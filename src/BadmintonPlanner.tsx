@@ -465,9 +465,12 @@ function BadmintonPlanner() {
       return true;
     };
 
-    regenerateFrom(nextRegeneratableSlot(changedSlot + 1, nextLiveGames));
+    const initialRegenSlot = nextRegeneratableSlot(changedSlot + 1, nextLiveGames);
+    const initialRegenSucceeded = regenerateFrom(initialRegenSlot);
 
-    const promotedAfterRegen = promoteNextGame && promotedLiveGameFor(nextResult, promoteNextGame, nextCompletedGames, nextLiveGames);
+    const promotedAfterRegen = promoteNextGame &&
+      (initialRegenSlot > totalSlots || initialRegenSucceeded) &&
+      promotedLiveGameFor(nextResult, promoteNextGame, nextCompletedGames, nextLiveGames);
     if (promotedAfterRegen) {
       nextLiveGames = addUniqueGame(nextLiveGames, promotedAfterRegen);
       regenerateFrom(nextRegeneratableSlot(promotedAfterRegen.slot + 1, nextLiveGames));
