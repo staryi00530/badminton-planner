@@ -25,6 +25,54 @@ export default function ScheduleGrid({
   blockedPlayerNames,
   fromSlot,
 }) {
+  const slotHasLiveGame = slotNum => liveGames?.some(lg => lg.slot === slotNum);
+  const pastSlots = result.schedule.filter(slot => slot.slot < fromSlot && !slotHasLiveGame(slot.slot));
+  const liveSlots = result.schedule.filter(slot => slotHasLiveGame(slot.slot));
+  const currentSlots = liveSlots.length > 0
+    ? liveSlots
+    : result.schedule.filter(slot => slot.slot === Math.min(fromSlot, result.schedule.length));
+  const currentSlotNumbers = new Set(currentSlots.map(slot => slot.slot));
+  const upcomingSlots = result.schedule.filter(slot =>
+    slot.slot >= fromSlot &&
+    !currentSlotNumbers.has(slot.slot)
+  );
+  const nextFutureSlots = upcomingSlots.slice(0, 1);
+  const foldedFutureSlots = upcomingSlots.slice(1);
+
+  const renderSlot = slot => (
+    <SlotCard
+      key={slot.slot}
+      slot={slot}
+      scores={scores}
+      editing={editingSlot === slot.slot}
+      editLayout={editingSlot === slot.slot ? editLayout : null}
+      isAdmin={isAdmin}
+      slotTime={slotTime}
+      startSlotEdit={startSlotEdit}
+      applySlotEdit={applySlotEdit}
+      applySlotEditOnly={applySlotEditOnly}
+      cancelSlotEdit={cancelSlotEdit}
+      assignToPosition={assignToPosition}
+      updateScore={updateScore}
+      liveGames={liveGames}
+      onToggleLive={onToggleLive}
+      onAdjustCourts={onAdjustCourts}
+      blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
+      canShowReady={slot.slot === fromSlot + 1}
+    />
+  );
+
+  const sectionTitleStyle = {
+    fontSize: 12,
+    color: C.textDim,
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: '0.8px',
+    margin: '0 0 10px',
+  };
+
+  const sectionStyle = { marginBottom: 18 };
+
   return (
     <div ref={scheduleRef} style={{ background: C.bg, padding: 16, borderRadius: 12 }}>
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
@@ -56,30 +104,45 @@ export default function ScheduleGrid({
         </p>
       </div>
 
-      <div className="schedule-grid">
-        {result.schedule.map(slot => (
-          <SlotCard
-            key={slot.slot}
-            slot={slot}
-            scores={scores}
-            editing={editingSlot === slot.slot}
-            editLayout={editingSlot === slot.slot ? editLayout : null}
-            isAdmin={isAdmin}
-            slotTime={slotTime}
-            startSlotEdit={startSlotEdit}
-            applySlotEdit={applySlotEdit}
-            applySlotEditOnly={applySlotEditOnly}
-            cancelSlotEdit={cancelSlotEdit}
-            assignToPosition={assignToPosition}
-            updateScore={updateScore}
-            liveGames={liveGames}
-            onToggleLive={onToggleLive}
-            onAdjustCourts={onAdjustCourts}
-            blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
-            canShowReady={slot.slot === fromSlot + 1}
-          />
-        ))}
-      </div>
+      {currentSlots.length > 0 && (
+        <section style={sectionStyle}>
+          <h3 style={sectionTitleStyle}>Current game</h3>
+          <div className="schedule-grid">
+            {currentSlots.map(renderSlot)}
+          </div>
+        </section>
+      )}
+
+      {nextFutureSlots.length > 0 && (
+        <section style={sectionStyle}>
+          <h3 style={sectionTitleStyle}>Next game</h3>
+          <div className="schedule-grid">
+            {nextFutureSlots.map(renderSlot)}
+          </div>
+        </section>
+      )}
+
+      {foldedFutureSlots.length > 0 && (
+        <details style={{ ...sectionStyle, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px' }}>
+          <summary style={{ ...sectionTitleStyle, margin: 0, cursor: 'pointer' }}>
+            Future games ({foldedFutureSlots.length})
+          </summary>
+          <div className="schedule-grid" style={{ marginTop: 12 }}>
+            {foldedFutureSlots.map(renderSlot)}
+          </div>
+        </details>
+      )}
+
+      {pastSlots.length > 0 && (
+        <details style={{ ...sectionStyle, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px' }}>
+          <summary style={{ ...sectionTitleStyle, margin: 0, cursor: 'pointer' }}>
+            Past games ({pastSlots.length})
+          </summary>
+          <div className="schedule-grid" style={{ marginTop: 12 }}>
+            {pastSlots.map(renderSlot)}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

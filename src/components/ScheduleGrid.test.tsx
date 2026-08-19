@@ -1,0 +1,78 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+import ScheduleGrid from './ScheduleGrid';
+
+function makeSlot(slotNum: number) {
+  return {
+    slot: slotNum,
+    courts: [{
+      court: 1,
+      teamA: [{ name: `A${slotNum}1`, gender: 'M' }, { name: `A${slotNum}2`, gender: 'M' }],
+      teamB: [{ name: `B${slotNum}1`, gender: 'M' }, { name: `B${slotNum}2`, gender: 'M' }],
+    }],
+    sitting: [],
+    repeatedCourts: [],
+    playerState: [],
+  };
+}
+
+function renderGrid(overrides = {}) {
+  const players = [{ name: 'A11', gender: 'M' }, { name: 'A12', gender: 'M' }];
+  render(
+    <ScheduleGrid
+      result={{ schedule: [1, 2, 3, 4].map(makeSlot), gamesPlayed: [1, 1] }}
+      players={players}
+      scores={{}}
+      editingSlot={null}
+      editLayout={null}
+      isAdmin={true}
+      scheduleRef={{ current: null }}
+      minGames={1}
+      maxGames={1}
+      slotTime={slot => `t${slot}`}
+      startSlotEdit={vi.fn()}
+      applySlotEdit={vi.fn()}
+      applySlotEditOnly={vi.fn()}
+      cancelSlotEdit={vi.fn()}
+      assignToPosition={vi.fn()}
+      updateScore={vi.fn()}
+      liveGames={[]}
+      onToggleLive={vi.fn()}
+      onAdjustCourts={vi.fn()}
+      blockedPlayerNames={new Set()}
+      fromSlot={2}
+      {...overrides}
+    />
+  );
+}
+
+function sectionFor(title: string) {
+  return screen.getByRole('heading', { name: title }).closest('section');
+}
+
+describe('ScheduleGrid grouping', () => {
+  it('shows current, one next game, and folds past/future slots', () => {
+    renderGrid();
+
+    expect(within(sectionFor('Current game')).getByText('SLOT 2')).toBeInTheDocument();
+    expect(within(sectionFor('Next game')).getByText('SLOT 3')).toBeInTheDocument();
+
+    const past = screen.getByText('Past games (1)').closest('details');
+    expect(past).not.toHaveAttribute('open');
+    expect(within(past).getByText('SLOT 1')).toBeInTheDocument();
+
+    const future = screen.getByText('Future games (1)').closest('details');
+    expect(future).not.toHaveAttribute('open');
+    expect(within(future).getByText('SLOT 4')).toBeInTheDocument();
+  });
+
+  it('keeps a live earlier slot in Current game until the slot is done', () => {
+    renderGrid({ liveGames: [{ slot: 1, court: 0 }] });
+
+    expect(within(sectionFor('Current game')).getByText('SLOT 1')).toBeInTheDocument();
+    expect(screen.queryByText('Past games (1)')).not.toBeInTheDocument();
+    expect(within(sectionFor('Next game')).getByText('SLOT 2')).toBeInTheDocument();
+    expect(screen.getByText('Future games (2)')).toBeInTheDocument();
+  });
+});
