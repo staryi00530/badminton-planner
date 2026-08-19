@@ -84,4 +84,15 @@ describe('ScheduleGrid grouping', () => {
     expect(within(sectionFor('Next game')).getByText('SLOT 2')).toBeInTheDocument();
     expect(screen.queryByText(/Past games/)).not.toBeInTheDocument();
   });
+
+  it('shows compact court statuses for live and waiting courts', () => {
+    renderGrid({ liveGames: [{ slot: 1, court: 0 }], blockedPlayerNames: new Set(['A112']) });
+
+    const status = within(screen.getByRole('region', { name: 'Court status' }));
+    expect(status.getByText('Court 1')).toBeInTheDocument();
+    expect(status.getByText('Live')).toBeInTheDocument();
+    expect(status.getAllByText('Slot 1').length).toBeGreaterThan(0);
+    expect(status.getByText('Court 2')).toBeInTheDocument();
+    expect(status.getByText('Waiting')).toBeInTheDocument();
+  });
 });

@@ -67,8 +67,8 @@ describe('BadmintonPlanner live game flow', () => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
 
-    await user.click(within(sectionFor('Current game')).getAllByText('Live')[0]);
-    await user.click(within(sectionFor('Current game')).getByText('Live'));
+    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await user.click(within(sectionFor('Current game')).getByText('Start'));
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
 
     await waitFor(() => {

@@ -27,8 +27,11 @@ export default function ScheduleGrid({
   fromSlot,
 }) {
   const slotHasLiveGame = slotNum => liveGames?.some(lg => lg.slot === slotNum);
+  const courtHasBlockedPlayer = court => blockedPlayerNames?.size > 0 &&
+    [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
+  const isCourtCompleted = (slot, ci) => completedGames.some(game => game.slot === slot.slot && game.court === ci);
   const isSlotCompleted = slot => slot.courts.length > 0 &&
-    slot.courts.every((_, ci) => completedGames.some(game => game.slot === slot.slot && game.court === ci));
+    slot.courts.every((_, ci) => isCourtCompleted(slot, ci));
   const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot));
   const liveSlots = result.schedule.filter(slot => slotHasLiveGame(slot.slot));
   const currentSlots = liveSlots.length > 0
@@ -42,6 +45,25 @@ export default function ScheduleGrid({
   );
   const nextFutureSlots = upcomingSlots.slice(0, 1);
   const foldedFutureSlots = upcomingSlots.slice(1);
+  const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
+  const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
+    const liveGame = liveGames
+      ?.filter(game => game.court === ci)
+      .sort((a, b) => a.slot - b.slot)[0];
+    if (liveGame) return { court: ci + 1, label: 'Live', slot: liveGame.slot, color: '#ef4444', bg: 'rgba(239,68,68,0.12)' };
+
+    const nextCourt = result.schedule.find(slot => slot.courts[ci] && !isCourtCompleted(slot, ci));
+    if (!nextCourt) return { court: ci + 1, label: 'Done', slot: null, color: C.green, bg: 'rgba(34,197,94,0.12)' };
+
+    const waiting = courtHasBlockedPlayer(nextCourt.courts[ci]);
+    return {
+      court: ci + 1,
+      label: waiting ? 'Waiting' : 'Ready',
+      slot: nextCourt.slot,
+      color: waiting ? C.amber : C.green,
+      bg: waiting ? 'rgba(245,158,11,0.12)' : 'rgba(34,197,94,0.12)',
+    };
+  });
 
   const renderSlot = slot => (
     <SlotCard
@@ -83,6 +105,20 @@ export default function ScheduleGrid({
       <div style={{ textAlign: 'center', marginBottom: 16 }}>
         <span style={{ fontSize: 18, fontWeight: 700 }}>🏸 Badminton Schedule</span>
       </div>
+
+      {courtStatuses.length > 0 && (
+        <div role="region" aria-label="Court status" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 16 }}>
+          {courtStatuses.map(status => (
+            <div key={status.court} style={{ background: status.bg, border: `1px solid ${status.color}55`, borderRadius: 8, padding: '8px 10px', minHeight: 50 }}>
+              <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 800, textTransform: 'uppercase', marginBottom: 3 }}>Court {status.court}</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ color: status.color, fontSize: 13, fontWeight: 800 }}>{status.label}</span>
+                {status.slot && <span style={{ color: C.textDim, fontSize: 12, fontWeight: 600 }}>Slot {status.slot}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 20, boxShadow: C.shadow }}>
         <h3 style={{ fontSize: 13, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 12px' }}>Games per Player</h3>

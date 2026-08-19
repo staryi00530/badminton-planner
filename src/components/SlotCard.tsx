@@ -113,25 +113,32 @@ export default function SlotCard({
       {!editing && slot.courts.map((court, ci) => {
         const isLive = liveGames?.some(lg => lg.slot === slot.slot && lg.court === ci);
         const isCompleted = completedGames?.some(game => game.slot === slot.slot && game.court === ci);
+        const hasBlockedPlayer = blockedPlayerNames && blockedPlayerNames.size > 0 &&
+          [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
         // "Ready" = every player on this court is currently free (not stuck in a live
         // game elsewhere) — only meaningful when something else actually IS live, and
         // gated to canShowReady (the slot right after fromSlot) since fromSlot itself
         // is ambiguous — its courts could be live, already Done, or about to start.
-        const isReady = canShowReady && !isLive && blockedPlayerNames && blockedPlayerNames.size > 0 &&
-          [...court.teamA, ...court.teamB].every(p => !blockedPlayerNames.has(p.name));
+        const isWaiting = !isLive && !isCompleted && hasBlockedPlayer;
+        const isReady = canShowReady && !isLive && !isCompleted && blockedPlayerNames && blockedPlayerNames.size > 0 && !hasBlockedPlayer;
+        const actionLabel = isLive ? '✓ Done' : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : 'Start';
+        const actionColor = isLive ? '#fff' : isWaiting ? C.amber : isCompleted ? C.green : C.accent;
+        const actionBorder = isLive ? '#ef4444' : isWaiting ? C.amber : isCompleted ? C.green : C.accentDim;
+        const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isCompleted ? 'Restart this game' : 'Start this game';
         return (
-        <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: ci < slot.courts.length - 1 ? 6 : 0 }}>
-          {(slot.courts.length > 1 || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady) && (
+        <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: ci < slot.courts.length - 1 ? 6 : 0 }}>
+          {(slot.courts.length > 1 || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
             <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {slot.courts.length > 1 && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : COURT_COLORS[ci] }}>Court {court.court}</span>}
+              {slot.courts.length > 1 && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci] }}>Court {court.court}</span>}
               {slot.repeatedCourts?.includes(ci) && <span style={{ color: C.amber }}>⚠ repeat group</span>}
               {isLive && <span style={{ color: '#ef4444' }}>● LIVE</span>}
               {isCompleted && !isLive && <span style={{ color: C.green }}>✓ DONE</span>}
+              {isWaiting && <span style={{ color: C.amber }}>⏳ WAITING</span>}
               {isReady && <span style={{ color: C.green }} title="Everyone on this court is free to start">✓ Ready</span>}
               <div style={{ flex: 1 }} />
               {onToggleLive && (
-                <button onClick={() => onToggleLive(slot.slot, ci)} title={isLive ? 'Mark game as finished — frees players for next round' : isCompleted ? 'Mark game as still in progress — locks players out of next round' : 'Mark game as still in progress — locks players out of next round'} style={{ background: isLive ? '#ef4444' : 'none', color: isLive ? '#fff' : C.textMuted, border: `1px solid ${isLive ? '#ef4444' : C.border}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: 'pointer', lineHeight: 1.4 }}>
-                  {isLive ? '✓ Done' : 'Live'}
+                <button onClick={() => onToggleLive(slot.slot, ci)} disabled={isWaiting} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting ? 0.75 : 1 }}>
+                  {actionLabel}
                 </button>
               )}
             </div>
@@ -139,7 +146,7 @@ export default function SlotCard({
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
             <div style={{ textAlign: 'center' }}>
               {court.teamA.map((p, pi) => {
-                const blocked = blockedPlayerNames?.has(p.name);
+                const blocked = !isLive && blockedPlayerNames?.has(p.name);
                 return (
                   <span key={pi} style={{ color: blocked ? C.amber : (p.gender === 'F' ? C.pink : C.accent), fontSize: 15, fontWeight: 600 }}>
                     {p.name}{blocked ? ' ⏳' : ''}{pi === 0 ? ' · ' : ''}
@@ -150,7 +157,7 @@ export default function SlotCard({
             <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 700 }}>VS</span>
             <div style={{ textAlign: 'center' }}>
               {court.teamB.map((p, pi) => {
-                const blocked = blockedPlayerNames?.has(p.name);
+                const blocked = !isLive && blockedPlayerNames?.has(p.name);
                 return (
                   <span key={pi} style={{ color: blocked ? C.amber : (p.gender === 'F' ? C.pink : C.accent), fontSize: 15, fontWeight: 600 }}>
                     {p.name}{blocked ? ' ⏳' : ''}{pi === 0 ? ' · ' : ''}

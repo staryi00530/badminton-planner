@@ -93,12 +93,12 @@ describe('SlotCard — per-slot court stepper', () => {
 });
 
 describe('SlotCard — Live/Done toggle', () => {
-  it('clicking Live on a court calls onToggleLive(slotNum, courtIndex)', async () => {
+  it('clicking Start on a court calls onToggleLive(slotNum, courtIndex)', async () => {
     const user = userEvent.setup();
     const slot = makeSlot(2);
     const handlers = renderSlotCard(slot);
-    const liveButtons = screen.getAllByText('Live');
-    await user.click(liveButtons[1]); // second court, index 1
+    const startButtons = screen.getAllByText('Start');
+    await user.click(startButtons[1]); // second court, index 1
     expect(handlers.onToggleLive).toHaveBeenCalledWith(1, 1);
   });
 
@@ -108,7 +108,7 @@ describe('SlotCard — Live/Done toggle', () => {
     expect(screen.getByText('✓ Done')).toBeInTheDocument();
     expect(screen.getByText('● LIVE')).toBeInTheDocument();
     // The other court is untouched.
-    expect(screen.getByText('Live')).toBeInTheDocument();
+    expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
   it('shows a done badge for a completed court without marking the whole slot live', () => {
@@ -116,7 +116,16 @@ describe('SlotCard — Live/Done toggle', () => {
     renderSlotCard(slot, { completedGames: [{ slot: 1, court: 0 }] });
     expect(screen.getByText('✓ DONE')).toBeInTheDocument();
     expect(screen.queryByText('● LIVE')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Live')).toHaveLength(2);
+    expect(screen.getByText('Restart')).toBeInTheDocument();
+    expect(screen.getByText('Start')).toBeInTheDocument();
+  });
+
+  it('shows and disables Waiting when a court has a blocked player', () => {
+    const slot = makeSlot(1);
+    renderSlotCard(slot, { blockedPlayerNames: new Set(['A01']), canShowReady: true });
+    expect(screen.getByText('⏳ WAITING')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Waiting' })).toBeDisabled();
+    expect(screen.getByText(/A01/)).toHaveTextContent('A01 ⏳');
   });
 });
 
