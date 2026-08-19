@@ -5,6 +5,7 @@ export default function SessionStatusPanel({
   players,
   fromSlot,
   totalSlots,
+  liveGames = [],
   staggerMode,
   setPlayerBack,
   setPlayerJoining,
@@ -13,7 +14,7 @@ export default function SessionStatusPanel({
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
       <div style={{ fontSize: 11, color: C.textDim, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
-        Session Status · round {fromSlot - 1} done · next: {Math.min(fromSlot, totalSlots)}
+        Session Status · next: {Math.min(fromSlot, totalSlots)}{liveGames.length > 0 ? ` · ${liveGames.length} live` : ` · ${fromSlot - 1} done`}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {players.map((p, idx) => {

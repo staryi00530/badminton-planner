@@ -8,4 +8,4 @@ id = "REPLACE_WITH_PROD_KV_NAMESPACE_ID"
 preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
 
 [vars]
-ALLOWED_ORIGIN = "https://eamonsuen02784.github.io"
+ALLOWED_ORIGIN = "https://staryi00530.github.io"

@@ -27,7 +27,12 @@ function rowFor(name: string) {
 describe('SessionStatusPanel', () => {
   it('shows the round header derived from fromSlot/totalSlots', () => {
     renderPanel();
-    expect(screen.getByText('Session Status · round 2 done · next: 3')).toBeInTheDocument();
+    expect(screen.getByText('Session Status · next: 3 · 2 done')).toBeInTheDocument();
+  });
+
+  it('shows live game count in the round header', () => {
+    renderPanel({ liveGames: [{ slot: 2, court: 0 }] });
+    expect(screen.getByText('Session Status · next: 3 · 1 live')).toBeInTheDocument();
   });
 
   it('a currently-playing player only shows the "leaving" control', async () => {

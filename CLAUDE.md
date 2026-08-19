@@ -4,7 +4,7 @@ An interactive 2v2 badminton match scheduler for recreational groups. Generates 
 well-paced round-robin schedules for a session, lets you edit and confirm them, and optionally
 shares them with the group via a link backed by Firebase.
 
-**Live app →** [eamonsuen02784.github.io/badminton-planner](https://eamonsuen02784.github.io/badminton-planner)
+**Live app →** [staryi00530.github.io/badminton-planner](https://staryi00530.github.io/badminton-planner)
 
 Built iteratively with Claude.
 
