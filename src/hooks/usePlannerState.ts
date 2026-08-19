@@ -99,6 +99,7 @@ function createInitialState(): PlannerState {
     shareNotice: null,
     loadedPlanId: loadState(STORAGE_KEYS.loadedPlanId, null),
     liveGames: [],
+    completedGames: [],
   };
 }
 

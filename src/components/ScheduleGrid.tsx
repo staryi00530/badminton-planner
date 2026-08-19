@@ -20,20 +20,24 @@ export default function ScheduleGrid({
   assignToPosition,
   updateScore,
   liveGames,
+  completedGames = [],
   onToggleLive,
   onAdjustCourts,
   blockedPlayerNames,
   fromSlot,
 }) {
   const slotHasLiveGame = slotNum => liveGames?.some(lg => lg.slot === slotNum);
-  const pastSlots = result.schedule.filter(slot => slot.slot < fromSlot && !slotHasLiveGame(slot.slot));
+  const isSlotCompleted = slot => slot.courts.length > 0 &&
+    slot.courts.every((_, ci) => completedGames.some(game => game.slot === slot.slot && game.court === ci));
+  const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot));
   const liveSlots = result.schedule.filter(slot => slotHasLiveGame(slot.slot));
   const currentSlots = liveSlots.length > 0
     ? liveSlots
-    : result.schedule.filter(slot => slot.slot === Math.min(fromSlot, result.schedule.length));
+    : result.schedule.filter(slot => !isSlotCompleted(slot) && slot.slot === Math.min(fromSlot, result.schedule.length));
   const currentSlotNumbers = new Set(currentSlots.map(slot => slot.slot));
   const upcomingSlots = result.schedule.filter(slot =>
     slot.slot >= fromSlot &&
+    !isSlotCompleted(slot) &&
     !currentSlotNumbers.has(slot.slot)
   );
   const nextFutureSlots = upcomingSlots.slice(0, 1);
@@ -55,6 +59,7 @@ export default function ScheduleGrid({
       assignToPosition={assignToPosition}
       updateScore={updateScore}
       liveGames={liveGames}
+      completedGames={completedGames}
       onToggleLive={onToggleLive}
       onAdjustCourts={onAdjustCourts}
       blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}

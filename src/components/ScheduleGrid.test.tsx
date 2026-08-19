@@ -6,11 +6,11 @@ import ScheduleGrid from './ScheduleGrid';
 function makeSlot(slotNum: number) {
   return {
     slot: slotNum,
-    courts: [{
-      court: 1,
-      teamA: [{ name: `A${slotNum}1`, gender: 'M' }, { name: `A${slotNum}2`, gender: 'M' }],
-      teamB: [{ name: `B${slotNum}1`, gender: 'M' }, { name: `B${slotNum}2`, gender: 'M' }],
-    }],
+    courts: [0, 1].map(ci => ({
+      court: ci + 1,
+      teamA: [{ name: `A${slotNum}${ci}1`, gender: 'M' }, { name: `A${slotNum}${ci}2`, gender: 'M' }],
+      teamB: [{ name: `B${slotNum}${ci}1`, gender: 'M' }, { name: `B${slotNum}${ci}2`, gender: 'M' }],
+    })),
     sitting: [],
     repeatedCourts: [],
     playerState: [],
@@ -38,6 +38,7 @@ function renderGrid(overrides = {}) {
       assignToPosition={vi.fn()}
       updateScore={vi.fn()}
       liveGames={[]}
+      completedGames={[]}
       onToggleLive={vi.fn()}
       onAdjustCourts={vi.fn()}
       blockedPlayerNames={new Set()}
@@ -53,7 +54,7 @@ function sectionFor(title: string) {
 
 describe('ScheduleGrid grouping', () => {
   it('shows current, one next game, and folds past/future slots', () => {
-    renderGrid();
+    renderGrid({ fromSlot: 2, completedGames: [{ slot: 1, court: 0 }, { slot: 1, court: 1 }] });
 
     expect(within(sectionFor('Current game')).getByText('SLOT 2')).toBeInTheDocument();
     expect(within(sectionFor('Next game')).getByText('SLOT 3')).toBeInTheDocument();
@@ -74,5 +75,13 @@ describe('ScheduleGrid grouping', () => {
     expect(screen.queryByText('Past games (1)')).not.toBeInTheDocument();
     expect(within(sectionFor('Next game')).getByText('SLOT 2')).toBeInTheDocument();
     expect(screen.getByText('Future games (2)')).toBeInTheDocument();
+  });
+
+  it('keeps a partially completed slot in Current game instead of folding it into past', () => {
+    renderGrid({ fromSlot: 1, completedGames: [{ slot: 1, court: 0 }] });
+
+    expect(within(sectionFor('Current game')).getByText('SLOT 1')).toBeInTheDocument();
+    expect(within(sectionFor('Next game')).getByText('SLOT 2')).toBeInTheDocument();
+    expect(screen.queryByText(/Past games/)).not.toBeInTheDocument();
   });
 });

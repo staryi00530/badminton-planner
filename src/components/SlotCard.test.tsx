@@ -40,6 +40,7 @@ function renderSlotCard(slot, overrides = {}) {
       isAdmin={true}
       slotTime={n => `t${n}`}
       liveGames={[]}
+      completedGames={[]}
       blockedPlayerNames={undefined}
       {...handlers}
       {...overrides}
@@ -108,6 +109,14 @@ describe('SlotCard — Live/Done toggle', () => {
     expect(screen.getByText('● LIVE')).toBeInTheDocument();
     // The other court is untouched.
     expect(screen.getByText('Live')).toBeInTheDocument();
+  });
+
+  it('shows a done badge for a completed court without marking the whole slot live', () => {
+    const slot = makeSlot(2);
+    renderSlotCard(slot, { completedGames: [{ slot: 1, court: 0 }] });
+    expect(screen.getByText('✓ DONE')).toBeInTheDocument();
+    expect(screen.queryByText('● LIVE')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Live')).toHaveLength(2);
   });
 });
 

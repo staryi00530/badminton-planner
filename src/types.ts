@@ -112,6 +112,7 @@ export interface PlannerState {
   shareNotice: 'expired' | null;
   loadedPlanId: number | null;
   liveGames: Array<{ slot: number; court: number }>;
+  completedGames: Array<{ slot: number; court: number }>;
 }
 
 export interface PlannerPersistedState {
@@ -148,6 +149,7 @@ export interface ScheduleGridProps {
   cancelSlotEdit: () => void;
   assignToPosition: (pos: { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number }, newName: string) => void;
   updateScore: (slot: number, courtIdx: number, aVal: string, bVal: string, teamA: string[], teamB: string[]) => void;
+  completedGames?: Array<{ slot: number; court: number }>;
 }
 
 declare global {

@@ -104,6 +104,7 @@ function BadmintonPlanner() {
     loadedPlanId,
     shareNotice,
     liveGames,
+    completedGames,
   } = state;
 
   const totalSlots = Math.floor(totalMinutes / gameMinutes);
@@ -253,7 +254,7 @@ function BadmintonPlanner() {
 
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
-    patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], fromSlot: 1 });
+    patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], fromSlot: 1 });
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
     const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, { preferMixedTeams });
     let lastValue = null;
@@ -329,7 +330,7 @@ function BadmintonPlanner() {
   }, [isConfirmed, result, runRegenerateFromSlotWithCourts]);
 
   const runClearSchedule = useCallback(() => {
-    patchState({ result: null, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [] });
+    patchState({ result: null, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [] });
   }, []);
 
   const clearSchedule = useCallback(() => {
@@ -392,10 +393,24 @@ function BadmintonPlanner() {
     return names;
   }, [result]);
 
-  const applyLiveGamesUpdate = useCallback((newLiveGames, changedSlot, extraPatch = {}) => {
-    const nextFromSlot = Math.max(fromSlot, Math.min(changedSlot + 1, totalSlots));
+  const gameMatches = (game, slot, court) => game.slot === slot && game.court === court;
+
+  const isSlotCompleted = useCallback((slot, games) => {
+    if (!slot || slot.courts.length === 0) return false;
+    return slot.courts.every((_, ci) => games.some(game => gameMatches(game, slot.slot, ci)));
+  }, []);
+
+  const firstIncompleteSlot = useCallback((games) => {
+    if (!result) return fromSlot;
+    const slot = result.schedule.find(s => !isSlotCompleted(s, games));
+    return slot?.slot ?? totalSlots;
+  }, [fromSlot, isSlotCompleted, result, totalSlots]);
+
+  const applyLiveGamesUpdate = useCallback((newLiveGames, changedSlot, newCompletedGames = completedGames, extraPatch = {}) => {
+    const nextFromSlot = firstIncompleteSlot(newCompletedGames);
     const patch = {
       liveGames: newLiveGames,
+      completedGames: newCompletedGames,
       fromSlot: nextFromSlot,
       ...extraPatch,
     };
@@ -412,6 +427,7 @@ function BadmintonPlanner() {
       if (r) {
         patch.result = r.newResult;
         patch.scores = r.nextScores;
+        patch.completedGames = newCompletedGames.filter(game => game.slot < regenFromSlot);
         patch.copied = false;
         patch.isConfirmed = false;
         patch.loadedPlanId = null;
@@ -419,17 +435,21 @@ function BadmintonPlanner() {
     }
 
     patchState(patch);
-  }, [doRegen, fromSlot, livePlayerNamesFor, totalSlots]);
+  }, [completedGames, doRegen, firstIncompleteSlot, livePlayerNamesFor, totalSlots]);
 
   // Live/Done dynamically regenerates future slots. Still-live players are treated
   // as unavailable for the next regenerated slot, then become available again later.
   const toggleLiveGame = useCallback((slotNum, courtIdx) => {
     const isLive = liveGames.some(lg => lg.slot === slotNum && lg.court === courtIdx);
+    const withoutCompletedGame = completedGames.filter(game => !gameMatches(game, slotNum, courtIdx));
     const newLiveGames = isLive
       ? liveGames.filter(lg => !(lg.slot === slotNum && lg.court === courtIdx))
       : [...liveGames, { slot: slotNum, court: courtIdx }];
-    applyLiveGamesUpdate(newLiveGames, slotNum);
-  }, [applyLiveGamesUpdate, liveGames]);
+    const newCompletedGames = isLive
+      ? [...withoutCompletedGame, { slot: slotNum, court: courtIdx }]
+      : withoutCompletedGame;
+    applyLiveGamesUpdate(newLiveGames, slotNum, newCompletedGames);
+  }, [applyLiveGamesUpdate, completedGames, liveGames]);
 
   // Session status handlers — mid-session early departure / late arrival / restore
   const setPlayerLeaving = useCallback((idx) => {
@@ -580,8 +600,12 @@ function BadmintonPlanner() {
 
     const nextScores = { ...scores, [key]: { a: aVal, b: bVal, applied: true, teamA, teamB } };
     const nextLiveGames = liveGames.filter(lg => !(lg.slot === slot && lg.court === courtIdx));
-    applyLiveGamesUpdate(nextLiveGames, slot, { scores: nextScores, winLoss: nextWinLoss });
-  }, [applyLiveGamesUpdate, isAdmin, liveGames, scores, updateScoreBase, winLoss]);
+    const nextCompletedGames = [
+      ...completedGames.filter(game => !gameMatches(game, slot, courtIdx)),
+      { slot, court: courtIdx },
+    ];
+    applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss });
+  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, scores, updateScoreBase, winLoss]);
 
   const buildCopyText = useCallback(
     (mode) => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
@@ -929,6 +953,7 @@ function BadmintonPlanner() {
             assignToPosition={assignToPosition}
             updateScore={updateScore}
             liveGames={liveGames}
+            completedGames={completedGames}
             onToggleLive={toggleLiveGame}
             onAdjustCourts={adjustCourtsAtSlot}
             blockedPlayerNames={blockedPlayerNames}

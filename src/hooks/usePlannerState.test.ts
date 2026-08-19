@@ -17,6 +17,7 @@ describe('usePlannerState — defaults & loading', () => {
     expect(result.current.state.gameMinutes).toBe(15);
     expect(result.current.state.isConfirmed).toBe(false);
     expect(result.current.state.liveGames).toEqual([]);
+    expect(result.current.state.completedGames).toEqual([]);
   });
 
   it('loads persisted values from localStorage on init', () => {
