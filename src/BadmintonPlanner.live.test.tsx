@@ -154,4 +154,29 @@ describe('BadmintonPlanner live game flow', () => {
       expect(currentSection).toHaveTextContent('P4');
     });
   });
+
+  it('skips a player from the immediate next selection and clears the skip after regeneration', async () => {
+    const user = userEvent.setup();
+    const players = ['SkipMe', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11', 'P12'].map(makePlayer);
+    const result = {
+      schedule: [
+        makeSlot(1, [['SkipMe', 'P2', 'P3', 'P4'], ['P5', 'P6', 'P7', 'P8']], ['P9', 'P10', 'P11', 'P12']),
+        makeSlot(2, [['SkipMe', 'P5', 'P9', 'P10'], ['P2', 'P6', 'P11', 'P12']], ['P3', 'P4', 'P7', 'P8']),
+        makeSlot(3, [['P3', 'P7', 'P9', 'P11'], ['P4', 'P8', 'P10', 'P12']], ['SkipMe', 'P2', 'P5', 'P6']),
+      ],
+      gamesPlayed: players.map(() => 1),
+    };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(result));
+
+    render(<BadmintonPlanner />);
+
+    expect(sectionFor('Current game')).toHaveTextContent('SkipMe');
+    await user.click(screen.getAllByTitle('Skip this player for the next generated game only')[0]);
+
+    await waitFor(() => {
+      expect(sectionFor('Current game')).not.toHaveTextContent('SkipMe');
+      expect(screen.queryByText('Skipping next')).not.toBeInTheDocument();
+    });
+  });
 });

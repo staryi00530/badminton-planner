@@ -100,6 +100,7 @@ function createInitialState(): PlannerState {
     loadedPlanId: loadState(STORAGE_KEYS.loadedPlanId, null),
     liveGames: [],
     completedGames: [],
+    suspendedPlayerNames: [],
   };
 }
 

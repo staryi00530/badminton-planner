@@ -105,6 +105,7 @@ function BadmintonPlanner() {
     shareNotice,
     liveGames,
     completedGames,
+    suspendedPlayerNames,
   } = state;
 
   const totalSlots = Math.floor(totalMinutes / gameMinutes);
@@ -241,7 +242,7 @@ function BadmintonPlanner() {
       patchState({ importError: 'Could not parse schedule — paste the full copied text.' });
       return;
     }
-    patchState({ result: parsed, scores: {}, showImport: false, importText: '', importError: '', isConfirmed: false, loadedPlanId: null });
+    patchState({ result: parsed, scores: {}, showImport: false, importText: '', importError: '', isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, [importText, parseScheduleText]);
 
   const importSchedule = useCallback(() => {
@@ -254,7 +255,7 @@ function BadmintonPlanner() {
 
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
-    patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], fromSlot: 1 });
+    patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
     const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, { preferMixedTeams });
     let lastValue = null;
@@ -295,7 +296,7 @@ function BadmintonPlanner() {
       const match = key.match(/^s(\d+)c/);
       if (match && parseInt(match[1]) < targetFromSlot) nextScores[key] = scores[key];
     }
-    patchState({ result: newResult, scores: nextScores, copied: false, isConfirmed: false, loadedPlanId: null, fromSlot: targetFromSlot, fromSlotCourts: targetCourts });
+    patchState({ result: newResult, scores: nextScores, copied: false, isConfirmed: false, loadedPlanId: null, suspendedPlayerNames: [], fromSlot: targetFromSlot, fromSlotCourts: targetCourts });
   }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, players.length, preferMixedTeams, result, scores, totalSlots]);
 
   const runRegenerateRemaining = useCallback(() => {
@@ -330,7 +331,7 @@ function BadmintonPlanner() {
   }, [isConfirmed, result, runRegenerateFromSlotWithCourts]);
 
   const runClearSchedule = useCallback(() => {
-    patchState({ result: null, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [] });
+    patchState({ result: null, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, []);
 
   const clearSchedule = useCallback(() => {
@@ -444,9 +445,11 @@ function BadmintonPlanner() {
     let nextLiveGames = newLiveGames;
     let nextCompletedGames = newCompletedGames;
     let nextResult = result;
+    let nextSuspendedPlayerNames = options.suspendedPlayerNames ?? suspendedPlayerNames;
     const patch = {
       liveGames: nextLiveGames,
       completedGames: nextCompletedGames,
+      suspendedPlayerNames: nextSuspendedPlayerNames,
       fromSlot: firstIncompleteSlot(nextCompletedGames, nextResult),
       ...extraPatch,
     };
@@ -461,10 +464,14 @@ function BadmintonPlanner() {
       const blockingLiveGames = forcedLiveCourts
         ? nextLiveGames.filter(game => game.slot !== regenFromSlot)
         : nextLiveGames;
+      const blockedForFirstSlot = new Set([
+        ...livePlayerNamesFor(blockingLiveGames, nextResult),
+        ...nextSuspendedPlayerNames,
+      ]);
       const r = doRegen(
         regenFromSlot,
         null,
-        livePlayerNamesFor(blockingLiveGames, nextResult),
+        blockedForFirstSlot,
         patch.winLoss ?? null,
         patch.scores ?? null,
         nextResult,
@@ -479,6 +486,10 @@ function BadmintonPlanner() {
       patch.copied = false;
       patch.isConfirmed = false;
       patch.loadedPlanId = null;
+      if (nextSuspendedPlayerNames.length > 0) {
+        nextSuspendedPlayerNames = [];
+        patch.suspendedPlayerNames = [];
+      }
       return true;
     };
 
@@ -508,9 +519,10 @@ function BadmintonPlanner() {
 
     patch.liveGames = nextLiveGames;
     patch.completedGames = nextCompletedGames;
+    patch.suspendedPlayerNames = nextSuspendedPlayerNames;
     patch.fromSlot = firstIncompleteSlot(nextCompletedGames, nextResult);
     patchState(patch);
-  }, [completedGames, doRegen, firstIncompleteSlot, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, nextPlayableQueuedGame, result, totalSlots]);
+  }, [completedGames, doRegen, firstIncompleteSlot, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, nextPlayableQueuedGame, result, suspendedPlayerNames, totalSlots]);
 
   // Live/Done dynamically regenerates future slots. Still-live players are treated
   // as unavailable for the next regenerated slot, then become available again later.
@@ -545,6 +557,26 @@ function BadmintonPlanner() {
   const setPlayerBack = useCallback((idx) => {
     patchState({ players: players.map((p, i) => i === idx ? { ...p, leavesAt: null } : p) });
   }, [players]);
+
+  const togglePlayerSuspended = useCallback((idx) => {
+    const player = players[idx];
+    if (!player) return;
+    const nextSuspendedPlayerNames = suspendedPlayerNames.includes(player.name)
+      ? suspendedPlayerNames.filter(name => name !== player.name)
+      : [...suspendedPlayerNames, player.name];
+    if (!result) {
+      patchState({ suspendedPlayerNames: nextSuspendedPlayerNames });
+      return;
+    }
+    const regenStart = Math.max(1, firstIncompleteSlot(completedGames, result));
+    applyLiveGamesUpdate(
+      liveGames,
+      regenStart - 1,
+      completedGames,
+      {},
+      { suspendedPlayerNames: nextSuspendedPlayerNames },
+    );
+  }, [applyLiveGamesUpdate, completedGames, firstIncompleteSlot, liveGames, players, result, suspendedPlayerNames]);
 
   // Names of all players currently in a live game — used to highlight them in the next slot
   const blockedPlayerNames = useMemo(() => {
@@ -757,7 +789,7 @@ function BadmintonPlanner() {
   }, [buildSharePayload, isSharedSession, loadedPlanId, result, saveTag, savedPlans, shareId]);
 
   const loadPlan = useCallback((plan) => {
-    patchState({ result: plan.result, scores: {}, activeTab: 'schedule', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false });
+    patchState({ result: plan.result, scores: {}, activeTab: 'schedule', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, []);
 
   const deletePlan = useCallback((id) => {
@@ -844,6 +876,9 @@ function BadmintonPlanner() {
       isConfirmed: decoded.isConfirmed,
       loadedPlanId: newLoadedPlanId,
       savedPlans: nextSavedPlans,
+      liveGames: [],
+      completedGames: [],
+      suspendedPlayerNames: [],
     });
   }, [gameMinutes, numCourts, savedPlans]);
 
@@ -1001,16 +1036,18 @@ function BadmintonPlanner() {
 
         {saved && <p style={{ fontSize: 12, color: C.green, textAlign: 'center', marginTop: -16, marginBottom: 16 }}>Schedule saved — will persist on refresh</p>}
 
-        {result && (fromSlot > 1 || liveGames.length > 0) && (
+        {result && (
           <SessionStatusPanel
             players={players}
             fromSlot={fromSlot}
             totalSlots={totalSlots}
             liveGames={liveGames}
+            suspendedPlayerNames={suspendedPlayerNames}
             staggerMode={staggerMode}
             setPlayerBack={setPlayerBack}
             setPlayerJoining={setPlayerJoining}
             setPlayerLeaving={setPlayerLeaving}
+            togglePlayerSuspended={togglePlayerSuspended}
           />
         )}
 

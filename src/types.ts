@@ -113,6 +113,7 @@ export interface PlannerState {
   loadedPlanId: number | null;
   liveGames: Array<{ slot: number; court: number }>;
   completedGames: Array<{ slot: number; court: number }>;
+  suspendedPlayerNames: string[];
 }
 
 export interface PlannerPersistedState {

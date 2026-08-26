@@ -13,7 +13,7 @@ const PLAYERS = [
 ];
 
 function renderPanel(overrides = {}) {
-  const handlers = { setPlayerBack: vi.fn(), setPlayerJoining: vi.fn(), setPlayerLeaving: vi.fn() };
+  const handlers = { setPlayerBack: vi.fn(), setPlayerJoining: vi.fn(), setPlayerLeaving: vi.fn(), togglePlayerSuspended: vi.fn() };
   render(
     <SessionStatusPanel players={PLAYERS} fromSlot={3} totalSlots={12} staggerMode="custom" {...handlers} {...overrides} />
   );
@@ -35,10 +35,11 @@ describe('SessionStatusPanel', () => {
     expect(screen.getByText('Session Status · next: 3 · 1 live')).toBeInTheDocument();
   });
 
-  it('a currently-playing player only shows the "leaving" control', async () => {
+  it('a currently-available player shows skip-next and leaving controls', async () => {
     renderPanel();
     const row = rowFor('Here');
     expect(within(row).getByTitle('Player is done for today')).toBeInTheDocument();
+    expect(within(row).getByTitle('Skip this player for the next generated game only')).toBeInTheDocument();
     expect(within(row).queryByTitle('Restore player to session')).not.toBeInTheDocument();
     expect(within(row).queryByTitle(/here — add to upcoming round/)).not.toBeInTheDocument();
   });
@@ -75,6 +76,9 @@ describe('SessionStatusPanel', () => {
     const user = userEvent.setup();
     const handlers = renderPanel();
 
+    await user.click(within(rowFor('Here')).getByTitle('Skip this player for the next generated game only'));
+    expect(handlers.togglePlayerSuspended).toHaveBeenCalledWith(0);
+
     await user.click(within(rowFor('Here')).getByTitle('Player is done for today'));
     expect(handlers.setPlayerLeaving).toHaveBeenCalledWith(0);
 
@@ -83,5 +87,14 @@ describe('SessionStatusPanel', () => {
 
     await user.click(within(rowFor('NotYet')).getByTitle(/here — add to upcoming round/));
     expect(handlers.setPlayerJoining).toHaveBeenCalledWith(3);
+  });
+
+  it('shows an undo state for a player already skipping next', async () => {
+    const user = userEvent.setup();
+    const handlers = renderPanel({ suspendedPlayerNames: ['Here'] });
+    const row = rowFor('Here');
+    expect(within(row).getByText('Skipping next')).toBeInTheDocument();
+    await user.click(within(row).getByTitle('Undo skip-next for this player'));
+    expect(handlers.togglePlayerSuspended).toHaveBeenCalledWith(0);
   });
 });

@@ -6,11 +6,14 @@ export default function SessionStatusPanel({
   fromSlot,
   totalSlots,
   liveGames = [],
+  suspendedPlayerNames = [],
   staggerMode,
   setPlayerBack,
   setPlayerJoining,
   setPlayerLeaving,
+  togglePlayerSuspended,
 }) {
+  const suspendedSet = new Set(suspendedPlayerNames);
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
       <div style={{ fontSize: 11, color: C.textDim, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
@@ -23,9 +26,15 @@ export default function SessionStatusPanel({
           const notArrived = staggerMode === 'custom' && p.availFrom != null && p.availFrom > nextSlotIdx;
           const leavingScheduled = p.leavesAt != null && !departed;
           const isHere = !departed && !notArrived;
+          const isSuspended = suspendedSet.has(p.name);
           return (
-            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 4, background: (departed || notArrived) ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${(departed || notArrived) ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: (departed || notArrived) ? 0.6 : 1 }}>
+            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 4, background: isSuspended ? 'rgba(245,158,11,0.10)' : (departed || notArrived) ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${isSuspended ? C.amber + '88' : (departed || notArrived) ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: (departed || notArrived) ? 0.6 : 1 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: p.gender === 'F' ? C.pink : (isHere ? C.text : C.textMuted) }}>{p.name}</span>
+              {isHere && !leavingScheduled && togglePlayerSuspended && (
+                <button onClick={() => togglePlayerSuspended(idx)} title={isSuspended ? 'Undo skip-next for this player' : 'Skip this player for the next generated game only'} style={{ background: isSuspended ? C.amber : 'none', border: `1px solid ${isSuspended ? C.amber : C.border}`, color: isSuspended ? C.bg : C.textMuted, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>
+                  {isSuspended ? 'Skipping next' : 'Skip next'}
+                </button>
+              )}
               {(departed || leavingScheduled) && (
                 <button onClick={() => setPlayerBack(idx)} title="Restore player to session" style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 13, padding: '0 2px', cursor: 'pointer', fontFamily: FONT, lineHeight: 1 }}>↩</button>
               )}
