@@ -424,15 +424,21 @@ function BadmintonPlanner() {
     return slot?.slot ?? totalSlots;
   }, [fromSlot, isSlotCompleted, result, totalSlots]);
 
-  const promotedLiveGameFor = useCallback((scheduleResult, completedGame, gamesCompleted, gamesLive) => {
-    if (!scheduleResult || !completedGame) return null;
-    const nextSlotNum = completedGame.slot + 1;
-    const slot = scheduleResult.schedule.find(s => s.slot === nextSlotNum);
-    if (!slot?.courts?.[completedGame.court]) return null;
-    if (hasGame(gamesCompleted, nextSlotNum, completedGame.court)) return null;
-    if (hasGame(gamesLive, nextSlotNum, completedGame.court)) return null;
-    return { slot: nextSlotNum, court: completedGame.court };
-  }, []);
+  const nextPlayableQueuedGame = useCallback((scheduleResult, gamesCompleted, gamesLive, startSlot) => {
+    if (!scheduleResult) return null;
+    const blockedNames = livePlayerNamesFor(gamesLive, scheduleResult);
+    for (const slot of scheduleResult.schedule) {
+      if (slot.slot < startSlot) continue;
+      for (let ci = 0; ci < slot.courts.length; ci++) {
+        if (hasGame(gamesCompleted, slot.slot, ci) || hasGame(gamesLive, slot.slot, ci)) continue;
+        const court = slot.courts[ci];
+        if (!court) continue;
+        const hasBlockedPlayer = [...court.teamA, ...court.teamB].some(p => blockedNames.has(p.name));
+        if (!hasBlockedPlayer) return { slot: slot.slot, court: ci };
+      }
+    }
+    return null;
+  }, [livePlayerNamesFor]);
 
   const applyLiveGamesUpdate = useCallback((newLiveGames, changedSlot, newCompletedGames = completedGames, extraPatch = {}, options = {}) => {
     let nextLiveGames = newLiveGames;
@@ -444,14 +450,7 @@ function BadmintonPlanner() {
       fromSlot: firstIncompleteSlot(nextCompletedGames, nextResult),
       ...extraPatch,
     };
-    const promoteNextGame = options.promoteNextGame;
-
-    // If the target slot is already protected by another live court, promote before
-    // regenerating so the follow-on regen blocks every live game in that slot.
-    if (promoteNextGame && nextLiveGames.some(game => game.slot === promoteNextGame.slot + 1)) {
-      const promoted = promotedLiveGameFor(nextResult, promoteNextGame, nextCompletedGames, nextLiveGames);
-      if (promoted) nextLiveGames = addUniqueGame(nextLiveGames, promoted);
-    }
+    const targetLiveCount = options.targetLiveCount ?? nextLiveGames.length;
 
     const regenerateFrom = (regenFromSlot) => {
       if (regenFromSlot > totalSlots) return false;
@@ -496,21 +495,22 @@ function BadmintonPlanner() {
     };
 
     const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
-    const initialRegenSucceeded = regenerateFrom(initialRegenSlot);
-
-    const promotedAfterRegen = promoteNextGame &&
-      (initialRegenSlot > totalSlots || initialRegenSucceeded) &&
-      promotedLiveGameFor(nextResult, promoteNextGame, nextCompletedGames, nextLiveGames);
-    if (promotedAfterRegen) {
-      nextLiveGames = addUniqueGame(nextLiveGames, promotedAfterRegen);
-      regenerateFrom(nextSafeRegenSlot(promotedAfterRegen.slot + 1));
+    if (regenerateFrom(initialRegenSlot) || initialRegenSlot > totalSlots) {
+      while (nextLiveGames.length < targetLiveCount) {
+        const queuedGame = nextPlayableQueuedGame(nextResult, nextCompletedGames, nextLiveGames, changedSlot + 1);
+        if (!queuedGame) break;
+        const beforeCount = nextLiveGames.length;
+        nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
+        if (nextLiveGames.length === beforeCount) break;
+        regenerateFrom(nextSafeRegenSlot(queuedGame.slot + 1));
+      }
     }
 
     patch.liveGames = nextLiveGames;
     patch.completedGames = nextCompletedGames;
     patch.fromSlot = firstIncompleteSlot(nextCompletedGames, nextResult);
     patchState(patch);
-  }, [completedGames, doRegen, firstIncompleteSlot, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, promotedLiveGameFor, result, totalSlots]);
+  }, [completedGames, doRegen, firstIncompleteSlot, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, nextPlayableQueuedGame, result, totalSlots]);
 
   // Live/Done dynamically regenerates future slots. Still-live players are treated
   // as unavailable for the next regenerated slot, then become available again later.
@@ -523,7 +523,7 @@ function BadmintonPlanner() {
     const newCompletedGames = isLive
       ? [...withoutCompletedGame, { slot: slotNum, court: courtIdx }]
       : withoutCompletedGame;
-    applyLiveGamesUpdate(newLiveGames, slotNum, newCompletedGames, {}, isLive ? { promoteNextGame: { slot: slotNum, court: courtIdx } } : {});
+    applyLiveGamesUpdate(newLiveGames, slotNum, newCompletedGames, {}, isLive ? { targetLiveCount: liveGames.length } : {});
   }, [applyLiveGamesUpdate, completedGames, liveGames]);
 
   // Session status handlers — mid-session early departure / late arrival / restore
@@ -684,7 +684,7 @@ function BadmintonPlanner() {
       ...completedGames.filter(game => !gameMatches(game, slot, courtIdx)),
       { slot, court: courtIdx },
     ];
-    applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { promoteNextGame: { slot, court: courtIdx } });
+    applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount: liveGames.length });
   }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, scores, updateScoreBase, winLoss]);
 
   const buildCopyText = useCallback(

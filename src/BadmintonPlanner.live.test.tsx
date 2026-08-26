@@ -110,4 +110,33 @@ describe('BadmintonPlanner live game flow', () => {
       expect(within(sectionFor('Current game')).getByText('SLOT 2')).toBeInTheDocument();
     });
   });
+
+  it('fills a freed court from the next playable queued game even when the same court index disappears', async () => {
+    const user = userEvent.setup();
+    const players = Array.from({ length: 10 }, (_, i) => makePlayer(`P${i + 1}`));
+    const result = {
+      schedule: [
+        makeSlot(1, [['P1', 'P2', 'P3', 'P4'], ['P5', 'P6', 'P7', 'P8']], ['P9', 'P10']),
+        makeSlot(2, [['P1', 'P5', 'P9', 'P10'], ['P2', 'P6', 'P7', 'P8']], ['P3', 'P4']),
+        makeSlot(3, [['P3', 'P4', 'P5', 'P6'], ['P1', 'P2', 'P7', 'P8']], ['P9', 'P10']),
+      ],
+      gamesPlayed: players.map(() => 1),
+    };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(result));
+    localStorage.setItem('bp-numCourts', JSON.stringify(2));
+
+    render(<BadmintonPlanner />);
+
+    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[1]);
+
+    await waitFor(() => {
+      const current = within(sectionFor('Current game'));
+      expect(current.getAllByText('● LIVE')).toHaveLength(2);
+      expect(current.getByText('SLOT 1')).toBeInTheDocument();
+      expect(current.getByText('SLOT 2')).toBeInTheDocument();
+    });
+  });
 });
