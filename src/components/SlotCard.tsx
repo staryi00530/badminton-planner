@@ -21,8 +21,15 @@ export default function SlotCard({
   onAdjustCourts,
   blockedPlayerNames,
   canShowReady,
+  visibleCourtIndexes,
+  compactGameView = false,
 }) {
   const stepBtnStyle = { background: 'none', border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontSize: 12, fontWeight: 700, fontFamily: FONT, width: 20, height: 20, lineHeight: 1, cursor: 'pointer' };
+  const visibleCourts = (visibleCourtIndexes ?? slot.courts.map((_, ci) => ci))
+    .map(ci => ({ ci, court: slot.courts[ci] }))
+    .filter(item => item.court);
+  const isSingleCourtView = visibleCourts.length === 1 && visibleCourtIndexes;
+  const headerCourt = isSingleCourtView ? visibleCourts[0].court : null;
   const slotPicker = (pos, currentName, genderByName, allNames) => {
     const g = genderByName.get(currentName);
     const color = g === 'F' ? C.pink : C.accent;
@@ -42,10 +49,12 @@ export default function SlotCard({
   return (
     <div style={{ background: C.card, border: `1px solid ${editing ? C.amber : C.border}`, borderRadius: 10, padding: '14px 16px', boxShadow: C.shadow }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <span style={{ fontSize: 13, color: C.textDim, fontWeight: 600 }}>SLOT {slot.slot}</span>
+        <span style={{ fontSize: 13, color: C.textDim, fontWeight: 600 }}>
+          SLOT {slot.slot}{headerCourt ? ` · COURT ${headerCourt.court}` : ''}
+        </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, color: C.textMuted }}>{slotTime(slot.slot)}</span>
-          {onAdjustCourts && !editing && (
+          {onAdjustCourts && !editing && !isSingleCourtView && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
               <button onClick={() => onAdjustCourts(slot.slot, -1)} disabled={slot.courts.length <= 1} title="Remove a court, starting this slot through the rest of the session" style={{ ...stepBtnStyle, opacity: slot.courts.length <= 1 ? 0.35 : 1 }}>
                 −
@@ -77,9 +86,12 @@ export default function SlotCard({
         return (
           <div style={{ marginBottom: 12 }}>
             <p style={{ fontSize: 11, color: C.textDim, marginBottom: 8, fontWeight: 600 }}>Tap any name to swap with another player</p>
-            {editLayout.courts.map((court, ci) => (
+            {(visibleCourtIndexes ?? editLayout.courts.map((_, ci) => ci)).map((ci) => {
+              const court = editLayout.courts[ci];
+              if (!court) return null;
+              return (
               <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: 6 }}>
-                {editLayout.courts.length > 1 && <div style={{ fontSize: 10, color: COURT_COLORS[ci], fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Court {ci + 1}</div>}
+                {(editLayout.courts.length > 1 || isSingleCourtView) && <div style={{ fontSize: 10, color: COURT_COLORS[ci], fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Court {ci + 1}</div>}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', gap: 4 }}>
                     {slotPicker({ type: 'court', ci, idx: 0 }, court[0], genderByName, allNames)}
@@ -92,7 +104,8 @@ export default function SlotCard({
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
             {editLayout.sitting.length > 0 && (
               <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 11, color: C.textMuted }}>Sit:</span>
@@ -116,7 +129,7 @@ export default function SlotCard({
         );
       })()}
 
-      {!editing && slot.courts.map((court, ci) => {
+      {!editing && visibleCourts.map(({ court, ci }, visibleIdx) => {
         const isLive = liveGames?.some(lg => lg.slot === slot.slot && lg.court === ci);
         const isCompleted = completedGames?.some(game => game.slot === slot.slot && game.court === ci);
         const hasBlockedPlayer = blockedPlayerNames && blockedPlayerNames.size > 0 &&
@@ -132,10 +145,10 @@ export default function SlotCard({
         const actionBorder = isLive ? '#ef4444' : isWaiting ? C.amber : isCompleted ? C.green : C.accentDim;
         const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isCompleted ? 'Restart this game' : 'Start this game';
         return (
-        <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: ci < slot.courts.length - 1 ? 6 : 0 }}>
-          {(slot.courts.length > 1 || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
+        <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: visibleIdx < visibleCourts.length - 1 ? 6 : 0 }}>
+          {(slot.courts.length > 1 || isSingleCourtView || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
             <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {slot.courts.length > 1 && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci] }}>Court {court.court}</span>}
+              {(slot.courts.length > 1 || isSingleCourtView) && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci] }}>Court {court.court}</span>}
               {slot.repeatedCourts?.includes(ci) && <span style={{ color: C.amber }}>⚠ repeat group</span>}
               {isLive && <span style={{ color: '#ef4444' }}>● LIVE</span>}
               {isCompleted && !isLive && <span style={{ color: C.green }}>✓ DONE</span>}
@@ -205,13 +218,13 @@ export default function SlotCard({
 
       {slot.courts.length === 0 && <div style={{ textAlign: 'center', padding: 10, color: C.textMuted, fontSize: 12 }}>Not enough players</div>}
 
-      {!editing && slot.sitting && slot.sitting.length > 0 && (
+      {!editing && !compactGameView && slot.sitting && slot.sitting.length > 0 && (
         <div style={{ marginTop: 8, textAlign: 'center' }}>
           <span style={{ fontSize: 12, color: C.textMuted }}>Sit: {slot.sitting.map(p => p.name).join(', ')}</span>
         </div>
       )}
 
-      <div className="player-tracker" style={{ borderTop: `1px solid ${C.border}` }}>
+      {!compactGameView && <div className="player-tracker" style={{ borderTop: `1px solid ${C.border}` }}>
         {slot.playerState.filter(ps => ps.available).map((ps, pi) => (
           <div key={pi} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: ps.playing ? (ps.gender === 'F' ? C.pink : C.accent) : C.textMuted }}>{ps.name}</span>
@@ -225,7 +238,7 @@ export default function SlotCard({
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

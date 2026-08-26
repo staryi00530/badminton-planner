@@ -37,6 +37,15 @@ function sectionFor(title: string) {
   return screen.getByRole('heading', { name: title }).closest('section')!;
 }
 
+async function startNextVisibleGame(user: ReturnType<typeof userEvent.setup>) {
+  const currentStarts = within(sectionFor('Current game')).queryAllByText('Start');
+  if (currentStarts.length > 0) {
+    await user.click(currentStarts[0]);
+    return;
+  }
+  await user.click(within(sectionFor('Next game')).getByText('Start'));
+}
+
 describe('BadmintonPlanner live game flow', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -67,14 +76,17 @@ describe('BadmintonPlanner live game flow', () => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
 
-    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
-    await user.click(within(sectionFor('Current game')).getByText('Start'));
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
 
     await waitFor(() => {
-      const current = within(sectionFor('Current game'));
-      expect(current.getByText('SLOT 1')).toBeInTheDocument();
-      expect(current.getByText('SLOT 2')).toBeInTheDocument();
+      const currentSection = sectionFor('Current game');
+      const current = within(currentSection);
+      expect(current.getByText(/SLOT 1 .* COURT 2/)).toBeInTheDocument();
+      expect(current.getByText(/SLOT 2 .* COURT 1/)).toBeInTheDocument();
+      expect(currentSection).toHaveTextContent('P5');
+      expect(currentSection).toHaveTextContent('P8');
       expect(current.getAllByText('● LIVE')).toHaveLength(2);
     });
   });
@@ -96,9 +108,9 @@ describe('BadmintonPlanner live game flow', () => {
 
     render(<BadmintonPlanner />);
 
-    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
-    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
-    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
@@ -107,7 +119,7 @@ describe('BadmintonPlanner live game flow', () => {
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
-      expect(within(sectionFor('Current game')).getByText('SLOT 2')).toBeInTheDocument();
+      expect(within(sectionFor('Current game')).getAllByText(/SLOT 2/).length).toBeGreaterThan(0);
     });
   });
 
@@ -128,15 +140,18 @@ describe('BadmintonPlanner live game flow', () => {
 
     render(<BadmintonPlanner />);
 
-    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
-    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[1]);
 
     await waitFor(() => {
-      const current = within(sectionFor('Current game'));
+      const currentSection = sectionFor('Current game');
+      const current = within(currentSection);
       expect(current.getAllByText('● LIVE')).toHaveLength(2);
-      expect(current.getByText('SLOT 1')).toBeInTheDocument();
-      expect(current.getByText('SLOT 2')).toBeInTheDocument();
+      expect(current.getByText(/SLOT 1 .* COURT 1/)).toBeInTheDocument();
+      expect(current.getByText(/SLOT 2 .* COURT 1/)).toBeInTheDocument();
+      expect(currentSection).toHaveTextContent('P1');
+      expect(currentSection).toHaveTextContent('P4');
     });
   });
 });

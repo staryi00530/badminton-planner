@@ -52,36 +52,41 @@ function sectionFor(title: string) {
   return screen.getByRole('heading', { name: title }).closest('section');
 }
 
+function expectInSection(title: string, pattern: RegExp) {
+  expect(within(sectionFor(title)).getByText(pattern)).toBeInTheDocument();
+}
+
 describe('ScheduleGrid grouping', () => {
   it('shows current, one next game, and folds past/future slots', () => {
     renderGrid({ fromSlot: 2, completedGames: [{ slot: 1, court: 0 }, { slot: 1, court: 1 }] });
 
-    expect(within(sectionFor('Current game')).getByText('SLOT 2')).toBeInTheDocument();
-    expect(within(sectionFor('Next game')).getByText('SLOT 3')).toBeInTheDocument();
+    expectInSection('Current game', /SLOT 2 .* COURT 1/);
+    expectInSection('Current game', /SLOT 2 .* COURT 2/);
+    expectInSection('Next game', /SLOT 3 .* COURT 1/);
 
     const past = screen.getByText('Past games (1)').closest('details');
     expect(past).not.toHaveAttribute('open');
     expect(within(past).getByText('SLOT 1')).toBeInTheDocument();
 
-    const future = screen.getByText('Future games (1)').closest('details');
+    const future = screen.getByText('Future games (3)').closest('details');
     expect(future).not.toHaveAttribute('open');
-    expect(within(future).getByText('SLOT 4')).toBeInTheDocument();
+    expect(within(future).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
   });
 
   it('keeps a live earlier slot in Current game until the slot is done', () => {
     renderGrid({ liveGames: [{ slot: 1, court: 0 }] });
 
-    expect(within(sectionFor('Current game')).getByText('SLOT 1')).toBeInTheDocument();
+    expectInSection('Current game', /SLOT 1 .* COURT 1/);
     expect(screen.queryByText('Past games (1)')).not.toBeInTheDocument();
-    expect(within(sectionFor('Next game')).getByText('SLOT 2')).toBeInTheDocument();
-    expect(screen.getByText('Future games (2)')).toBeInTheDocument();
+    expectInSection('Next game', /SLOT 1 .* COURT 2/);
+    expect(screen.getByText('Future games (6)')).toBeInTheDocument();
   });
 
   it('keeps a partially completed slot in Current game instead of folding it into past', () => {
     renderGrid({ fromSlot: 1, completedGames: [{ slot: 1, court: 0 }] });
 
-    expect(within(sectionFor('Current game')).getByText('SLOT 1')).toBeInTheDocument();
-    expect(within(sectionFor('Next game')).getByText('SLOT 2')).toBeInTheDocument();
+    expectInSection('Current game', /SLOT 1 .* COURT 2/);
+    expectInSection('Next game', /SLOT 2 .* COURT 1/);
     expect(screen.queryByText(/Past games/)).not.toBeInTheDocument();
   });
 

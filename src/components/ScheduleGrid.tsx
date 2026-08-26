@@ -26,25 +26,38 @@ export default function ScheduleGrid({
   blockedPlayerNames,
   fromSlot,
 }) {
-  const slotHasLiveGame = slotNum => liveGames?.some(lg => lg.slot === slotNum);
   const courtHasBlockedPlayer = court => blockedPlayerNames?.size > 0 &&
     [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
   const isCourtCompleted = (slot, ci) => completedGames.some(game => game.slot === slot.slot && game.court === ci);
+  const gameKey = (slotNum, courtIdx) => `${slotNum}:${courtIdx}`;
   const isSlotCompleted = slot => slot.courts.length > 0 &&
     slot.courts.every((_, ci) => isCourtCompleted(slot, ci));
   const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot));
-  const liveSlots = result.schedule.filter(slot => slotHasLiveGame(slot.slot));
-  const currentSlots = liveSlots.length > 0
-    ? liveSlots
-    : result.schedule.filter(slot => !isSlotCompleted(slot) && slot.slot === Math.min(fromSlot, result.schedule.length));
-  const currentSlotNumbers = new Set(currentSlots.map(slot => slot.slot));
-  const upcomingSlots = result.schedule.filter(slot =>
-    slot.slot >= fromSlot &&
-    !isSlotCompleted(slot) &&
-    !currentSlotNumbers.has(slot.slot)
-  );
-  const nextFutureSlots = upcomingSlots.slice(0, 1);
-  const foldedFutureSlots = upcomingSlots.slice(1);
+  const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot));
+  const liveGameRefs = (liveGames ?? [])
+    .map(game => {
+      const slot = result.schedule.find(s => s.slot === game.slot);
+      return slot?.courts[game.court] ? { slot, court: game.court } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.slot.slot - b.slot.slot || a.court - b.court);
+  const fallbackCurrentRefs = liveGameRefs.length > 0 || !firstIncomplete
+    ? []
+    : firstIncomplete.courts
+      .map((_, ci) => ({ slot: firstIncomplete, court: ci }))
+      .filter(ref => !isCourtCompleted(ref.slot, ref.court));
+  const currentGameRefs = liveGameRefs.length > 0 ? liveGameRefs : fallbackCurrentRefs;
+  const currentGameKeys = new Set(currentGameRefs.map(ref => gameKey(ref.slot.slot, ref.court)));
+  const queueStartSlot = firstIncomplete?.slot ?? fromSlot;
+  const upcomingGameRefs = result.schedule
+    .flatMap(slot => slot.courts.map((_, ci) => ({ slot, court: ci })))
+    .filter(ref =>
+      ref.slot.slot >= queueStartSlot &&
+      !isCourtCompleted(ref.slot, ref.court) &&
+      !currentGameKeys.has(gameKey(ref.slot.slot, ref.court))
+    );
+  const nextFutureGames = upcomingGameRefs.slice(0, 1);
+  const foldedFutureGames = upcomingGameRefs.slice(1);
   const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
     const liveGame = liveGames
@@ -87,6 +100,32 @@ export default function ScheduleGrid({
       onAdjustCourts={onAdjustCourts}
       blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
       canShowReady={slot.slot === fromSlot + 1}
+    />
+  );
+
+  const renderGame = ({ slot, court }) => (
+    <SlotCard
+      key={`${slot.slot}-${court}`}
+      slot={slot}
+      scores={scores}
+      editing={editingSlot === slot.slot}
+      editLayout={editingSlot === slot.slot ? editLayout : null}
+      isAdmin={isAdmin}
+      slotTime={slotTime}
+      startSlotEdit={startSlotEdit}
+      applySlotEdit={applySlotEdit}
+      applySlotEditOnly={applySlotEditOnly}
+      cancelSlotEdit={cancelSlotEdit}
+      assignToPosition={assignToPosition}
+      editOptions={players}
+      updateScore={updateScore}
+      liveGames={liveGames}
+      completedGames={completedGames}
+      onToggleLive={onToggleLive}
+      blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
+      canShowReady={slot.slot === fromSlot + 1}
+      visibleCourtIndexes={[court]}
+      compactGameView={true}
     />
   );
 
@@ -146,31 +185,31 @@ export default function ScheduleGrid({
         </p>
       </div>
 
-      {currentSlots.length > 0 && (
+      {currentGameRefs.length > 0 && (
         <section style={sectionStyle}>
           <h3 style={sectionTitleStyle}>Current game</h3>
           <div className="schedule-grid">
-            {currentSlots.map(renderSlot)}
+            {currentGameRefs.map(renderGame)}
           </div>
         </section>
       )}
 
-      {nextFutureSlots.length > 0 && (
+      {nextFutureGames.length > 0 && (
         <section style={sectionStyle}>
           <h3 style={sectionTitleStyle}>Next game</h3>
           <div className="schedule-grid">
-            {nextFutureSlots.map(renderSlot)}
+            {nextFutureGames.map(renderGame)}
           </div>
         </section>
       )}
 
-      {foldedFutureSlots.length > 0 && (
+      {foldedFutureGames.length > 0 && (
         <details style={{ ...sectionStyle, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px' }}>
           <summary style={{ ...sectionTitleStyle, margin: 0, cursor: 'pointer' }}>
-            Future games ({foldedFutureSlots.length})
+            Future games ({foldedFutureGames.length})
           </summary>
           <div className="schedule-grid" style={{ marginTop: 12 }}>
-            {foldedFutureSlots.map(renderSlot)}
+            {foldedFutureGames.map(renderGame)}
           </div>
         </details>
       )}
