@@ -72,7 +72,8 @@ export default function SlotCard({
           ...slot.courts.flatMap(c => [...c.teamA, ...c.teamB]).map(p => [p.name, p.gender]),
           ...slot.sitting.map(p => [p.name, p.gender]),
         ]);
-        const allNames = [...new Set([...editLayout.courts.flat(), ...editLayout.sitting, ...editOptions.map(p => p.name)])];
+        const allNames = [...new Set([...editLayout.courts.flat(), ...editLayout.sitting, ...editOptions.map(p => p.name)])]
+          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         return (
           <div style={{ marginBottom: 12 }}>
             <p style={{ fontSize: 11, color: C.textDim, marginBottom: 8, fontWeight: 600 }}>Tap any name to swap with another player</p>

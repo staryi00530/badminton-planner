@@ -144,12 +144,12 @@ const COURT_COLORS = ["#22d3ee", "#a78bfa", "#fb923c"];
 const COURT_BG = ["rgba(34,211,238,0.08)", "rgba(167,139,250,0.08)", "rgba(251,146,60,0.08)"];
 
 const DEFAULT_PLAYERS = [
-  { name: "Eamon", gender: "M" }, { name: "Jialin", gender: "F" },
-  { name: "Mindy", gender: "F" }, { name: "Yuta", gender: "M" },
-  { name: "Jae", gender: "M" }, { name: "Jess", gender: "F" },
-  { name: "Edwin", gender: "M" }, { name: "Stanley", gender: "M" },
-  { name: "Kayleen", gender: "F" }, { name: "Ricky", gender: "M" },
-  { name: "Tim", gender: "M" }, { name: "Henry", gender: "M" },
+  { name: "Player 01", gender: "M" }, { name: "Player 02", gender: "F" },
+  { name: "Player 03", gender: "F" }, { name: "Player 04", gender: "M" },
+  { name: "Player 05", gender: "M" }, { name: "Player 06", gender: "F" },
+  { name: "Player 07", gender: "M" }, { name: "Player 08", gender: "M" },
+  { name: "Player 09", gender: "F" }, { name: "Player 10", gender: "M" },
+  { name: "Player 11", gender: "M" }, { name: "Player 12", gender: "M" },
 ];
 
 const font = "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace";

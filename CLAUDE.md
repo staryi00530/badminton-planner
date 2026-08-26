@@ -248,7 +248,7 @@ Deployment is automatic: push to `main` and GitHub Actions builds and publishes 
 
 ### Configuration knobs
 
-- **`DEFAULT_PLAYERS`** in `src/constants.ts` — your group's starter roster.
+- **`DEFAULT_PLAYERS`** in `src/constants.ts` — anonymized sample roster used by the "Load defaults" button.
 - **`window.ADMIN_PIN`**, **`window.FIREBASE_CONFIG`**, **`window.RECAPTCHA_SITE_KEY`**,
   **`window.SHARE_API_BASE`** — set in `index.html`'s inline `<script>`. `FIREBASE_CONFIG: null`
   disables sharing and win/loss cloud sync entirely (the app still works fully locally).

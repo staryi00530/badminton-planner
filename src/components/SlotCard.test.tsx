@@ -100,6 +100,7 @@ describe('SlotCard — slot edit picker', () => {
       editing: true,
       editLayout: { courts: [['A01', 'A02', 'B01', 'B02']], sitting: [] },
       editOptions: [
+        { name: 'Zed', gender: 'M' },
         { name: 'A01', gender: 'M' },
         { name: 'A02', gender: 'M' },
         { name: 'B01', gender: 'M' },
@@ -110,6 +111,7 @@ describe('SlotCard — slot edit picker', () => {
 
     const firstPicker = screen.getAllByRole('combobox')[0];
     expect(screen.getAllByRole('option', { name: 'Sub' })).toHaveLength(4);
+    expect([...firstPicker.querySelectorAll('option')].map(option => option.value)).toEqual(['A01', 'A02', 'B01', 'B02', 'Sub', 'Zed']);
     await user.selectOptions(firstPicker, 'Sub');
     expect(handlers.assignToPosition).toHaveBeenCalledWith({ type: 'court', ci: 0, idx: 0 }, 'Sub');
   });

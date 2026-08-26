@@ -302,21 +302,21 @@ def build_alert(slots: list[dict]) -> str:
 # ── Sign-up list ───────────────────────────────────────────────────────────────
 
 SIGNUP_ROSTER = [
-    "Eamon",
-    "Jialin",
-    "Mindy",
-    "Yuta",
-    "Jae",
-    "Jess",
-    "Edwin",
-    "Stanley",
-    "Kayleen",
-    "Ricky",
-    "Tim",
-    "Henry",
+    "Player 01",
+    "Player 02",
+    "Player 03",
+    "Player 04",
+    "Player 05",
+    "Player 06",
+    "Player 07",
+    "Player 08",
+    "Player 09",
+    "Player 10",
+    "Player 11",
+    "Player 12",
 ]
 
-SIGNUP_FIXED = ["Eamon", "Jialin"]  # always pre-filled at the top
+SIGNUP_FIXED = ["Player 01", "Player 02"]  # always pre-filled at the top
 
 
 def build_signup_list() -> str:

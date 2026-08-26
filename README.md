@@ -103,18 +103,18 @@ Lowest score wins. Skill ratings are derived from each player's win rate from pr
 
 | # | Name | Gender |
 |---|---|---|
-| 1 | Eamon | M |
-| 2 | Jialin | F |
-| 3 | Mindy | F |
-| 4 | Yuta | M |
-| 5 | Jae | M |
-| 6 | Jess | F |
-| 7 | Edwin | M |
-| 8 | Stanley | M |
-| 9 | Kayleen | F |
-| 10 | Ricky | M |
-| 11 | Tim | M |
-| 12 | Henry | M |
+| 1 | Player 01 | M |
+| 2 | Player 02 | F |
+| 3 | Player 03 | F |
+| 4 | Player 04 | M |
+| 5 | Player 05 | M |
+| 6 | Player 06 | F |
+| 7 | Player 07 | M |
+| 8 | Player 08 | M |
+| 9 | Player 09 | F |
+| 10 | Player 10 | M |
+| 11 | Player 11 | M |
+| 12 | Player 12 | M |
 
 ---
 

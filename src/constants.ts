@@ -5,18 +5,18 @@ export const DEFAULT_GAME_MINUTES = 15;
 export const ARCHIVE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export const DEFAULT_PLAYERS: Player[] = [
-  { name: 'Eamon', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Jialin', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Mindy', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Yuta', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Jae', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Jess', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Edwin', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Stanley', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Kayleen', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Ricky', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Tim', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
-  { name: 'Henry', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 01', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 02', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 03', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 04', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 05', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 06', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 07', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 08', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 09', gender: 'F', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 10', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 11', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
+  { name: 'Player 12', gender: 'M', skill: 2, availFrom: 0, availTo: 0, group: 'full', leavesAt: null },
 ];
 
 export const C = {
