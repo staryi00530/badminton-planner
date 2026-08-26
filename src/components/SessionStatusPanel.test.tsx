@@ -35,6 +35,11 @@ describe('SessionStatusPanel', () => {
     expect(screen.getByText('Session Status · next: 3 · 1 live')).toBeInTheDocument();
   });
 
+  it('shows a completed status after the final slot is done', () => {
+    renderPanel({ fromSlot: 13, totalSlots: 12 });
+    expect(screen.getByText('Session Status · complete · 12 done')).toBeInTheDocument();
+  });
+
   it('a currently-available player shows skip-next and leaving controls', async () => {
     renderPanel();
     const row = rowFor('Here');

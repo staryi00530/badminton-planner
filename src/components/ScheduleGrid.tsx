@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { C } from '../constants';
+import { gameMatches, isSlotCompleted } from '../utils/liveQueue';
 import SlotCard from './SlotCard';
 
 export default function ScheduleGrid({
@@ -28,12 +29,10 @@ export default function ScheduleGrid({
 }) {
   const courtHasBlockedPlayer = court => blockedPlayerNames?.size > 0 &&
     [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
-  const isCourtCompleted = (slot, ci) => completedGames.some(game => game.slot === slot.slot && game.court === ci);
+  const isCourtCompleted = (slot, ci) => completedGames.some(game => gameMatches(game, slot.slot, ci));
   const gameKey = (slotNum, courtIdx) => `${slotNum}:${courtIdx}`;
-  const isSlotCompleted = slot => slot.courts.length > 0 &&
-    slot.courts.every((_, ci) => isCourtCompleted(slot, ci));
-  const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot));
-  const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot));
+  const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot, completedGames));
+  const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot, completedGames));
   const liveGameRefs = (liveGames ?? [])
     .map(game => {
       const slot = result.schedule.find(s => s.slot === game.slot);

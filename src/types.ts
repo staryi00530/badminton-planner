@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import type { Player, SlotResult } from './algorithm/types';
+import type { GameRef } from './utils/liveQueue';
 
 export type { Player, SlotResult };
 
@@ -111,8 +112,8 @@ export interface PlannerState {
   pendingOverwrite: 'generate' | 'clear' | 'import' | 'regenerateRemaining' | null;
   shareNotice: 'expired' | null;
   loadedPlanId: number | null;
-  liveGames: Array<{ slot: number; court: number }>;
-  completedGames: Array<{ slot: number; court: number }>;
+  liveGames: GameRef[];
+  completedGames: GameRef[];
   suspendedPlayerNames: string[];
 }
 
@@ -151,7 +152,7 @@ export interface ScheduleGridProps {
   assignToPosition: (pos: { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number }, newName: string) => void;
   editOptions?: Player[];
   updateScore: (slot: number, courtIdx: number, aVal: string, bVal: string, teamA: string[], teamB: string[]) => void;
-  completedGames?: Array<{ slot: number; court: number }>;
+  completedGames?: GameRef[];
 }
 
 declare global {
