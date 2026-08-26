@@ -56,8 +56,13 @@ export default function ScheduleGrid({
       !isCourtCompleted(ref.slot, ref.court) &&
       !currentGameKeys.has(gameKey(ref.slot.slot, ref.court))
     );
-  const nextFutureGames = upcomingGameRefs.slice(0, 1);
-  const foldedFutureGames = upcomingGameRefs.slice(1);
+  const nextFutureSlot = upcomingGameRefs[0]?.slot.slot;
+  const nextFutureGames = nextFutureSlot == null
+    ? []
+    : upcomingGameRefs.filter(ref => ref.slot.slot === nextFutureSlot);
+  const foldedFutureGames = nextFutureSlot == null
+    ? []
+    : upcomingGameRefs.filter(ref => ref.slot.slot !== nextFutureSlot);
   const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
     const liveGame = liveGames

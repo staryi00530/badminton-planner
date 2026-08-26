@@ -43,7 +43,7 @@ async function startNextVisibleGame(user: ReturnType<typeof userEvent.setup>) {
     await user.click(currentStarts[0]);
     return;
   }
-  await user.click(within(sectionFor('Next game')).getByText('Start'));
+  await user.click(within(sectionFor('Next game')).getAllByText('Start')[0]);
 }
 
 describe('BadmintonPlanner live game flow', () => {

@@ -63,12 +63,13 @@ describe('ScheduleGrid grouping', () => {
     expectInSection('Current game', /SLOT 2 .* COURT 1/);
     expectInSection('Current game', /SLOT 2 .* COURT 2/);
     expectInSection('Next game', /SLOT 3 .* COURT 1/);
+    expectInSection('Next game', /SLOT 3 .* COURT 2/);
 
     const past = screen.getByText('Past games (1)').closest('details');
     expect(past).not.toHaveAttribute('open');
     expect(within(past).getByText('SLOT 1')).toBeInTheDocument();
 
-    const future = screen.getByText('Future games (3)').closest('details');
+    const future = screen.getByText('Future games (2)').closest('details');
     expect(future).not.toHaveAttribute('open');
     expect(within(future).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
   });
@@ -87,6 +88,7 @@ describe('ScheduleGrid grouping', () => {
 
     expectInSection('Current game', /SLOT 1 .* COURT 2/);
     expectInSection('Next game', /SLOT 2 .* COURT 1/);
+    expectInSection('Next game', /SLOT 2 .* COURT 2/);
     expect(screen.queryByText(/Past games/)).not.toBeInTheDocument();
   });
 
