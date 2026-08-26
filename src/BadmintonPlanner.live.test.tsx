@@ -78,4 +78,36 @@ describe('BadmintonPlanner live game flow', () => {
       expect(current.getAllByText('● LIVE')).toHaveLength(2);
     });
   });
+
+  it('keeps live game count at court capacity as a pulled-up slot expands', async () => {
+    const user = userEvent.setup();
+    const players = Array.from({ length: 12 }, (_, i) => makePlayer(`P${i + 1}`));
+    const result = {
+      schedule: [
+        makeSlot(1, [['P1', 'P2', 'P3', 'P4'], ['P5', 'P6', 'P7', 'P8'], ['P9', 'P10', 'P11', 'P12']]),
+        makeSlot(2, [['P1', 'P5', 'P9', 'P10'], ['P2', 'P6', 'P11', 'P12'], ['P3', 'P4', 'P7', 'P8']]),
+        makeSlot(3, [['P1', 'P6', 'P7', 'P12'], ['P2', 'P5', 'P8', 'P9'], ['P3', 'P4', 'P10', 'P11']]),
+      ],
+      gamesPlayed: players.map(() => 1),
+    };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(result));
+    localStorage.setItem('bp-numCourts', JSON.stringify(3));
+
+    render(<BadmintonPlanner />);
+
+    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Start')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await waitFor(() => {
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+    });
+
+    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await waitFor(() => {
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+      expect(within(sectionFor('Current game')).getByText('SLOT 2')).toBeInTheDocument();
+    });
+  });
 });

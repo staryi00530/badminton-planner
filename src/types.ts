@@ -148,6 +148,7 @@ export interface ScheduleGridProps {
   applySlotEdit: () => void;
   cancelSlotEdit: () => void;
   assignToPosition: (pos: { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number }, newName: string) => void;
+  editOptions?: Player[];
   updateScore: (slot: number, courtIdx: number, aVal: string, bVal: string, teamA: string[], teamB: string[]) => void;
   completedGames?: Array<{ slot: number; court: number }>;
 }

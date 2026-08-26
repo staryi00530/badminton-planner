@@ -117,12 +117,48 @@ export function* generateScheduleGen(
       (forcedFirstSlot as { courts: number[][] }).courts != null;
 
     if (isForcedCourts) {
-      // Fully forced — accept user's court assignments as-is
-      const courtsForced = (forcedFirstSlot as { courts: number[][] }).courts;
+      // Fully or partially forced — accept provided courts as-is, then optionally
+      // fill additional courts when a live pulled-up slot is being expanded.
+      const forced = forcedFirstSlot as { courts: number[][]; targetCourts?: number };
+      const courtsForced = forced.courts;
       const selectedForced = courtsForced.flat();
+      const forcedSet = new Set(selectedForced);
+      const playableCount = new Set([...available, ...selectedForced]).size;
+      const targetCourts = Math.max(
+        courtsForced.length,
+        Math.min(forced.targetCourts ?? courtsForced.length, Math.floor(playableCount / 4), courtsPerSlot[slot]!),
+      );
+      const additionalNeeded = Math.max(0, targetCourts - courtsForced.length) * 4;
+      const selectedAdditional: number[] = [];
+      const addCandidate = (i: number) => {
+        if (selectedAdditional.length >= additionalNeeded) return;
+        if (forcedSet.has(i) || selectedAdditional.includes(i)) return;
+        selectedAdditional.push(i);
+      };
+      const candidatesByRate = (idxs: number[]) => {
+        const grouped: Record<string, number[]> = {};
+        for (const p of idxs) {
+          const avail = players[p]!.availTo - players[p]!.availFrom + 1;
+          const rate = avail > 0 ? (gamesPlayed[p] ?? 0) / avail : 0;
+          const key = `${Math.round(rate * 100)}`;
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key]!.push(p);
+        }
+        return Object.keys(grouped)
+          .sort((a, b) => Number(a) - Number(b))
+          .flatMap(g => shuffle(grouped[g]!, rng));
+      };
+      for (const p of shuffle(mustPlay.filter(i => !forcedSet.has(i)), rng)) addCandidate(p);
+      for (const p of candidatesByRate(canPlay.filter(i => !forcedSet.has(i)))) addCandidate(p);
+      for (const p of shuffle(mustRest.filter(i => !forcedSet.has(i)), rng)) addCandidate(p);
+
+      const courtsToBuild = [...courtsForced];
+      for (let i = 0; i + 3 < selectedAdditional.length; i += 4) {
+        courtsToBuild.push(selectedAdditional.slice(i, i + 4));
+      }
       const courts: Court[] = [];
-      for (let c = 0; c < courtsForced.length; c++) {
-        const cf = courtsForced[c]!;
+      for (let c = 0; c < courtsToBuild.length; c++) {
+        const cf = courtsToBuild[c]!;
         const [a1, a2, b1, b2] = [cf[0]!, cf[1]!, cf[2]!, cf[3]!];
         courts.push({
           court: c + 1,
@@ -143,7 +179,7 @@ export function* generateScheduleGen(
         const genders = [players[a1]!.gender, players[a2]!.gender, players[b1]!.gender, players[b2]!.gender];
         if (genders.every(g => g === 'F')) womenDoublesCount++;
       }
-      const playingSet = new Set(selectedForced);
+      const playingSet = new Set(courtsToBuild.flat());
       for (let i = 0; i < n; i++) {
         const isAvail = available.includes(i);
         if (playingSet.has(i)) {
@@ -165,7 +201,7 @@ export function* generateScheduleGen(
         playing: playingSet.has(i),
         available: available.includes(i),
       }));
-      for (const cf of courtsForced) courtGroupHistory.add(groupKey(cf));
+      for (const cf of courtsToBuild) courtGroupHistory.add(groupKey(cf));
       schedule.push({ slot: slot + 1, courts, sitting, playerState, repeatedCourts: [] });
       yield { schedule: [...schedule], gamesPlayed: [...gamesPlayed] };
       continue;

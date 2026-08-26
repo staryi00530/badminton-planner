@@ -79,6 +79,7 @@ export default function ScheduleGrid({
       applySlotEditOnly={applySlotEditOnly}
       cancelSlotEdit={cancelSlotEdit}
       assignToPosition={assignToPosition}
+      editOptions={players}
       updateScore={updateScore}
       liveGames={liveGames}
       completedGames={completedGames}

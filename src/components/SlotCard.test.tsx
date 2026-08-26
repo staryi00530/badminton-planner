@@ -92,6 +92,29 @@ describe('SlotCard — per-slot court stepper', () => {
   });
 });
 
+describe('SlotCard — slot edit picker', () => {
+  it('offers roster players who were not already in the slot', async () => {
+    const user = userEvent.setup();
+    const slot = makeSlot(1);
+    const handlers = renderSlotCard(slot, {
+      editing: true,
+      editLayout: { courts: [['A01', 'A02', 'B01', 'B02']], sitting: [] },
+      editOptions: [
+        { name: 'A01', gender: 'M' },
+        { name: 'A02', gender: 'M' },
+        { name: 'B01', gender: 'M' },
+        { name: 'B02', gender: 'M' },
+        { name: 'Sub', gender: 'F' },
+      ],
+    });
+
+    const firstPicker = screen.getAllByRole('combobox')[0];
+    expect(screen.getAllByRole('option', { name: 'Sub' })).toHaveLength(4);
+    await user.selectOptions(firstPicker, 'Sub');
+    expect(handlers.assignToPosition).toHaveBeenCalledWith({ type: 'court', ci: 0, idx: 0 }, 'Sub');
+  });
+});
+
 describe('SlotCard — Live/Done toggle', () => {
   it('clicking Start on a court calls onToggleLive(slotNum, courtIndex)', async () => {
     const user = userEvent.setup();

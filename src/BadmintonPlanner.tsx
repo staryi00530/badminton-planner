@@ -347,7 +347,7 @@ function BadmintonPlanner() {
   // Regen helper for session-status handlers (late arrivals / early departures).
   // overridePlayers lets the caller pass a pre-modified player list so the new
   // availability takes effect without waiting for a state round-trip.
-  const doRegen = useCallback((targetFromSlot, overridePlayers, blockedForFirstSlot = new Set(), overrideWinLoss = null, overrideScores = null, baseResult = result) => {
+  const doRegen = useCallback((targetFromSlot, overridePlayers, blockedForFirstSlot = new Set(), overrideWinLoss = null, overrideScores = null, baseResult = result, forcedFirstSlot = null) => {
     if (!baseResult) return null;
     const basePlayers = overridePlayers ?? players;
     const targetSlotIdx = targetFromSlot - 1;
@@ -371,7 +371,7 @@ function BadmintonPlanner() {
     const keptSlots = baseResult.schedule.slice(0, targetFromSlot - 1);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const courtsArr = getCourtsPerSlot();
-    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, null, { preferMixedTeams });
+    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, forcedFirstSlot, { preferMixedTeams });
     if (!newResult) return null;
     const nextScores = {};
     const sourceScores = overrideScores ?? scores;
@@ -397,6 +397,22 @@ function BadmintonPlanner() {
   const hasGame = (games, slot, court) => games.some(game => gameMatches(game, slot, court));
   const addUniqueGame = (games, game) => hasGame(games, game.slot, game.court) ? games : [...games, game];
 
+  const forcedLiveCourtsForSlot = useCallback((slotNum, games, scheduleResult = result) => {
+    if (!scheduleResult) return null;
+    const liveInSlot = games.filter(game => game.slot === slotNum).sort((a, b) => a.court - b.court);
+    if (!liveInSlot.length) return null;
+    const slot = scheduleResult.schedule.find(s => s.slot === slotNum);
+    if (!slot) return null;
+    const forcedCourts = [];
+    for (const game of liveInSlot) {
+      if (game.court !== forcedCourts.length) return null;
+      const court = slot.courts[game.court];
+      if (!court) return null;
+      forcedCourts.push([...court.teamA, ...court.teamB].map(p => players.findIndex(player => player.name === p.name)));
+    }
+    return forcedCourts.every(court => court.length === 4 && court.every(idx => idx >= 0)) ? forcedCourts : null;
+  }, [players, result]);
+
   const isSlotCompleted = useCallback((slot, games) => {
     if (!slot || slot.courts.length === 0) return false;
     return slot.courts.every((_, ci) => games.some(game => gameMatches(game, slot.slot, ci)));
@@ -407,12 +423,6 @@ function BadmintonPlanner() {
     const slot = scheduleResult.schedule.find(s => !isSlotCompleted(s, games));
     return slot?.slot ?? totalSlots;
   }, [fromSlot, isSlotCompleted, result, totalSlots]);
-
-  const nextRegeneratableSlot = useCallback((startSlot, games) => {
-    let slot = startSlot;
-    while (slot <= totalSlots && games.some(game => game.slot === slot)) slot += 1;
-    return slot;
-  }, [totalSlots]);
 
   const promotedLiveGameFor = useCallback((scheduleResult, completedGame, gamesCompleted, gamesLive) => {
     if (!scheduleResult || !completedGame) return null;
@@ -445,13 +455,21 @@ function BadmintonPlanner() {
 
     const regenerateFrom = (regenFromSlot) => {
       if (regenFromSlot > totalSlots) return false;
+      const forcedLiveCourts = forcedLiveCourtsForSlot(regenFromSlot, nextLiveGames, nextResult);
+      const forcedFirstSlot = forcedLiveCourts
+        ? { courts: forcedLiveCourts, targetCourts: getCourtsPerSlot()[regenFromSlot - 1] }
+        : null;
+      const blockingLiveGames = forcedLiveCourts
+        ? nextLiveGames.filter(game => game.slot !== regenFromSlot)
+        : nextLiveGames;
       const r = doRegen(
         regenFromSlot,
         null,
-        livePlayerNamesFor(nextLiveGames, nextResult),
+        livePlayerNamesFor(blockingLiveGames, nextResult),
         patch.winLoss ?? null,
         patch.scores ?? null,
         nextResult,
+        forcedFirstSlot,
       );
       if (!r) return false;
       nextResult = r.newResult;
@@ -465,7 +483,19 @@ function BadmintonPlanner() {
       return true;
     };
 
-    const initialRegenSlot = nextRegeneratableSlot(changedSlot + 1, nextLiveGames);
+    const nextSafeRegenSlot = (startSlot) => {
+      let slot = startSlot;
+      while (
+        slot <= totalSlots &&
+        nextLiveGames.some(game => game.slot === slot) &&
+        !forcedLiveCourtsForSlot(slot, nextLiveGames, nextResult)
+      ) {
+        slot += 1;
+      }
+      return slot;
+    };
+
+    const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
     const initialRegenSucceeded = regenerateFrom(initialRegenSlot);
 
     const promotedAfterRegen = promoteNextGame &&
@@ -473,14 +503,14 @@ function BadmintonPlanner() {
       promotedLiveGameFor(nextResult, promoteNextGame, nextCompletedGames, nextLiveGames);
     if (promotedAfterRegen) {
       nextLiveGames = addUniqueGame(nextLiveGames, promotedAfterRegen);
-      regenerateFrom(nextRegeneratableSlot(promotedAfterRegen.slot + 1, nextLiveGames));
+      regenerateFrom(nextSafeRegenSlot(promotedAfterRegen.slot + 1));
     }
 
     patch.liveGames = nextLiveGames;
     patch.completedGames = nextCompletedGames;
     patch.fromSlot = firstIncompleteSlot(nextCompletedGames, nextResult);
     patchState(patch);
-  }, [completedGames, doRegen, firstIncompleteSlot, livePlayerNamesFor, nextRegeneratableSlot, promotedLiveGameFor, result, totalSlots]);
+  }, [completedGames, doRegen, firstIncompleteSlot, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, promotedLiveGameFor, result, totalSlots]);
 
   // Live/Done dynamically regenerates future slots. Still-live players are treated
   // as unavailable for the next regenerated slot, then become available again later.
@@ -564,7 +594,6 @@ function BadmintonPlanner() {
       return idx >= 0 ? { type: 'sit', idx } : null;
     };
     const other = findPos(newName);
-    if (!other) return;
     const courts = editLayout.courts.map(c => [...c]);
     const sitting = [...editLayout.sitting];
     const get = p => p.type === 'court' ? courts[p.ci][p.idx] : sitting[p.idx];
@@ -573,6 +602,12 @@ function BadmintonPlanner() {
       else sitting[p.idx] = value;
     };
     const av = get(pos);
+    if (!other) {
+      set(pos, newName);
+      if (pos.type === 'court' && av && !sitting.includes(av)) sitting.push(av);
+      patchState({ editLayout: { courts, sitting } });
+      return;
+    }
     const bv = get(other);
     set(pos, bv);
     set(other, av);

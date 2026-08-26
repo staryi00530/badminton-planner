@@ -55,4 +55,4 @@ export interface GeneratorYield {
   gamesPlayed: number[];
 }
 
-export type ForcedFirstSlot = number[] | { courts: number[][] };
+export type ForcedFirstSlot = number[] | { courts: number[][]; targetCourts?: number };
