@@ -1,7 +1,7 @@
-// @ts-nocheck
+import type { ReactNode } from 'react';
 import { C, FONT } from '../constants';
 
-function Section({ title, children }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 16, boxShadow: C.shadow }}>
       <h3 style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, margin: '0 0 12px' }}>{title}</h3>
@@ -10,7 +10,7 @@ function Section({ title, children }) {
   );
 }
 
-function Row({ label, children }) {
+function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'flex-start' }}>
       <span style={{ fontSize: 12, fontWeight: 700, color: C.accent, minWidth: 110, flexShrink: 0 }}>{label}</span>
