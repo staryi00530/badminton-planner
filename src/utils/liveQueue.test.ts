@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstIncompleteSlot, keepGamesBeforeSlot, isSlotCompleted, normalizeGameRefs } from './liveQueue';
+import { contiguousGamesForSlot, firstIncompleteSlot, keepGamesBeforeSlot, isSlotCompleted, normalizeGameRefs } from './liveQueue';
 
 const schedule = [
   { slot: 1, courts: [{}, {}] },
@@ -32,5 +32,11 @@ describe('live queue helpers', () => {
       { slot: 1, court: 0 },
       { slot: 1, court: 1 },
     ]);
+  });
+
+  it('only treats contiguous court refs as safely forceable', () => {
+    expect(contiguousGamesForSlot([{ slot: 2, court: 0 }, { slot: 2, court: 1 }], 2))
+      .toEqual([{ slot: 2, court: 0 }, { slot: 2, court: 1 }]);
+    expect(contiguousGamesForSlot([{ slot: 2, court: 1 }], 2)).toBeNull();
   });
 });

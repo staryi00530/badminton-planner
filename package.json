@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/run-tests.mjs run",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node scripts/run-tests.mjs run",
+    "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:watch": "node scripts/run-tests.mjs"
   },
   "dependencies": {

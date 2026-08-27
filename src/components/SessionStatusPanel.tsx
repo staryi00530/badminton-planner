@@ -1,5 +1,19 @@
-// @ts-nocheck
 import { C, FONT } from '../constants';
+import type { Player } from '../algorithm/types';
+import type { GameRef } from '../utils/liveQueue';
+
+interface SessionStatusPanelProps {
+  players: Player[];
+  fromSlot: number;
+  totalSlots: number;
+  liveGames?: GameRef[];
+  suspendedPlayerNames?: string[];
+  staggerMode: 'none' | 'group' | 'custom';
+  setPlayerBack: (index: number) => void;
+  setPlayerJoining: (index: number) => void;
+  setPlayerLeaving: (index: number) => void;
+  togglePlayerSuspended?: (index: number) => void;
+}
 
 export default function SessionStatusPanel({
   players,
@@ -12,7 +26,7 @@ export default function SessionStatusPanel({
   setPlayerJoining,
   setPlayerLeaving,
   togglePlayerSuspended,
-}) {
+}: SessionStatusPanelProps) {
   const suspendedSet = new Set(suspendedPlayerNames);
   const sessionComplete = fromSlot > totalSlots && liveGames.length === 0;
   return (

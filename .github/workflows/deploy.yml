@@ -37,6 +37,7 @@ jobs:
         working-directory: site-main
         run: |
           npm ci
+          npx playwright install --with-deps chromium
           npm test
           npm run build
 

@@ -1,7 +1,35 @@
-// @ts-nocheck
+import type { RefObject } from 'react';
+import type { Court, Player, SlotResult } from '../algorithm/types';
 import { C } from '../constants';
 import { gameMatches, isSlotCompleted } from '../utils/liveQueue';
+import type { GameRef } from '../utils/liveQueue';
+import type { EditLayout, PlannerResult, ScoresMap } from '../types';
 import SlotCard from './SlotCard';
+
+interface ScheduleGridProps {
+  result: PlannerResult;
+  players: Player[];
+  scores: ScoresMap;
+  editingSlot: number | null;
+  editLayout: EditLayout | null;
+  isAdmin: boolean;
+  scheduleRef: RefObject<HTMLDivElement>;
+  minGames: number;
+  maxGames: number;
+  slotTime: (slot: number) => string;
+  startSlotEdit: (slot: number) => void;
+  applySlotEdit: () => void;
+  applySlotEditOnly: () => void;
+  cancelSlotEdit: () => void;
+  assignToPosition: (position: { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number }, name: string) => void;
+  updateScore: (slot: number, court: number, a: string, b: string, teamA: string[], teamB: string[]) => void;
+  liveGames?: GameRef[];
+  completedGames?: GameRef[];
+  onToggleLive?: (slot: number, court: number) => void;
+  onAdjustCourts?: (slot: number, delta: number) => void;
+  blockedPlayerNames?: Set<string>;
+  fromSlot: number;
+}
 
 export default function ScheduleGrid({
   result,
@@ -26,10 +54,10 @@ export default function ScheduleGrid({
   onAdjustCourts,
   blockedPlayerNames,
   fromSlot,
-}) {
-  const courtHasBlockedPlayer = court => blockedPlayerNames?.size > 0 &&
+}: ScheduleGridProps) {
+  const courtHasBlockedPlayer = (court: Court) => blockedPlayerNames?.size > 0 &&
     [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
-  const isCourtCompleted = (slot, ci) => completedGames.some(game => gameMatches(game, slot.slot, ci));
+  const isCourtCompleted = (slot: SlotResult, ci: number) => completedGames.some(game => gameMatches(game, slot.slot, ci));
   const gameKey = (slotNum, courtIdx) => `${slotNum}:${courtIdx}`;
   const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot, completedGames));
   const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot, completedGames));
@@ -38,7 +66,7 @@ export default function ScheduleGrid({
       const slot = result.schedule.find(s => s.slot === game.slot);
       return slot?.courts[game.court] ? { slot, court: game.court } : null;
     })
-    .filter(Boolean)
+    .filter((ref): ref is { slot: SlotResult; court: number } => ref !== null)
     .sort((a, b) => a.slot.slot - b.slot.slot || a.court - b.court);
   const fallbackCurrentRefs = liveGameRefs.length > 0 || !firstIncomplete
     ? []
@@ -82,7 +110,7 @@ export default function ScheduleGrid({
     };
   });
 
-  const renderSlot = slot => (
+  const renderSlot = (slot: SlotResult) => (
     <SlotCard
       key={slot.slot}
       slot={slot}
@@ -107,7 +135,7 @@ export default function ScheduleGrid({
     />
   );
 
-  const renderGame = ({ slot, court }) => (
+  const renderGame = ({ slot, court }: { slot: SlotResult; court: number }) => (
     <SlotCard
       key={`${slot.slot}-${court}`}
       slot={slot}

@@ -34,6 +34,11 @@ export function normalizeGameRefs(
   return normalized;
 }
 
+export function contiguousGamesForSlot(games: GameRef[], slotNum: number) {
+  const inSlot = games.filter(game => game.slot === slotNum).sort((a, b) => a.court - b.court);
+  return inSlot.length > 0 && inSlot.every((game, index) => game.court === index) ? inSlot : null;
+}
+
 export function keepGamesBeforeSlot(games: GameRef[], slot: number) {
   return games.filter(game => game.slot < slot);
 }
