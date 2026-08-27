@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstIncompleteSlot, keepGamesBeforeSlot, isSlotCompleted } from './liveQueue';
+import { firstIncompleteSlot, keepGamesBeforeSlot, isSlotCompleted, normalizeGameRefs } from './liveQueue';
 
 const schedule = [
   { slot: 1, courts: [{}, {}] },
@@ -20,5 +20,17 @@ describe('live queue helpers', () => {
   it('returns a finished sentinel after the final slot', () => {
     const completed = schedule.flatMap(slot => slot.courts.map((_, court) => ({ slot: slot.slot, court })));
     expect(firstIncompleteSlot(schedule, completed, 2)).toBe(3);
+  });
+
+  it('drops duplicate and stale live refs while respecting capacity', () => {
+    expect(normalizeGameRefs([
+      { slot: 1, court: 0 },
+      { slot: 1, court: 0 },
+      { slot: 9, court: 0 },
+      { slot: 1, court: 1 },
+    ], schedule, 2)).toEqual([
+      { slot: 1, court: 0 },
+      { slot: 1, court: 1 },
+    ]);
   });
 });

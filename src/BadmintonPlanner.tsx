@@ -11,7 +11,7 @@ import { computeCourtsPerSlot } from './utils/courtsPerSlot';
 import { applyAvailability as applyAvailabilityUtil } from './utils/availability';
 import { formatSlotTime } from './utils/slotTime';
 import { isValidBadmintonScore } from './utils/scoreValidation';
-import { addUniqueGame, firstIncompleteSlot as getFirstIncompleteSlot, gameMatches, hasGame, keepGamesBeforeSlot } from './utils/liveQueue';
+import { addUniqueGame, firstIncompleteSlot as getFirstIncompleteSlot, gameMatches, hasGame, keepGamesBeforeSlot, normalizeGameRefs } from './utils/liveQueue';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
 import PlayerList from './components/PlayerList';
@@ -444,7 +444,8 @@ function BadmintonPlanner() {
   }, [livePlayerNamesFor]);
 
   const applyLiveGamesUpdate = useCallback((newLiveGames, changedSlot, newCompletedGames = completedGames, extraPatch = {}, options = {}) => {
-    let nextLiveGames = newLiveGames;
+    const targetLiveCount = options.targetLiveCount ?? newLiveGames.length;
+    let nextLiveGames = normalizeGameRefs(newLiveGames, result?.schedule ?? null, targetLiveCount);
     let nextCompletedGames = newCompletedGames;
     let nextResult = result;
     let nextSuspendedPlayerNames = options.suspendedPlayerNames ?? suspendedPlayerNames;
@@ -455,8 +456,6 @@ function BadmintonPlanner() {
       fromSlot: firstIncompleteSlot(nextCompletedGames, nextResult),
       ...extraPatch,
     };
-    const targetLiveCount = options.targetLiveCount ?? nextLiveGames.length;
-
     const regenerateFrom = (regenFromSlot) => {
       if (regenFromSlot > totalSlots) return false;
       const forcedLiveCourts = forcedLiveCourtsForSlot(regenFromSlot, nextLiveGames, nextResult);
@@ -472,7 +471,7 @@ function BadmintonPlanner() {
       ]);
       const r = doRegen(
         regenFromSlot,
-        null,
+        options.overridePlayers ?? null,
         blockedForFirstSlot,
         patch.winLoss ?? null,
         patch.scores ?? null,
@@ -519,6 +518,7 @@ function BadmintonPlanner() {
       }
     }
 
+    nextLiveGames = normalizeGameRefs(nextLiveGames, nextResult?.schedule ?? null, targetLiveCount);
     patch.liveGames = nextLiveGames;
     patch.completedGames = nextCompletedGames;
     patch.suspendedPlayerNames = nextSuspendedPlayerNames;
@@ -543,36 +543,14 @@ function BadmintonPlanner() {
   // Session status handlers — mid-session early departure / late arrival / restore
   const setPlayerLeaving = useCallback((idx) => {
     const updatedPlayers = players.map((p, i) => i === idx ? { ...p, leavesAt: fromSlot - 2 } : p);
-    const r = doRegen(fromSlot, updatedPlayers);
-    if (!r) return;
-    patchState({
-      players: updatedPlayers,
-      result: r.newResult,
-      scores: r.nextScores,
-      liveGames: keepGamesBeforeSlot(liveGames, fromSlot),
-      completedGames: keepGamesBeforeSlot(completedGames, fromSlot),
-      copied: false,
-      isConfirmed: false,
-      loadedPlanId: null,
-    });
-  }, [completedGames, doRegen, fromSlot, liveGames, players]);
+    applyLiveGamesUpdate(liveGames, fromSlot - 1, completedGames, { players: updatedPlayers }, { overridePlayers: updatedPlayers });
+  }, [applyLiveGamesUpdate, completedGames, fromSlot, liveGames, players]);
 
   const setPlayerJoining = useCallback((idx) => {
     if (staggerMode !== 'custom') return;
     const updatedPlayers = players.map((p, i) => i === idx ? { ...p, availFrom: fromSlot - 1 } : p);
-    const r = doRegen(fromSlot, updatedPlayers);
-    if (!r) return;
-    patchState({
-      players: updatedPlayers,
-      result: r.newResult,
-      scores: r.nextScores,
-      liveGames: keepGamesBeforeSlot(liveGames, fromSlot),
-      completedGames: keepGamesBeforeSlot(completedGames, fromSlot),
-      copied: false,
-      isConfirmed: false,
-      loadedPlanId: null,
-    });
-  }, [completedGames, doRegen, fromSlot, liveGames, players, staggerMode]);
+    applyLiveGamesUpdate(liveGames, fromSlot - 1, completedGames, { players: updatedPlayers }, { overridePlayers: updatedPlayers });
+  }, [applyLiveGamesUpdate, completedGames, fromSlot, liveGames, players, staggerMode]);
 
   const setPlayerBack = useCallback((idx) => {
     patchState({ players: players.map((p, i) => i === idx ? { ...p, leavesAt: null } : p) });

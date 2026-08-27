@@ -155,6 +155,25 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('keeps both active courts unchanged when a player is marked done for the day', async () => {
+    const user = userEvent.setup();
+    render(<BadmintonPlanner />);
+
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    const currentBefore = sectionFor('Current game').textContent;
+
+    await user.click(screen.getAllByTitle('Player is done for today')[0]);
+
+    await waitFor(() => {
+      const current = sectionFor('Current game');
+      expect(current).toHaveTextContent('● LIVE');
+      expect(current).toHaveTextContent('P1');
+      expect(current).toHaveTextContent('P8');
+      expect(current.textContent).toContain(currentBefore!.match(/P1.*P4/)?.[0] ?? 'P1');
+    });
+  });
+
   it('skips a player from the immediate next selection and clears the skip after regeneration', async () => {
     const user = userEvent.setup();
     const players = ['SkipMe', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11', 'P12'].map(makePlayer);
