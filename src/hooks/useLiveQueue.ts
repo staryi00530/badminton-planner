@@ -48,7 +48,6 @@ export function useLiveQueue({
   suspendedPlayerNames,
   fromSlot,
   totalSlots,
-  scores,
   canPlayerJoin,
   getCourtsPerSlot,
   regenerate,

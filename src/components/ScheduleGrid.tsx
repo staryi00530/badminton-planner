@@ -1,10 +1,13 @@
-import type { RefObject } from 'react';
+import type { ComponentType, RefObject } from 'react';
 import type { Court, Player, SlotResult } from '../algorithm/types';
 import { C } from '../constants';
 import { gameMatches, isSlotCompleted } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
 import type { EditLayout, PlannerResult, ScoresMap } from '../types';
 import SlotCard from './SlotCard';
+
+// SlotCard is still on the legacy untyped boundary; keep that boundary explicit here.
+const TypedSlotCard = SlotCard as unknown as ComponentType<Record<string, unknown>>;
 
 interface ScheduleGridProps {
   result: PlannerResult;
@@ -55,10 +58,12 @@ export default function ScheduleGrid({
   blockedPlayerNames,
   fromSlot,
 }: ScheduleGridProps) {
-  const courtHasBlockedPlayer = (court: Court) => blockedPlayerNames?.size > 0 &&
-    [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
+  const courtHasBlockedPlayer = (court: Court) => {
+    const blocked = blockedPlayerNames ?? new Set<string>();
+    return blocked.size > 0 && [...court.teamA, ...court.teamB].some(p => blocked.has(p.name));
+  };
   const isCourtCompleted = (slot: SlotResult, ci: number) => completedGames.some(game => gameMatches(game, slot.slot, ci));
-  const gameKey = (slotNum, courtIdx) => `${slotNum}:${courtIdx}`;
+  const gameKey = (slotNum: number, courtIdx: number) => `${slotNum}:${courtIdx}`;
   const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot, completedGames));
   const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot, completedGames));
   const liveGameRefs = (liveGames ?? [])
@@ -100,7 +105,9 @@ export default function ScheduleGrid({
     const nextCourt = result.schedule.find(slot => slot.courts[ci] && !isCourtCompleted(slot, ci));
     if (!nextCourt) return { court: ci + 1, label: 'Done', slot: null, color: C.green, bg: 'rgba(34,197,94,0.12)' };
 
-    const waiting = courtHasBlockedPlayer(nextCourt.courts[ci]);
+    const court = nextCourt.courts[ci];
+    if (!court) return { court: ci + 1, label: 'Done', slot: null, color: C.green, bg: 'rgba(34,197,94,0.12)' };
+    const waiting = courtHasBlockedPlayer(court);
     return {
       court: ci + 1,
       label: waiting ? 'Waiting' : 'Ready',
@@ -111,7 +118,7 @@ export default function ScheduleGrid({
   });
 
   const renderSlot = (slot: SlotResult) => (
-    <SlotCard
+    <TypedSlotCard
       key={slot.slot}
       slot={slot}
       scores={scores}
@@ -136,7 +143,7 @@ export default function ScheduleGrid({
   );
 
   const renderGame = ({ slot, court }: { slot: SlotResult; court: number }) => (
-    <SlotCard
+    <TypedSlotCard
       key={`${slot.slot}-${court}`}
       slot={slot}
       scores={scores}
@@ -196,7 +203,7 @@ export default function ScheduleGrid({
         <h3 style={{ fontSize: 13, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 12px' }}>Games per Player</h3>
         <div className="stats-grid">
           {players.map((p, i) => {
-            const g = result.gamesPlayed[i];
+    const g = result.gamesPlayed[i] ?? 0;
             const pct = maxGames > 0 ? (g / maxGames) * 100 : 0;
             return (
               <div key={`${p.name}-${i}`} className="stat-item">
