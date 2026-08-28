@@ -98,8 +98,8 @@ export default function ScheduleGrid({
     ? []
     : upcomingGameRefs.filter(ref => ref.slot.slot !== nextFutureSlot);
   liveQueueDebug('render', {
-    liveGames,
-    completedGames,
+    liveGames: liveGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
+    completedGames: completedGames.map(game => ({ slot: game.slot, court: game.court + 1 })),
     fromSlot,
     current: currentGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
     next: nextFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court })),

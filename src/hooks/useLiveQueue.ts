@@ -54,6 +54,16 @@ export function useLiveQueue({
   regenerate,
   patchState,
 }: LiveQueueOptions) {
+  const describeGames = useCallback((games: GameRef[], scheduleResult = result) => games.map(game => {
+    const slot = scheduleResult?.schedule.find(item => item.slot === game.slot);
+    const court = slot?.courts[game.court];
+    return {
+      slot: game.slot,
+      court: game.court + 1,
+      players: court ? [...court.teamA, ...court.teamB].map(player => player.name) : [],
+    };
+  }), [result]);
+
   const firstIncomplete = useCallback((games: GameRef[], scheduleResult = result) => {
     if (!scheduleResult) return fromSlot;
     return firstIncompleteSlot(scheduleResult.schedule, games, totalSlots);
@@ -112,8 +122,8 @@ export function useLiveQueue({
     liveQueueDebug('apply:start', {
       changedSlot,
       targetLiveCount,
-      liveGames: newLiveGames,
-      completedGames: newCompletedGames,
+      liveGames: describeGames(newLiveGames),
+      completedGames: describeGames(newCompletedGames),
       extraPatch: Object.keys(extraPatch),
     });
     let nextLiveGames = normalizeGameRefs(newLiveGames, result?.schedule ?? null, targetLiveCount);
@@ -184,6 +194,12 @@ export function useLiveQueue({
         const beforeCount = nextLiveGames.length;
         nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
         if (nextLiveGames.length === beforeCount) break;
+        liveQueueDebug('queue:promote', {
+          promoted: describeGames([queuedGame], nextResult),
+          beforeLiveGames: describeGames(nextLiveGames.slice(0, beforeCount), nextResult),
+          afterLiveGames: describeGames(nextLiveGames, nextResult),
+          completedGames: describeGames(nextCompletedGames, nextResult),
+        });
         regenerateFrom(nextSafeRegenSlot(queuedGame.slot + 1));
       }
     }
@@ -195,13 +211,13 @@ export function useLiveQueue({
     patch.fromSlot = firstIncomplete(nextCompletedGames, nextResult);
     liveQueueDebug('apply:final', {
       changedSlot,
-      liveGames: nextLiveGames,
-      completedGames: nextCompletedGames,
+      liveGames: describeGames(nextLiveGames, nextResult),
+      completedGames: describeGames(nextCompletedGames, nextResult),
       fromSlot: patch.fromSlot,
       regenerated: Boolean(patch.result),
     });
     patchState(patch);
-  }, [completedGames, firstIncomplete, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, nextPlayableQueuedGame, regenerate, result, suspendedPlayerNames, totalSlots]);
+  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, nextPlayableQueuedGame, regenerate, result, suspendedPlayerNames, totalSlots]);
 
   const toggleLiveGame = useCallback((slotNum: number, court: number) => {
     const isLive = hasGame(liveGames, slotNum, court);
@@ -222,13 +238,13 @@ export function useLiveQueue({
     liveQueueDebug('toggle', {
       clicked: { slot: slotNum, court },
       action: isLive ? 'complete' : 'start',
-      beforeLiveGames: liveGames,
-      beforeCompletedGames: completedGames,
-      nextLiveGames,
-      nextCompletedGames,
+      beforeLiveGames: describeGames(liveGames),
+      beforeCompletedGames: describeGames(completedGames),
+      nextLiveGames: describeGames(nextLiveGames),
+      nextCompletedGames: describeGames(nextCompletedGames),
     });
     applyLiveGamesUpdate(nextLiveGames, slotNum, nextCompletedGames, {}, isLive ? { targetLiveCount: liveGames.length } : {});
-  }, [applyLiveGamesUpdate, completedGames, fromSlot, getCourtsPerSlot, liveGames]);
+  }, [applyLiveGamesUpdate, completedGames, describeGames, fromSlot, getCourtsPerSlot, liveGames]);
 
   const setPlayerLeaving = useCallback((index: number) => {
     const updatedPlayers = players.map((player, playerIndex) => playerIndex === index ? { ...player, leavesAt: fromSlot - 2 } : player);
