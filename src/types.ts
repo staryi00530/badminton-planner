@@ -164,5 +164,6 @@ declare global {
     };
     SHARE_API_BASE: string | null;
     html2canvas?: (node: HTMLElement, options?: unknown) => Promise<HTMLCanvasElement>;
+    DEBUG_LIVE_QUEUE?: boolean;
   }
 }

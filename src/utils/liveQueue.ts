@@ -3,6 +3,11 @@ export interface GameRef {
   court: number;
 }
 
+export function liveQueueDebug(label: string, details: Record<string, unknown> = {}) {
+  if (typeof window === 'undefined' || window.localStorage?.getItem('bp-debug-live-queue') !== 'true') return;
+  console.debug(`[live-queue] ${label}`, details);
+}
+
 export function gameMatches(game: GameRef, slot: number, court: number) {
   return game.slot === slot && game.court === court;
 }
