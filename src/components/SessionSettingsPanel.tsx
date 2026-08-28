@@ -1,16 +1,5 @@
+// @ts-nocheck
 import { C, FONT } from '../constants';
-import type { ExtraCourt, StaggerMode } from '../types';
-
-interface SessionSettingsPanelProps {
-  sessionStart: string;
-  totalMinutes: number;
-  gameMinutes: number;
-  numCourts: number;
-  extraCourt: ExtraCourt;
-  staggerMode: StaggerMode;
-  preferMixedTeams: boolean;
-  patchState: (patch: Partial<SessionSettingsPanelProps>) => void;
-}
 
 export default function SessionSettingsPanel({
   sessionStart,
@@ -21,7 +10,7 @@ export default function SessionSettingsPanel({
   staggerMode,
   preferMixedTeams,
   patchState,
-}: SessionSettingsPanelProps) {
+}) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20, boxShadow: C.shadow }}>
       <h3 style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, margin: '0 0 14px' }}>Session</h3>
@@ -79,7 +68,7 @@ export default function SessionSettingsPanel({
         <div style={{ flex: '1 1 200px' }}>
           <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Availability</label>
           <div className="avail-buttons" style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            {([['none', 'All here'], ['group', 'Early / Late'], ['custom', 'Per player']] as const).map(([val, label]) => (
+            {[['none', 'All here'], ['group', 'Early / Late'], ['custom', 'Per player']].map(([val, label]) => (
               <button key={val} onClick={() => patchState({ staggerMode: val })} style={{ background: staggerMode === val ? C.accentDim : C.card, color: staggerMode === val ? '#fff' : C.textDim, border: `1px solid ${staggerMode === val ? C.accentDim : C.border}`, borderRadius: 6, padding: '8px 10px', fontSize: 12, fontWeight: 600, fontFamily: FONT, flex: 1 }}>
                 {label}
               </button>

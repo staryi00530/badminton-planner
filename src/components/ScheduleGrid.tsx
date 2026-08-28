@@ -1,7 +1,7 @@
 import type { ComponentType, RefObject } from 'react';
 import type { Court, Player, SlotResult } from '../algorithm/types';
 import { C } from '../constants';
-import { gameMatches, isSlotCompleted, liveQueueDebug } from '../utils/liveQueue';
+import { gameMatches, isSlotCompleted } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
 import type { EditLayout, PlannerResult, ScoresMap } from '../types';
 import SlotCard from './SlotCard';
@@ -95,14 +95,6 @@ export default function ScheduleGrid({
   const foldedFutureGames = nextFutureSlot == null
     ? []
     : upcomingGameRefs.filter(ref => ref.slot.slot !== nextFutureSlot);
-  liveQueueDebug('render', {
-    liveGames,
-    completedGames,
-    fromSlot,
-    current: currentGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
-    next: nextFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
-    future: foldedFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
-  });
   const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
     const liveGame = liveGames
