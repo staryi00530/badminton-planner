@@ -67,7 +67,7 @@ export interface SharePayload {
 
 export interface PlannerState {
   players: Player[];
-  playerHistory: Player[];
+  playerHistory: Array<Pick<Player, 'name' | 'gender'>>;
   nameInput: string;
   genderInput: 'M' | 'F';
   totalMinutes: number;
@@ -119,7 +119,7 @@ export interface PlannerState {
 
 export interface PlannerPersistedState {
   players: Player[];
-  playerHistory: Player[];
+  playerHistory: Array<Pick<Player, 'name' | 'gender'>>;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;
@@ -157,12 +157,13 @@ export interface ScheduleGridProps {
 
 declare global {
   interface Window {
-    ADMIN_PIN?: string;
+    ADMIN_PIN: string | null;
     DB?: {
       load: () => Promise<WinLossMap>;
       save: (data: WinLossMap) => Promise<void>;
     };
-    SHARE_API_BASE?: string | null;
+    SHARE_API_BASE: string | null;
     html2canvas?: (node: HTMLElement, options?: unknown) => Promise<HTMLCanvasElement>;
+    DEBUG_LIVE_QUEUE?: boolean;
   }
 }
