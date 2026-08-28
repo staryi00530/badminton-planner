@@ -123,6 +123,19 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('does not allow manually starting a third game on two courts', async () => {
+    const user = userEvent.setup();
+    render(<BadmintonPlanner />);
+
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+
+    await waitFor(() => {
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
+    });
+  });
+
   it('fills a freed court from the next playable queued game even when the same court index disappears', async () => {
     const user = userEvent.setup();
     const players = Array.from({ length: 10 }, (_, i) => makePlayer(`P${i + 1}`));
