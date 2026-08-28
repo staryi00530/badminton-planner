@@ -934,6 +934,7 @@ function BadmintonPlanner() {
             onAdjustCourts={adjustCourtsAtSlot}
             blockedPlayerNames={blockedPlayerNames}
             fromSlot={fromSlot}
+            liveCapacity={getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? numCourts}
           />
         )}
         </>

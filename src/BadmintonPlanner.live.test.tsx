@@ -129,11 +129,11 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await startNextVisibleGame(user);
 
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
     });
+    expect(within(sectionFor('Next game')).getByRole('button', { name: 'Queued' })).toBeDisabled();
   });
 
   it('fills a freed court from the next playable queued game even when the same court index disappears', async () => {

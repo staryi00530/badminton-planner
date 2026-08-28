@@ -26,6 +26,7 @@ interface SlotCardProps {
   onAdjustCourts?: (slot: number, delta: number) => void;
   blockedPlayerNames?: Set<string>;
   canShowReady: boolean;
+  canStartGame?: boolean;
   visibleCourtIndexes?: number[];
   compactGameView?: boolean;
 }
@@ -50,6 +51,7 @@ export default function SlotCard({
   onAdjustCourts,
   blockedPlayerNames,
   canShowReady,
+  canStartGame = true,
   visibleCourtIndexes,
   compactGameView = false,
 }: SlotCardProps) {
@@ -168,11 +170,12 @@ export default function SlotCard({
         // gated to canShowReady (the slot right after fromSlot) since fromSlot itself
         // is ambiguous — its courts could be live, already Done, or about to start.
         const isWaiting = !isLive && !isCompleted && hasBlockedPlayer;
-        const isReady = canShowReady && !isLive && !isCompleted && blockedPlayerNames && blockedPlayerNames.size > 0 && !hasBlockedPlayer;
-        const actionLabel = isLive ? '✓ Done' : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : 'Start';
+        const isReady = canShowReady && canStartGame && !isLive && !isCompleted && blockedPlayerNames && blockedPlayerNames.size > 0 && !hasBlockedPlayer;
+        const isQueued = !isLive && !isCompleted && !isWaiting && !canStartGame;
+        const actionLabel = isLive ? '✓ Done' : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : isQueued ? 'Queued' : 'Start';
         const actionColor = isLive ? '#fff' : isWaiting ? C.amber : isCompleted ? C.green : C.accent;
         const actionBorder = isLive ? '#ef4444' : isWaiting ? C.amber : isCompleted ? C.green : C.accentDim;
-        const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isCompleted ? 'Restart this game' : 'Start this game';
+        const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isQueued ? 'Queued until a court is free' : isCompleted ? 'Restart this game' : 'Start this game';
         return (
         <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: visibleIdx < visibleCourts.length - 1 ? 6 : 0 }}>
           {(slot.courts.length > 1 || isSingleCourtView || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
@@ -185,7 +188,7 @@ export default function SlotCard({
               {isReady && <span style={{ color: C.green }} title="Everyone on this court is free to start">✓ Ready</span>}
               <div style={{ flex: 1 }} />
               {onToggleLive && (
-                <button onClick={() => onToggleLive(slot.slot, ci)} disabled={isWaiting} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting ? 0.75 : 1 }}>
+                <button onClick={() => onToggleLive(slot.slot, ci)} disabled={isWaiting || isQueued} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting || isQueued ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting || isQueued ? 0.75 : 1 }}>
                   {actionLabel}
                 </button>
               )}

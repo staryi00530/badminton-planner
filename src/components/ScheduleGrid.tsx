@@ -32,6 +32,7 @@ interface ScheduleGridProps {
   onAdjustCourts?: (slot: number, delta: number) => void;
   blockedPlayerNames?: Set<string>;
   fromSlot: number;
+  liveCapacity?: number;
 }
 
 export default function ScheduleGrid({
@@ -57,6 +58,7 @@ export default function ScheduleGrid({
   onAdjustCourts,
   blockedPlayerNames,
   fromSlot,
+  liveCapacity = Number.POSITIVE_INFINITY,
 }: ScheduleGridProps) {
   const courtHasBlockedPlayer = (court: Court) => {
     const blocked = blockedPlayerNames ?? new Set<string>();
@@ -147,6 +149,7 @@ export default function ScheduleGrid({
       onAdjustCourts={onAdjustCourts}
       blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
       canShowReady={slot.slot === fromSlot + 1}
+      canStartGame={(liveGames?.length ?? 0) < liveCapacity}
     />
   );
 
@@ -171,6 +174,7 @@ export default function ScheduleGrid({
       onToggleLive={onToggleLive}
       blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
       canShowReady={slot.slot === fromSlot + 1}
+      canStartGame={(liveGames?.length ?? 0) < liveCapacity}
       visibleCourtIndexes={[court]}
       compactGameView={true}
     />
