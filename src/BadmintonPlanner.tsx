@@ -405,6 +405,7 @@ function BadmintonPlanner() {
   const {
     applyLiveGamesUpdate,
     blockedPlayerNames,
+    queueAdjustment,
     setPlayerJoining,
     setPlayerLeaving,
     toggleLiveGame,
@@ -947,6 +948,7 @@ function BadmintonPlanner() {
             blockedPlayerNames={blockedPlayerNames}
             fromSlot={fromSlot}
             liveCapacity={getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? numCourts}
+            queueAdjustment={queueAdjustment}
           />
         )}
         </>

@@ -87,6 +87,9 @@ describe('BadmintonPlanner live game flow', () => {
       expect(current.getByText(/SLOT 2 .* COURT 1/)).toBeInTheDocument();
       expect(currentSection).toHaveTextContent('P5');
       expect(currentSection).toHaveTextContent('P8');
+      expect(currentSection).toHaveTextContent('P1');
+      expect(currentSection).toHaveTextContent('P9');
+      expect(currentSection).toHaveTextContent('P10');
       expect(current.getAllByText('● LIVE')).toHaveLength(2);
     });
   });

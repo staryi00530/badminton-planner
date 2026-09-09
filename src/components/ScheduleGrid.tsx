@@ -4,6 +4,7 @@ import { C } from '../constants';
 import { gameMatches, isSlotCompleted, liveQueueDebug } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
 import type { EditLayout, PlannerResult, ScoresMap } from '../types';
+import type { QueueAdjustmentNotice } from '../hooks/useLiveQueue';
 import SlotCard from './SlotCard';
 
 // SlotCard is still on the legacy untyped boundary; keep that boundary explicit here.
@@ -33,6 +34,7 @@ interface ScheduleGridProps {
   blockedPlayerNames?: Set<string>;
   fromSlot: number;
   liveCapacity?: number;
+  queueAdjustment?: QueueAdjustmentNotice | null;
 }
 
 export default function ScheduleGrid({
@@ -59,6 +61,7 @@ export default function ScheduleGrid({
   blockedPlayerNames,
   fromSlot,
   liveCapacity = Number.POSITIVE_INFINITY,
+  queueAdjustment = null,
 }: ScheduleGridProps) {
   const courtHasBlockedPlayer = (court: Court) => {
     const blocked = blockedPlayerNames ?? new Set<string>();
@@ -103,8 +106,8 @@ export default function ScheduleGrid({
     completedGames: completedGames.map(game => ({ slot: game.slot, court: game.court + 1 })),
     fromSlot,
     current: currentGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
-    next: nextFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
-    future: foldedFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
+    next: nextFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
+    future: foldedFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
   });
   const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
@@ -249,6 +252,11 @@ export default function ScheduleGrid({
       {nextFutureGames.length > 0 && (
         <section style={sectionStyle}>
           <h3 style={sectionTitleStyle}>Next game</h3>
+          {queueAdjustment && (
+            <p role="status" style={{ margin: '0 0 10px', padding: '8px 10px', borderLeft: `3px solid ${C.amber}`, background: 'rgba(245,158,11,0.10)', color: C.textDim, fontSize: 12 }}>
+              Queue adjusted: {queueAdjustment.unavailablePlayers.join(', ')} {queueAdjustment.unavailablePlayers.length === 1 ? 'is' : 'are'} still playing, so the queued lineup was updated before promotion.
+            </p>
+          )}
           <div className="schedule-grid">
             {nextFutureGames.map(renderGame)}
           </div>

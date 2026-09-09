@@ -30,7 +30,9 @@ try {
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /Load defaults/ }).click();
-  await page.getByRole('button', { name: '2', exact: true }).click();
+  const courtsControl = page.getByText('Courts', { exact: true }).locator('..');
+  await courtsControl.getByRole('button', { name: '2', exact: true }).click();
+  await assert.equal(await page.getByText(/2 courts/).count(), 1, 'E2E setup should select two courts');
   await page.getByRole('button', { name: /Generate/ }).click();
   await page.waitForTimeout(700);
 
