@@ -68,9 +68,14 @@ export function useLiveQueue({
     return {
       slot: game.slot,
       court: game.court + 1,
-      players: court ? [...court.teamA, ...court.teamB].map(player => player.name) : [],
+      players: game.players ? [...game.players] : court ? [...court.teamA, ...court.teamB].map(player => player.name) : [],
     };
   }), [result]);
+
+  const snapshotGame = useCallback((slot: number, court: number): GameRef => {
+    const selected = result?.schedule.find(item => item.slot === slot)?.courts[court];
+    return { slot, court, players: selected ? [...selected.teamA, ...selected.teamB].map(player => player.name) : [] };
+  }, [result]);
 
   const firstIncomplete = useCallback((games: GameRef[], scheduleResult = result) => {
     if (!scheduleResult) return fromSlot;
@@ -312,7 +317,7 @@ export function useLiveQueue({
     const nextLiveGames = isLive
       ? liveGames.filter(game => !gameMatches(game, slotNum, court))
       : addUniqueGame(liveGames, { slot: slotNum, court });
-    const nextCompletedGames = isLive ? [...withoutCompleted, { slot: slotNum, court }] : withoutCompleted;
+    const nextCompletedGames = isLive ? [...withoutCompleted, snapshotGame(slotNum, court)] : withoutCompleted;
     liveQueueDebug('toggle', {
       clicked: { slot: slotNum, court },
       action: isLive ? 'complete' : 'start',
@@ -322,7 +327,7 @@ export function useLiveQueue({
       nextCompletedGames: describeGames(nextCompletedGames),
     });
     applyLiveGamesUpdate(nextLiveGames, slotNum, nextCompletedGames, {}, isLive ? { targetLiveCount: liveGames.length } : {});
-  }, [applyLiveGamesUpdate, completedGames, describeGames, fromSlot, getCourtsPerSlot, liveGames]);
+  }, [applyLiveGamesUpdate, completedGames, describeGames, fromSlot, getCourtsPerSlot, liveGames, snapshotGame]);
 
   const setPlayerLeaving = useCallback((index: number) => {
     const updatedPlayers = players.map((player, playerIndex) => playerIndex === index ? { ...player, leavesAt: fromSlot - 2 } : player);

@@ -95,7 +95,7 @@ export interface PlannerState {
   savedPlans: SavedPlan[];
   showSavePlan: boolean;
   saveTag: string;
-  activeTab: 'schedule' | 'archive' | 'about';
+  activeTab: 'schedule' | 'past' | 'archive' | 'about';
   editingSlot: number | null;
   editLayout: EditLayout | null;
   pendingShare: SharePayload | null;

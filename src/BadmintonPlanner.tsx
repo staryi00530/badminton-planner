@@ -15,6 +15,7 @@ import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot } from './utils/l
 import { useLiveQueue } from './hooks/useLiveQueue';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
+import PastGamesTab from './components/PastGamesTab';
 import PlayerList from './components/PlayerList';
 import ScheduleGrid from './components/ScheduleGrid';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
@@ -571,12 +572,18 @@ function BadmintonPlanner() {
 
     const nextScores: ScoresMap = { ...scores, [key]: { a: aVal, b: bVal, applied: true, teamA, teamB } };
     const nextLiveGames = liveGames.filter(lg => !(lg.slot === slot && lg.court === courtIdx));
+    const scheduledCourt = result?.schedule.find(item => item.slot === slot)?.courts[courtIdx];
+    const completedRef = {
+      slot,
+      court: courtIdx,
+      players: scheduledCourt ? [...scheduledCourt.teamA, ...scheduledCourt.teamB].map(player => player.name) : [...teamA, ...teamB],
+    };
     const nextCompletedGames = [
       ...completedGames.filter(game => !gameMatches(game, slot, courtIdx)),
-      { slot, court: courtIdx },
+      completedRef,
     ];
     applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount: liveGames.length });
-  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, scores, updateScoreBase, winLoss]);
+  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, result, scores, updateScoreBase, winLoss]);
 
   const buildCopyText = useCallback(
     (mode: 'full' | 'games') => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
@@ -797,7 +804,7 @@ function BadmintonPlanner() {
         )}
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
-          {([['schedule', 'Schedule'], ['archive', `Saved Plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How It Works']] as const).map(([val, label]) => (
+          {([['schedule', 'Schedule'], ['past', `Past games${completedGames.length ? ` (${completedGames.length})` : ''}`], ['archive', `Saved Plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How It Works']] as const).map(([val, label]) => (
             <button key={val} onClick={() => patchState({ activeTab: val })}
               style={{
                 flex: 1, background: activeTab === val ? C.accentDim : C.card, color: activeTab === val ? '#fff' : C.textDim,
@@ -812,6 +819,8 @@ function BadmintonPlanner() {
         {activeTab === 'archive' && (
           <ArchiveTab savedPlans={savedPlans} loadPlan={loadPlan} deletePlan={deletePlan} />
         )}
+
+        {activeTab === 'past' && <PastGamesTab result={result} completedGames={completedGames} scores={scores} />}
 
         {activeTab === 'about' && <AboutTab />}
 
