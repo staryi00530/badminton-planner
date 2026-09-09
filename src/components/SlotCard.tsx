@@ -99,8 +99,8 @@ export default function SlotCard({
           {editing ? (
             <span style={{ fontSize: 11, color: C.amber, fontWeight: 700, textTransform: 'uppercase' }}>Editing</span>
           ) : (
-            <button onClick={() => startSlotEdit(slot.slot)} title="Edit who plays in this slot" style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 18, padding: '6px 10px', lineHeight: 1, cursor: 'pointer', minHeight: 36, minWidth: 36 }}>
-              ✏️
+            <button onClick={() => startSlotEdit(slot.slot)} title="Edit who plays in this slot" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', color: C.textMuted, fontSize: 13, fontWeight: 700, padding: '6px 8px', lineHeight: 1, cursor: 'pointer', minHeight: 36 }}>
+              <span aria-hidden="true">✏️</span> Edit
             </button>
           )}
         </div>

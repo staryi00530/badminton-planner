@@ -254,7 +254,11 @@ export default function ScheduleGrid({
           <h3 style={sectionTitleStyle}>Next game</h3>
           {queueAdjustment && (
             <p role="status" style={{ margin: '0 0 10px', padding: '8px 10px', borderLeft: `3px solid ${C.amber}`, background: 'rgba(245,158,11,0.10)', color: C.textDim, fontSize: 12 }}>
-              Queue adjusted: {queueAdjustment.unavailablePlayers.join(', ')} {queueAdjustment.unavailablePlayers.length === 1 ? 'is' : 'are'} still playing, so the queued lineup was updated before promotion.
+              Queue adjusted: {queueAdjustment.replacements.map(({ replacee, replacer }, index) => (
+                <span key={`${replacee}-${replacer}`}>
+                  {index > 0 && ', '}<strong>{replacer}</strong> replaced <strong>{replacee}</strong>
+                </span>
+              ))} because {queueAdjustment.unavailablePlayers.length === 1 ? 'a player was' : 'players were'} still playing.
             </p>
           )}
           <div className="schedule-grid">

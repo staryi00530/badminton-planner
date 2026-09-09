@@ -45,6 +45,7 @@ export interface QueueAdjustmentNotice {
   queuedGame: { slot: number; court: number; players: string[] };
   promotedGame: { slot: number; court: number; players: string[] };
   unavailablePlayers: string[];
+  replacements: Array<{ replacee: string; replacer: string }>;
 }
 
 export function useLiveQueue({
@@ -263,10 +264,16 @@ export function useLiveQueue({
           completedGames: describeGames(nextCompletedGames, nextResult),
         });
         if (reservedQueuedGame && unavailableQueuedPlayers.length > 0) {
+          const queuedDescription = describeGames([reservedQueuedGame], result)[0]!;
+          const promotedDescription = describeGames([queuedGame], nextResult)[0]!;
+          const queuedNames = new Set(queuedDescription.players);
+          const promotedNames = new Set(promotedDescription.players);
+          const replacers = promotedDescription.players.filter(name => !queuedNames.has(name));
           setQueueAdjustment({
-            queuedGame: describeGames([reservedQueuedGame], result)[0]!,
-            promotedGame: describeGames([queuedGame], nextResult)[0]!,
+            queuedGame: queuedDescription,
+            promotedGame: promotedDescription,
             unavailablePlayers: unavailableQueuedPlayers,
+            replacements: unavailableQueuedPlayers.map((replacee, index) => ({ replacee, replacer: replacers[index] ?? 'another available player' })),
           });
         } else {
           setQueueAdjustment(null);
