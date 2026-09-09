@@ -7,7 +7,7 @@ export interface Player {
   availFrom: number;
   availTo: number;
   group?: string;
-  leavesAt?: number | null;
+  leavesAt?: number;
 }
 
 export type PlayerInGame = {

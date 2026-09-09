@@ -195,7 +195,7 @@ export function useLiveQueue({
         nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
         if (nextLiveGames.length === beforeCount) break;
         liveQueueDebug('queue:promote', {
-          promoted: describeGames([queuedGame], nextResult),
+          promotedGame: describeGames([queuedGame], nextResult)[0],
           beforeLiveGames: describeGames(nextLiveGames.slice(0, beforeCount), nextResult),
           afterLiveGames: describeGames(nextLiveGames, nextResult),
           completedGames: describeGames(nextCompletedGames, nextResult),

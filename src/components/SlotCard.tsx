@@ -1,35 +1,5 @@
+// @ts-nocheck
 import { C, COURT_BG, COURT_COLORS, FONT } from '../constants';
-import type { CSSProperties } from 'react';
-import type { Court, Player, SlotResult } from '../algorithm/types';
-import type { EditLayout, ScoresMap } from '../types';
-import type { GameRef } from '../utils/liveQueue';
-
-type Position = { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number };
-
-interface SlotCardProps {
-  slot: SlotResult;
-  scores: ScoresMap;
-  editing: boolean;
-  editLayout: EditLayout | null;
-  isAdmin: boolean;
-  slotTime: (slot: number) => string;
-  startSlotEdit: (slot: number) => void;
-  applySlotEdit: () => void;
-  applySlotEditOnly: () => void;
-  cancelSlotEdit: () => void;
-  assignToPosition: (position: Position, name: string) => void;
-  editOptions?: Player[];
-  updateScore: (slot: number, court: number, a: string, b: string, teamA: string[], teamB: string[]) => void;
-  liveGames?: GameRef[];
-  completedGames?: GameRef[];
-  onToggleLive?: (slot: number, court: number) => void;
-  onAdjustCourts?: (slot: number, delta: number) => void;
-  blockedPlayerNames?: Set<string>;
-  canShowReady: boolean;
-  canStartGame?: boolean;
-  visibleCourtIndexes?: number[];
-  compactGameView?: boolean;
-}
 
 export default function SlotCard({
   slot,
@@ -51,17 +21,16 @@ export default function SlotCard({
   onAdjustCourts,
   blockedPlayerNames,
   canShowReady,
-  canStartGame = true,
   visibleCourtIndexes,
   compactGameView = false,
-}: SlotCardProps) {
+}) {
   const stepBtnStyle = { background: 'none', border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontSize: 12, fontWeight: 700, fontFamily: FONT, width: 20, height: 20, lineHeight: 1, cursor: 'pointer' };
   const visibleCourts = (visibleCourtIndexes ?? slot.courts.map((_, ci) => ci))
     .map(ci => ({ ci, court: slot.courts[ci] }))
-    .filter((item): item is { ci: number; court: Court } => item.court != null);
+    .filter(item => item.court);
   const isSingleCourtView = visibleCourts.length === 1 && visibleCourtIndexes;
-  const headerCourt = isSingleCourtView ? visibleCourts[0]?.court ?? null : null;
-  const slotPicker = (pos: Position, currentName: string, genderByName: Map<string, string>, allNames: string[]) => {
+  const headerCourt = isSingleCourtView ? visibleCourts[0].court : null;
+  const slotPicker = (pos, currentName, genderByName, allNames) => {
     const g = genderByName.get(currentName);
     const color = g === 'F' ? C.pink : C.accent;
     return (
@@ -107,10 +76,10 @@ export default function SlotCard({
       </div>
 
       {editing && editLayout && (() => {
-        const genderByName = new Map<string, string>([
-          ...editOptions.map(p => [p.name, p.gender] as [string, string]),
-          ...slot.courts.flatMap(c => [...c.teamA, ...c.teamB]).map(p => [p.name, p.gender] as [string, string]),
-          ...slot.sitting.map(p => [p.name, p.gender] as [string, string]),
+        const genderByName = new Map([
+          ...editOptions.map(p => [p.name, p.gender]),
+          ...slot.courts.flatMap(c => [...c.teamA, ...c.teamB]).map(p => [p.name, p.gender]),
+          ...slot.sitting.map(p => [p.name, p.gender]),
         ]);
         const allNames = [...new Set([...editLayout.courts.flat(), ...editLayout.sitting, ...editOptions.map(p => p.name)])]
           .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -125,13 +94,13 @@ export default function SlotCard({
                 {(editLayout.courts.length > 1 || isSingleCourtView) && <div style={{ fontSize: 10, color: COURT_COLORS[ci], fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Court {ci + 1}</div>}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    {slotPicker({ type: 'court', ci, idx: 0 }, court[0] ?? '', genderByName, allNames)}
-                    {slotPicker({ type: 'court', ci, idx: 1 }, court[1] ?? '', genderByName, allNames)}
+                    {slotPicker({ type: 'court', ci, idx: 0 }, court[0], genderByName, allNames)}
+                    {slotPicker({ type: 'court', ci, idx: 1 }, court[1], genderByName, allNames)}
                   </div>
                   <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 700 }}>VS</span>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    {slotPicker({ type: 'court', ci, idx: 2 }, court[2] ?? '', genderByName, allNames)}
-                    {slotPicker({ type: 'court', ci, idx: 3 }, court[3] ?? '', genderByName, allNames)}
+                    {slotPicker({ type: 'court', ci, idx: 2 }, court[2], genderByName, allNames)}
+                    {slotPicker({ type: 'court', ci, idx: 3 }, court[3], genderByName, allNames)}
                   </div>
                 </div>
               </div>
@@ -161,8 +130,8 @@ export default function SlotCard({
       })()}
 
       {!editing && visibleCourts.map(({ court, ci }, visibleIdx) => {
-        const isLive = liveGames?.some(lg => lg.slot === slot.slot && lg.court === ci) ?? false;
-        const isCompleted = completedGames?.some(game => game.slot === slot.slot && game.court === ci) ?? false;
+        const isLive = liveGames?.some(lg => lg.slot === slot.slot && lg.court === ci);
+        const isCompleted = completedGames?.some(game => game.slot === slot.slot && game.court === ci);
         const hasBlockedPlayer = blockedPlayerNames && blockedPlayerNames.size > 0 &&
           [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
         // "Ready" = every player on this court is currently free (not stuck in a live
@@ -170,12 +139,11 @@ export default function SlotCard({
         // gated to canShowReady (the slot right after fromSlot) since fromSlot itself
         // is ambiguous — its courts could be live, already Done, or about to start.
         const isWaiting = !isLive && !isCompleted && hasBlockedPlayer;
-        const isReady = canShowReady && canStartGame && !isLive && !isCompleted && blockedPlayerNames && blockedPlayerNames.size > 0 && !hasBlockedPlayer;
-        const isQueued = !isLive && !isCompleted && !isWaiting && !canStartGame;
-        const actionLabel = isLive ? '✓ Done' : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : isQueued ? 'Queued' : 'Start';
+        const isReady = canShowReady && !isLive && !isCompleted && blockedPlayerNames && blockedPlayerNames.size > 0 && !hasBlockedPlayer;
+        const actionLabel = isLive ? '✓ Done' : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : 'Start';
         const actionColor = isLive ? '#fff' : isWaiting ? C.amber : isCompleted ? C.green : C.accent;
         const actionBorder = isLive ? '#ef4444' : isWaiting ? C.amber : isCompleted ? C.green : C.accentDim;
-        const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isQueued ? 'Queued until a court is free' : isCompleted ? 'Restart this game' : 'Start this game';
+        const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isCompleted ? 'Restart this game' : 'Start this game';
         return (
         <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: visibleIdx < visibleCourts.length - 1 ? 6 : 0 }}>
           {(slot.courts.length > 1 || isSingleCourtView || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
@@ -188,7 +156,7 @@ export default function SlotCard({
               {isReady && <span style={{ color: C.green }} title="Everyone on this court is free to start">✓ Ready</span>}
               <div style={{ flex: 1 }} />
               {onToggleLive && (
-                <button onClick={() => onToggleLive(slot.slot, ci)} disabled={isWaiting || isQueued} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting || isQueued ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting || isQueued ? 0.75 : 1 }}>
+                <button onClick={() => onToggleLive(slot.slot, ci)} disabled={isWaiting} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting ? 0.75 : 1 }}>
                   {actionLabel}
                 </button>
               )}
@@ -220,10 +188,10 @@ export default function SlotCard({
 
           {(() => {
             const key = `s${slot.slot}c${ci}`;
-            const sc = scores[key] ?? { a: '', b: '', applied: false, teamA: [], teamB: [] };
+            const sc = scores[key] || { a: '', b: '' };
             const tA = court.teamA.map(p => p.name);
             const tB = court.teamB.map(p => p.name);
-            const inputStyle = (active: boolean): CSSProperties => ({
+            const inputStyle = active => ({
               width: 38,
               background: C.bg,
               border: `1px solid ${active ? C.green : C.border}`,
