@@ -92,6 +92,17 @@ describe('ScheduleGrid grouping', () => {
     expect(screen.queryByText(/Past games/)).not.toBeInTheDocument();
   });
 
+  it('does not show a completed out-of-order game as Next', () => {
+    renderGrid({
+      liveGames: [{ slot: 1, court: 1 }, { slot: 3, court: 0 }],
+      completedGames: [{ slot: 1, court: 0 }, { slot: 2, court: 0 }],
+      fromSlot: 1,
+    });
+
+    expectInSection('Next game', /SLOT 2 .* COURT 2/);
+    expect(screen.queryByText(/SLOT 2 .* COURT 1/)).not.toBeInTheDocument();
+  });
+
   it('shows compact court statuses for live and waiting courts', () => {
     renderGrid({ liveGames: [{ slot: 1, court: 0 }], blockedPlayerNames: new Set(['A112']) });
 

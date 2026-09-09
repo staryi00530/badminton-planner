@@ -66,6 +66,7 @@ export default function ScheduleGrid({
   };
   const isCourtCompleted = (slot: SlotResult, ci: number) => completedGames.some(game => gameMatches(game, slot.slot, ci));
   const gameKey = (slotNum: number, courtIdx: number) => `${slotNum}:${courtIdx}`;
+  const completedKeys = new Set(completedGames.map(game => gameKey(game.slot, game.court)));
   const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot, completedGames));
   const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot, completedGames));
   const liveGameRefs = (liveGames ?? [])
@@ -87,7 +88,7 @@ export default function ScheduleGrid({
     .flatMap(slot => slot.courts.map((_, ci) => ({ slot, court: ci })))
     .filter(ref =>
       ref.slot.slot >= queueStartSlot &&
-      !isCourtCompleted(ref.slot, ref.court) &&
+      !completedKeys.has(gameKey(ref.slot.slot, ref.court)) &&
       !currentGameKeys.has(gameKey(ref.slot.slot, ref.court))
     );
   const nextFutureSlot = upcomingGameRefs[0]?.slot.slot;
