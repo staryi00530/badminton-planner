@@ -72,7 +72,7 @@ function BadmintonPlanner() {
   const { state, setField, patchState } = usePlannerState();
   const scheduleRef = useRef<HTMLDivElement | null>(null);
   const [debugQueueEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage?.getItem('bp-debug-live-queue') === 'true');
-  const [privateLevelsVisible, setPrivateLevelsVisible] = useState(true);
+  const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
   const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
 
   const {
