@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { DEFAULT_PLAYERS } from '../constants';
 
 /** Roster + player-bank management: adding/removing players, bulk-adding from the bank, editing fields. */
-export function usePlayerRoster({ players, playerHistory, nameInput, genderInput, totalSlots, patchState }) {
+export function usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, patchState }) {
   const loadDefaults = useCallback(() => {
     const existing = new Set(players.map(p => p.name.toLowerCase()));
     const toAdd = DEFAULT_PLAYERS.filter(p => !existing.has(p.name.toLowerCase()));
@@ -29,17 +29,17 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     const name = nameInput.trim();
     if (!name || players.find(p => p.name.toLowerCase() === name.toLowerCase())) return;
     patchState({
-      players: [...players, { name, gender: genderInput, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }],
+      players: [...players, { name, gender: genderInput, level: levelInput, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }],
       nameInput: '',
     });
-  }, [genderInput, nameInput, players, totalSlots]);
+  }, [genderInput, levelInput, nameInput, players, totalSlots]);
 
   const addSelectedFromBank = useCallback((entries) => {
     const existing = new Set(players.map(p => p.name.toLowerCase()));
     const toAdd = entries.filter(e => !existing.has(e.name.toLowerCase()));
     if (toAdd.length === 0) return;
     patchState({
-      players: [...players, ...toAdd.map(e => ({ name: e.name, gender: e.gender, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }))],
+      players: [...players, ...toAdd.map(e => ({ name: e.name, gender: e.gender, level: e.level ?? 2, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }))],
     });
   }, [players, totalSlots]);
 

@@ -3,7 +3,7 @@ import { C, DEFAULT_PLAYERS, FONT } from '../constants';
 import type { Player, StaggerMode, WinLossMap } from '../types';
 import { sortPlayerIndicesForDisplay } from '../utils/sortPlayers';
 
-type PlayerField = 'name' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
+type PlayerField = 'name' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
 type PlayerFieldValue = string | number | null;
 
 interface PlayerListProps {
@@ -14,9 +14,12 @@ interface PlayerListProps {
   totalSlots: number;
   nameInput: string;
   genderInput: 'M' | 'F';
+  levelInput?: 1 | 2 | 3;
   allDefaultsLoaded: boolean;
+  showPrivateFields?: boolean;
   setNameInput: (value: string) => void;
   setGenderInput: (value: 'M' | 'F') => void;
+  setLevelInput?: (value: 1 | 2 | 3) => void;
   addPlayer: () => void;
   addSelectedFromBank: (entries: Array<Pick<Player, 'name' | 'gender'>>) => void;
   addToBank: (name: string, gender: 'M' | 'F') => void;
@@ -55,9 +58,12 @@ export default function PlayerList({
   totalSlots,
   nameInput,
   genderInput,
+  levelInput = 2,
   allDefaultsLoaded,
+  showPrivateFields = true,
   setNameInput,
   setGenderInput,
+  setLevelInput = () => {},
   addPlayer,
   addSelectedFromBank,
   addToBank,
@@ -154,6 +160,12 @@ export default function PlayerList({
             </button>
           ))}
         </div>
+        {showPrivateFields && <div title="Private level used for balancing" style={{ display: 'flex', alignItems: 'center', gap: 3, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 4px' }}>
+          <span style={{ fontSize: 10, color: C.textMuted, padding: '0 3px' }}>Level</span>
+          {([1, 2, 3] as const).map(level => (
+            <button key={level} onClick={() => setLevelInput(level)} style={{ background: levelInput === level ? C.accentDim : 'transparent', color: levelInput === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 4, padding: '5px 7px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>{level}</button>
+          ))}
+        </div>}
         <button onClick={addPlayer} style={{ background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '10px 18px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}>
           ADD
         </button>
@@ -278,6 +290,12 @@ export default function PlayerList({
                   style={{ color: p.gender === 'F' ? C.pink : C.accent, fontWeight: 700, fontSize: 14, minWidth: 70, cursor: 'text' }}>{p.name}</span>
               )}
               <span style={{ fontSize: 11, color: C.textDim }}>{p.gender === 'F' ? '♀' : '♂'}</span>
+              {showPrivateFields && <div title="Private balancing level" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <span style={{ fontSize: 10, color: C.textMuted }}>L</span>
+                {([1, 2, 3] as const).map(level => (
+                  <button key={level} onClick={() => updatePlayer(i, 'level', level)} style={{ background: (p.level ?? 2) === level ? C.accentDim : 'transparent', color: (p.level ?? 2) === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 3, padding: '2px 4px', fontSize: 10, fontWeight: 700, fontFamily: FONT }}>{level}</button>
+                ))}
+              </div>}
               {winLoss[p.name] && (() => {
                 const record = winLoss[p.name];
                 return !!record && record.wins + record.losses > 0;

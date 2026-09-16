@@ -78,6 +78,7 @@ function BadmintonPlanner() {
     playerHistory,
     nameInput,
     genderInput,
+    levelInput,
     totalMinutes,
     gameMinutes,
     numCourts,
@@ -142,7 +143,7 @@ function BadmintonPlanner() {
     removeFromHistory,
     removePlayer,
     updatePlayer,
-  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, totalSlots, patchState });
+  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, patchState });
   const { dbSynced, computeSkill, updateScore: updateScoreBase, clearWinLoss } = useWinLossSync({ winLoss, scores, isAdmin, patchState });
 
   useEffect(() => {
@@ -151,7 +152,7 @@ function BadmintonPlanner() {
     const newOnes = players.filter(p => !known.has(p.name.toLowerCase()));
     if (newOnes.length === 0) return;
     patchState({
-      playerHistory: [...playerHistory, ...newOnes.map(p => ({ name: p.name, gender: p.gender }))],
+      playerHistory: [...playerHistory, ...newOnes.map(p => ({ name: p.name, gender: p.gender, level: p.level }))],
     });
   }, [players]);
 
@@ -273,7 +274,7 @@ function BadmintonPlanner() {
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
     patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
+    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, { preferMixedTeams });
     let lastValue: GeneratorYield | null = null;
     function step() {
@@ -299,7 +300,7 @@ function BadmintonPlanner() {
 
   const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
     if (players.length < 4 || !result) return;
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
+    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const keptSlots = result.schedule.slice(0, targetFromSlot - 1);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const courtsArr = getCourtsPerSlot();
@@ -381,10 +382,13 @@ function BadmintonPlanner() {
     const basePlayers = overridePlayers ?? players;
     const targetSlotIdx = targetFromSlot - 1;
     const sourceWinLoss = overrideWinLoss ?? winLoss;
-    const skillFor = (name: string) => {
+    const skillFor = (name: string, level?: 1 | 2 | 3) => {
       const wl = sourceWinLoss[name];
-      if (!wl || wl.wins + wl.losses === 0) return 0.5;
-      return wl.wins / (wl.wins + wl.losses);
+      const games = (wl?.wins ?? 0) + (wl?.losses ?? 0);
+      if (level == null) return games === 0 ? 0.5 : wl!.wins / games;
+      const prior = (level - 1) / 2;
+      if (games === 0) return prior;
+      return (prior * 3 + (wl!.wins / games) * games) / (3 + games);
     };
     const playersWithSkill = applyAvailability(basePlayers).map(p => {
       const shouldBlock =
@@ -393,7 +397,7 @@ function BadmintonPlanner() {
         targetSlotIdx <= p.availTo;
       return {
         ...p,
-        skill: skillFor(p.name),
+        skill: skillFor(p.name, p.level),
         ...(shouldBlock ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}),
       };
     });
@@ -505,7 +509,7 @@ function BadmintonPlanner() {
   const applySlotEdit = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
     const slotIdx = editingSlot - 1;
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
+    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const keptSlots = result.schedule.slice(0, slotIdx);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const nameToIdx = new Map(playersWithSkill.map((p, i) => [p.name, i]));
@@ -857,9 +861,12 @@ function BadmintonPlanner() {
           totalSlots={totalSlots}
           nameInput={nameInput}
           genderInput={genderInput}
+          levelInput={levelInput}
           allDefaultsLoaded={allDefaultsLoaded}
+          showPrivateFields={!isSharedSession}
           setNameInput={value => setField('nameInput', value)}
           setGenderInput={value => setField('genderInput', value)}
+          setLevelInput={value => setField('levelInput', value)}
           addPlayer={addPlayer}
           addSelectedFromBank={addSelectedFromBank}
           addToBank={addToBank}

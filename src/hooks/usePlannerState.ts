@@ -56,6 +56,7 @@ function createInitialState(): PlannerState {
     playerHistory: loadState(STORAGE_KEYS.playerHistory, []),
     nameInput: '',
     genderInput: 'M',
+    levelInput: 2,
     totalMinutes: loadState(STORAGE_KEYS.totalMinutes, DEFAULT_TOTAL_MINUTES),
     gameMinutes: loadState(STORAGE_KEYS.gameMinutes, DEFAULT_GAME_MINUTES),
     numCourts: loadState(STORAGE_KEYS.numCourts, 1),

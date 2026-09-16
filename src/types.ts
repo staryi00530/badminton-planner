@@ -67,9 +67,10 @@ export interface SharePayload {
 
 export interface PlannerState {
   players: Player[];
-  playerHistory: Array<Pick<Player, 'name' | 'gender'>>;
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   nameInput: string;
   genderInput: 'M' | 'F';
+  levelInput: 1 | 2 | 3;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;
@@ -119,7 +120,7 @@ export interface PlannerState {
 
 export interface PlannerPersistedState {
   players: Player[];
-  playerHistory: Array<Pick<Player, 'name' | 'gender'>>;
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;

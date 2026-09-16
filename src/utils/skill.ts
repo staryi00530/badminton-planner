@@ -1,6 +1,9 @@
-/** A player's current skill rating: their win rate, defaulting to 0.5 with no recorded games. */
-export function computeSkill(name: string, winLoss: Record<string, { wins: number; losses: number }>): number {
+/** A player's rating: a private 1-3 level is used as a prior, then results refine it. */
+export function computeSkill(name: string, winLoss: Record<string, { wins: number; losses: number }>, level?: 1 | 2 | 3): number {
   const wl = winLoss[name];
-  if (!wl || wl.wins + wl.losses === 0) return 0.5;
-  return wl.wins / (wl.wins + wl.losses);
+  const games = (wl?.wins ?? 0) + (wl?.losses ?? 0);
+  if (level == null) return games === 0 ? 0.5 : wl!.wins / games;
+  const prior = (level - 1) / 2;
+  if (games === 0) return prior;
+  return (prior * 3 + (wl!.wins / games) * games) / (3 + games);
 }
