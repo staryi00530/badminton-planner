@@ -95,6 +95,21 @@ describe('Level balancing', () => {
       }
     }
   });
+
+  it('separates level-1 and level-3 players onto different courts when possible', () => {
+    const players = makePlayers(8).map((player, index) => ({
+      ...player,
+      level: (index < 4 ? 1 : 3) as 1 | 3,
+    }));
+    for (let seed = 1; seed <= 10; seed++) {
+      const result = generateSchedule(players, 1, [2], 0, null, null, {}, seededRng(seed));
+      expect(result).not.toBeNull();
+      for (const court of result!.schedule[0]!.courts) {
+        const levels = [...court.teamA, ...court.teamB].map(player => players.find(p => p.name === player.name)!.level!);
+        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
 });
 
 describe('Availability windows respected', () => {
