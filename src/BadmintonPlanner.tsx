@@ -12,6 +12,7 @@ import { applyAvailability as applyAvailabilityUtil } from './utils/availability
 import { formatSlotTime } from './utils/slotTime';
 import { isValidBadmintonScore } from './utils/scoreValidation';
 import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot } from './utils/liveQueue';
+import type { GameRef } from './utils/liveQueue';
 import { useLiveQueue } from './hooks/useLiveQueue';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
@@ -54,6 +55,17 @@ function copyText(text: string, onCopied?: () => void) {
     onCopied?.();
   } catch {}
   document.body.removeChild(ta);
+}
+
+function courtLineup(result: PlannerResult, game: GameRef) {
+  const court = result.schedule.find(slot => slot.slot === game.slot)?.courts[game.court];
+  return court ? [...court.teamA, ...court.teamB].map(player => player.name).sort().join('|') : '';
+}
+
+function preserveUnchangedGamesAtEditedSlot(games: GameRef[], before: PlannerResult, after: PlannerResult, editedSlot: number) {
+  return games.filter(game =>
+    game.slot < editedSlot || (game.slot === editedSlot && courtLineup(before, game) === courtLineup(after, game))
+  );
 }
 
 function BadmintonPlanner() {
@@ -509,8 +521,8 @@ function BadmintonPlanner() {
     patchState({
       result: newResult,
       scores: nextScores,
-      liveGames: keepGamesBeforeSlot(liveGames, editingSlot),
-      completedGames: keepGamesBeforeSlot(completedGames, editingSlot),
+      liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, newResult, editingSlot),
+      completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot),
       editingSlot: null,
       editLayout: null,
       copied: false,
@@ -535,8 +547,8 @@ function BadmintonPlanner() {
     const { schedule: newSchedule, gamesPlayed } = recomputeStats(newScheduleRaw, players);
     patchState({
       result: { schedule: newSchedule, gamesPlayed },
-      liveGames: keepGamesBeforeSlot(liveGames, editingSlot),
-      completedGames: keepGamesBeforeSlot(completedGames, editingSlot),
+      liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
+      completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
       editingSlot: null,
       editLayout: null,
       copied: false,

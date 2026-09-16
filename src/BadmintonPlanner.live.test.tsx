@@ -190,6 +190,24 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('keeps an unaffected live court running when another court is edited', async () => {
+    const user = userEvent.setup();
+    render(<BadmintonPlanner />);
+
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    const current = sectionFor('Current game');
+    await user.click(within(current).getAllByTitle('Edit who plays in this slot')[0]);
+    const editors = screen.getAllByRole('combobox');
+    await user.selectOptions(editors[0]!, 'P9');
+    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
+
+    await waitFor(() => {
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
+      expect(within(sectionFor('Current game')).getByText(/SLOT 1 .* COURT 2/)).toBeInTheDocument();
+    });
+  });
+
   it('skips a player from the immediate next selection and clears the skip after regeneration', async () => {
     const user = userEvent.setup();
     const players = ['SkipMe', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11', 'P12'].map(makePlayer);
