@@ -72,6 +72,8 @@ function BadmintonPlanner() {
   const { state, setField, patchState } = usePlannerState();
   const scheduleRef = useRef<HTMLDivElement | null>(null);
   const [debugQueueEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage?.getItem('bp-debug-live-queue') === 'true');
+  const [privateLevelsVisible, setPrivateLevelsVisible] = useState(true);
+  const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
 
   const {
     players,
@@ -133,6 +135,12 @@ function BadmintonPlanner() {
   const allDefaultsLoaded = DEFAULT_PLAYERS.every(dp => players.some(p => p.name.toLowerCase() === dp.name.toLowerCase()));
 
   const { isAdmin, submitPin, toggleAdminLock } = useAdminAuth({ pinInput, patchState });
+  useEffect(() => {
+    if (isAdmin && privateLevelUnlockRequested) {
+      setPrivateLevelsVisible(true);
+      setPrivateLevelUnlockRequested(false);
+    }
+  }, [isAdmin, privateLevelUnlockRequested]);
   const {
     loadDefaults,
     resetPlayers,
@@ -803,6 +811,17 @@ function BadmintonPlanner() {
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
             {debugQueueEnabled && <button onClick={exportDebugLogs} title="Download live queue debug logs" aria-label="Export debug logs" style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}><LucideIcon name="download" size={13} /> Debug</button>}
+            {!isSharedSession && <button onClick={() => {
+              if (privateLevelsVisible) {
+                setPrivateLevelsVisible(false);
+                return;
+              }
+              setPrivateLevelUnlockRequested(true);
+              if (isAdmin) setPrivateLevelsVisible(true);
+              else toggleAdminLock();
+            }} title={privateLevelsVisible ? 'Hide private level controls' : 'Unlock private level controls with the admin PIN'} style={{ background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}>
+              {privateLevelsVisible ? 'Hide levels' : 'Unlock levels'}
+            </button>}
             {isFirebaseConfigured() && <span title={dbSynced === 'synced' ? 'Win-loss synced to cloud' : dbSynced === 'syncing' ? 'Syncing…' : dbSynced === 'error' ? 'Sync failed' : 'Cloud sync ready'} style={{ fontSize: 13, color: dbSynced === 'synced' ? C.green : dbSynced === 'error' ? '#ef4444' : C.textMuted }}>{dbSynced === 'synced' ? '☁ Synced' : dbSynced === 'syncing' ? '⟳' : dbSynced === 'error' ? '☁ ✗' : '☁'}</span>}
             {window.ADMIN_PIN && (
               <button onClick={toggleAdminLock} title={isAdmin ? 'Click to lock score entry' : 'Click to unlock score entry'} style={{ background: isAdmin ? C.accentDim : C.card, color: isAdmin ? '#fff' : C.textMuted, border: `1px solid ${isAdmin ? 'transparent' : C.border}`, borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, fontFamily: FONT }}>
@@ -863,7 +882,7 @@ function BadmintonPlanner() {
           genderInput={genderInput}
           levelInput={levelInput}
           allDefaultsLoaded={allDefaultsLoaded}
-          showPrivateFields={!isSharedSession}
+          showPrivateFields={!isSharedSession && privateLevelsVisible}
           setNameInput={value => setField('nameInput', value)}
           setGenderInput={value => setField('genderInput', value)}
           setLevelInput={value => setField('levelInput', value)}

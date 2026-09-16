@@ -79,6 +79,24 @@ describe('Equal games', () => {
   });
 });
 
+describe('Level balancing', () => {
+  it('avoids putting level-1 and level-3 players on the same team when possible', () => {
+    const players = makePlayers(4).map((player, index) => ({
+      ...player,
+      level: (index < 2 ? 1 : 3) as 1 | 3,
+    }));
+    for (let seed = 1; seed <= 10; seed++) {
+      const result = generateSchedule(players, 1, [1], 0, null, null, {}, seededRng(seed));
+      expect(result).not.toBeNull();
+      const court = result!.schedule[0]!.courts[0]!;
+      for (const team of [court.teamA, court.teamB]) {
+        const levels = team.map(player => players.find(p => p.name === player.name)!.level!);
+        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
 describe('Availability windows respected', () => {
   it('player with availTo: 4 never appears after slot 5 (0-indexed slot 4)', () => {
     for (let seed = 1; seed <= 20; seed++) {

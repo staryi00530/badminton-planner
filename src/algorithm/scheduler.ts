@@ -412,6 +412,11 @@ export function* generateScheduleGen(
         const skillA = (players[tA[0]]!.skill ?? 0.5) + (players[tA[1]]!.skill ?? 0.5);
         const skillB = (players[tB[0]]!.skill ?? 0.5) + (players[tB[1]]!.skill ?? 0.5);
         score += Math.abs(skillA - skillB) * 2;
+        // Keep a level-1 and level-3 player from being teammates where another
+        // pairing is available. A one-level difference is acceptable; larger
+        // gaps are penalized softly so hard availability/format constraints win.
+        const teamLevelGap = (team: [number, number]) => Math.max(0, Math.abs((players[team[0]]!.level ?? 2) - (players[team[1]]!.level ?? 2)) - 1);
+        score += (teamLevelGap(tA) + teamLevelGap(tB)) * 12;
         score += rng() * 1.5;
         if (score < bestScore) {
           bestScore = score;
