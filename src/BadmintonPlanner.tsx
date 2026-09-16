@@ -819,8 +819,8 @@ function BadmintonPlanner() {
               setPrivateLevelUnlockRequested(true);
               if (isAdmin) setPrivateLevelsVisible(true);
               else toggleAdminLock();
-            }} title={privateLevelsVisible ? 'Hide private level controls' : 'Unlock private level controls with the admin PIN'} style={{ background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}>
-              {privateLevelsVisible ? 'Hide levels' : 'Unlock levels'}
+            }} title={privateLevelsVisible ? 'Exit admin view' : 'Open admin view with the admin PIN'} style={{ background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}>
+              {privateLevelsVisible ? 'Exit admin view' : 'Admin view'}
             </button>}
             {isFirebaseConfigured() && <span title={dbSynced === 'synced' ? 'Win-loss synced to cloud' : dbSynced === 'syncing' ? 'Syncing…' : dbSynced === 'error' ? 'Sync failed' : 'Cloud sync ready'} style={{ fontSize: 13, color: dbSynced === 'synced' ? C.green : dbSynced === 'error' ? '#ef4444' : C.textMuted }}>{dbSynced === 'synced' ? '☁ Synced' : dbSynced === 'syncing' ? '⟳' : dbSynced === 'error' ? '☁ ✗' : '☁'}</span>}
             {window.ADMIN_PIN && (
