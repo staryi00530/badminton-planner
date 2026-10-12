@@ -33,13 +33,13 @@ describe('computeCourtsPerSlot', () => {
     expect(result).toEqual([1, 2]);
   });
 
-  it('caps the total at 4 courts even if numCourts + extra exceeds it', () => {
+  it('caps the total at 5 courts even if numCourts + extra exceeds it', () => {
     const result = computeCourtsPerSlot({
       totalSlots: 1,
       gameMinutes: 15,
-      numCourts: 4,
+      numCourts: 5,
       extraCourt: { enabled: true, startMin: 0, durationMin: 15 },
     });
-    expect(result).toEqual([4]);
+    expect(result).toEqual([5]);
   });
 });

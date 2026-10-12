@@ -88,6 +88,7 @@ function BadmintonPlanner() {
     staggerMode,
     sessionStart,
     result,
+    scheduleDirty,
     scores,
     winLoss,
     fromSlot,
@@ -151,7 +152,7 @@ function BadmintonPlanner() {
     removeFromHistory,
     removePlayer,
     updatePlayer,
-  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, patchState });
+  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, scheduleActive: Boolean(result), patchState });
   const { dbSynced, computeSkill, updateScore: updateScoreBase, clearWinLoss } = useWinLossSync({ winLoss, scores, isAdmin, patchState });
 
   useEffect(() => {
@@ -268,7 +269,7 @@ function BadmintonPlanner() {
       patchState({ importError: 'Could not parse schedule — paste the full copied text.' });
       return;
     }
-    patchState({ result: parsed, scores: {}, showImport: false, importText: '', importError: '', isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
+    patchState({ result: parsed, scheduleDirty: false, scores: {}, showImport: false, importText: '', importError: '', isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, [importText, parseScheduleText]);
 
   const importSchedule = useCallback(() => {
@@ -281,7 +282,7 @@ function BadmintonPlanner() {
 
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
-    patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
+    patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, { preferMixedTeams });
     let lastValue: GeneratorYield | null = null;
@@ -291,7 +292,7 @@ function BadmintonPlanner() {
         lastValue = value;
         patchState({ genSlot: value.schedule.length });
       }
-      if (done) patchState({ result: lastValue, isGenerating: false });
+      if (done) patchState({ result: lastValue, scheduleDirty: false, isGenerating: false });
       else requestAnimationFrame(step);
     }
     requestAnimationFrame(step);
@@ -324,6 +325,7 @@ function BadmintonPlanner() {
     }
     patchState({
       result: newResult,
+      scheduleDirty: false,
       scores: nextScores,
       copied: false,
       isConfirmed: false,
@@ -358,7 +360,7 @@ function BadmintonPlanner() {
     const current = slotData ? slotData.courts.length : 0;
     // Never land on 0: fromSlotCourts===0 means "auto" (fall back to the settings-based
     // count), a different concept from "no courts" — keep the stepper's floor at 1.
-    const next = Math.max(1, Math.min(4, current + delta));
+    const next = Math.max(1, Math.min(5, current + delta));
     if (next === current) return;
     if (isConfirmed) {
       patchState({ fromSlot: slotNum, fromSlotCourts: next, pendingOverwrite: 'regenerateRemaining' });
@@ -368,7 +370,7 @@ function BadmintonPlanner() {
   }, [isConfirmed, result, runRegenerateFromSlotWithCourts]);
 
   const runClearSchedule = useCallback(() => {
-    patchState({ result: null, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
+    patchState({ result: null, scheduleDirty: false, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, []);
 
   const clearSchedule = useCallback(() => {
@@ -532,6 +534,7 @@ function BadmintonPlanner() {
     }
     patchState({
       result: newResult,
+      scheduleDirty: false,
       scores: nextScores,
       liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, newResult, editingSlot),
       completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot),
@@ -559,6 +562,7 @@ function BadmintonPlanner() {
     const { schedule: newSchedule, gamesPlayed } = recomputeStats(newScheduleRaw, players);
     patchState({
       result: { schedule: newSchedule, gamesPlayed },
+      scheduleDirty: false,
       liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
       completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
       editingSlot: null,
@@ -691,7 +695,7 @@ function BadmintonPlanner() {
   }, [buildSharePayload, isSharedSession, loadedPlanId, result, saveTag, savedPlans, shareId]);
 
   const loadPlan = useCallback((plan: SavedPlan) => {
-    patchState({ result: plan.result, scores: {}, activeTab: 'schedule', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
+    patchState({ result: plan.result, scheduleDirty: false, scores: {}, activeTab: 'schedule', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, []);
 
   const deletePlan = useCallback((id: number) => {
@@ -940,11 +944,12 @@ function BadmintonPlanner() {
 
         {result && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
+            {scheduleDirty && <span style={{ width: '100%', color: C.amber, fontSize: 12 }}>Roster changed — choose the first affected slot below, then apply regeneration to update the remaining schedule.</span>}
             <span style={{ fontSize: 12, color: C.textDim }}>Re-generate from slot</span>
             <input type="number" min={1} max={totalSlots} value={fromSlot} onChange={e => patchState({ fromSlot: Math.min(totalSlots, Math.max(1, +e.target.value)) })} style={{ width: 48, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', color: C.text, fontSize: 13, fontFamily: FONT, textAlign: 'center' }} />
             <span style={{ fontSize: 12, color: C.textDim }}>with</span>
             <div style={{ display: 'flex', gap: 4 }}>
-              {[0, 1, 2, 3, 4].map(n => (
+              {[0, 1, 2, 3, 4, 5].map(n => (
                 <button key={n} onClick={() => patchState({ fromSlotCourts: n })} style={{ padding: '4px 8px', fontSize: 12, fontWeight: 600, fontFamily: FONT, borderRadius: 4, border: `1px solid ${fromSlotCourts === n ? C.accent : C.border}`, background: fromSlotCourts === n ? C.accentDim : C.bg, color: fromSlotCourts === n ? '#fff' : C.textDim, cursor: 'pointer' }}>{n === 0 ? 'auto' : `${n}C`}</button>
               ))}
             </div>

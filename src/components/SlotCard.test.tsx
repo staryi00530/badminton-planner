@@ -71,8 +71,8 @@ describe('SlotCard — per-slot court stepper', () => {
     expect(handlers.onAdjustCourts).toHaveBeenCalledWith(1, -1);
   });
 
-  it('disables + at 4 courts (the app max)', () => {
-    renderSlotCard(makeSlot(4));
+  it('disables + at 5 courts (the app max)', () => {
+    renderSlotCard(makeSlot(5));
     expect(screen.getByTitle(/Add a court/)).toBeDisabled();
   });
 

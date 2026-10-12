@@ -136,7 +136,8 @@ describe('BadmintonPlanner live game flow', () => {
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
     });
-    expect(within(sectionFor('Next game')).getByRole('button', { name: 'Queued' })).toBeDisabled();
+    expect(within(sectionFor('Next game')).getAllByRole('button', { name: 'Queued' }).length).toBeGreaterThan(0);
+    expect(within(sectionFor('Next game')).getAllByRole('button', { name: 'Queued' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
   });
 
   it('fills a freed court from the next playable queued game even when the same court index disappears', async () => {

@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { DEFAULT_PLAYERS } from '../constants';
 
 /** Roster + player-bank management: adding/removing players, bulk-adding from the bank, editing fields. */
-export function usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, patchState }) {
+export function usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, scheduleActive, patchState }) {
   const loadDefaults = useCallback(() => {
     const existing = new Set(players.map(p => p.name.toLowerCase()));
     const toAdd = DEFAULT_PLAYERS.filter(p => !existing.has(p.name.toLowerCase()));
@@ -31,8 +31,9 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     patchState({
       players: [...players, { name, gender: genderInput, level: levelInput, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }],
       nameInput: '',
+      ...(scheduleActive ? { scheduleDirty: true } : {}),
     });
-  }, [genderInput, levelInput, nameInput, players, totalSlots]);
+  }, [genderInput, levelInput, nameInput, players, scheduleActive, totalSlots]);
 
   const addSelectedFromBank = useCallback((entries) => {
     const existing = new Set(players.map(p => p.name.toLowerCase()));
@@ -40,8 +41,9 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     if (toAdd.length === 0) return;
     patchState({
       players: [...players, ...toAdd.map(e => ({ name: e.name, gender: e.gender, level: e.level ?? 2, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }))],
+      ...(scheduleActive ? { scheduleDirty: true } : {}),
     });
-  }, [players, totalSlots]);
+  }, [players, scheduleActive, totalSlots]);
 
   const addToBank = useCallback((name, gender) => {
     const trimmed = name.trim();
@@ -54,15 +56,15 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
   }, [playerHistory]);
 
   const removePlayer = useCallback((idx) => {
-    patchState({ players: players.filter((_, i) => i !== idx), result: null });
-  }, [players]);
+    patchState({ players: players.filter((_, i) => i !== idx), ...(scheduleActive ? { scheduleDirty: true } : { result: null }) });
+  }, [players, scheduleActive]);
 
   const updatePlayer = useCallback((idx, field, value) => {
     patchState({
       players: players.map((p, i) => i === idx ? { ...p, [field]: value } : p),
-      result: null,
+      ...(scheduleActive ? { scheduleDirty: true } : { result: null }),
     });
-  }, [players]);
+  }, [players, scheduleActive]);
 
   return {
     loadDefaults,

@@ -503,6 +503,15 @@ describe('Forced court count from a mid-session slot onward (per-slot "add court
       }
     }
   });
+
+  it('forcing 5 courts with 20 players actually uses all 5', () => {
+    const players = makePlayers(20, 0, 8);
+    const { regen } = regenerateFromWithForcedCourts(players, 8, 1, 3, 5, 1);
+    for (let i = 2; i < 8; i++) {
+      expect(regen.schedule[i]!.courts.length).toBe(5);
+      expect(regen.schedule[i]!.courts.every(court => court.teamA.length === 2 && court.teamB.length === 2)).toBe(true);
+    }
+  });
 });
 
 describe('recomputeStats — single-slot edit without cascading', () => {

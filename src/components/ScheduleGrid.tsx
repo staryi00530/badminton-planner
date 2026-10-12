@@ -94,13 +94,16 @@ export default function ScheduleGrid({
       !completedKeys.has(gameKey(ref.slot.slot, ref.court)) &&
       !currentGameKeys.has(gameKey(ref.slot.slot, ref.court))
     );
-  const nextFutureSlot = upcomingGameRefs[0]?.slot.slot;
-  const nextFutureGames = nextFutureSlot == null
-    ? []
-    : upcomingGameRefs.filter(ref => ref.slot.slot === nextFutureSlot);
-  const foldedFutureGames = nextFutureSlot == null
-    ? []
-    : upcomingGameRefs.filter(ref => ref.slot.slot !== nextFutureSlot);
+  // Keep the visible queue wide enough to fill every planned court. If the
+  // next slot has fewer games because availability temporarily limits it, pull
+  // the remaining cards from subsequent slots instead of silently showing a
+  // short queue.
+  const plannedNextCount = Number.isFinite(liveCapacity)
+    ? Math.max(0, liveCapacity)
+    : result.schedule.find(slot => slot.courts.length > 0)?.courts.length ?? 0;
+  const nextFutureGames = upcomingGameRefs.slice(0, plannedNextCount);
+  const nextFutureKeys = new Set(nextFutureGames.map(ref => gameKey(ref.slot.slot, ref.court)));
+  const foldedFutureGames = upcomingGameRefs.filter(ref => !nextFutureKeys.has(gameKey(ref.slot.slot, ref.court)));
   liveQueueDebug('render', {
     liveGames: liveGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
     completedGames: completedGames.map(game => ({ slot: game.slot, court: game.court + 1 })),

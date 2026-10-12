@@ -28,16 +28,19 @@ try {
   const page = await context.newPage();
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
-  const playerNames = Array.from({ length: 12 }, (_, i) => `Player ${String(i + 1).padStart(2, '0')}`).concat('E2E Player 13');
+  let playerNames = [];
   const current = () => page.getByRole('heading', { name: 'Current game' }).locator('..');
   const next = () => page.getByRole('heading', { name: 'Next game' }).locator('..');
 
-  async function setup(courtCount) {
+  async function setup(courtCount, playerCount) {
     await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
     await page.reload({ waitUntil: 'networkidle' });
     await page.getByRole('button', { name: /Load defaults/ }).click();
-    await page.getByPlaceholder('Player name').fill('E2E Player 13');
-    await page.getByRole('button', { name: 'ADD', exact: true }).click();
+    playerNames = Array.from({ length: playerCount }, (_, i) => i < 12 ? `Player ${String(i + 1).padStart(2, '0')}` : `E2E Player ${i + 1}`);
+    for (const name of playerNames.slice(12)) {
+      await page.getByPlaceholder('Player name').fill(name);
+      await page.getByRole('button', { name: 'ADD', exact: true }).click();
+    }
     const courtsControl = page.getByText('Courts', { exact: true }).locator('..');
     await courtsControl.getByRole('button', { name: String(courtCount), exact: true }).click();
     assert.equal(await page.getByText(new RegExp(`${courtCount} courts`)).count(), 1, `E2E setup should select ${courtCount} courts`);
@@ -54,29 +57,33 @@ try {
       const cards = section.locator('.schedule-grid > div');
       const cardTexts = await cards.allTextContents();
       assert.ok(cardTexts.length <= courtCount, `too many visible courts at step ${step}`);
-      const seen = new Set();
+      const seenBySlot = new Map();
       for (const cardText of cardTexts) {
         const names = playerNames.filter(name => cardText.includes(name));
         assert.equal(names.length, 4, `court should contain exactly four players at step ${step}`);
         assert.equal(new Set(names).size, 4, `court should not duplicate a player at step ${step}`);
+        const slot = cardText.match(/SLOT\s+(\d+)/)?.[1] ?? 'unknown';
+        const seen = seenBySlot.get(slot) ?? new Set();
         for (const name of names) {
           assert.ok(!seen.has(name), `player ${name} appears on two courts in the same view at step ${step}`);
           seen.add(name);
         }
+        seenBySlot.set(slot, seen);
       }
       totalVisible += cardTexts.length;
     }
     assert.ok(totalVisible > 0, `queue should show a non-empty court at step ${step}`);
-    assert.ok(await page.getByText(/⚠ repeat group/).count() <= 2, `too many repeated groups at step ${step}`);
+    const visibleRepeatWarnings = await Promise.all(sections.map(section => section.getByText(/⚠ repeat group/).count()));
+    assert.ok(visibleRepeatWarnings.reduce((sum, count) => sum + count, 0) <= Math.max(2, courtCount), `too many repeated groups at step ${step}`);
   }
 
   let completed = 0;
   let maxLive = 0;
-  for (const courtCount of [2, 3]) {
-    await setup(courtCount);
+  for (const { courtCount, playerCount } of [{ courtCount: 2, playerCount: 13 }, { courtCount: 3, playerCount: 13 }, { courtCount: 4, playerCount: 16 }, { courtCount: 5, playerCount: 20 }]) {
+    await setup(courtCount, playerCount);
     for (let step = 0; step < 10; step++) {
       const liveCount = () => current().getByText('● LIVE').count();
-      for (let pass = 0; pass < 4 && await liveCount() < courtCount; pass++) {
+      for (let pass = 0; pass < courtCount + 1 && await liveCount() < courtCount; pass++) {
         for (const section of [current, next]) {
           if (await liveCount() >= courtCount) break;
           const start = section().getByRole('button', { name: 'Start', exact: true }).first();
@@ -121,10 +128,10 @@ try {
     }
   }
 
-  assert.ok(completed >= 10, 'the multi-court flow should complete games');
-  assert.equal(maxLive, 3, 'the smoke test should exercise three courts');
+  assert.ok(completed >= 20, 'the multi-court flow should complete games');
+  assert.equal(maxLive, 5, 'the smoke test should exercise five courts');
   await browser.close();
-  console.log(`E2E smoke passed: ${completed} games across 2 and 3 courts, max ${maxLive} live courts`);
+  console.log(`E2E smoke passed: ${completed} games across 2, 3, 4, and 5 courts, max ${maxLive} live courts`);
 } finally {
   server.kill('SIGTERM');
 }

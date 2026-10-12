@@ -78,6 +78,7 @@ export interface PlannerState {
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;
+  scheduleDirty: boolean;
   scores: ScoresMap;
   winLoss: WinLossMap;
   fromSlot: number;

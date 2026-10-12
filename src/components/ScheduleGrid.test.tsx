@@ -80,7 +80,7 @@ describe('ScheduleGrid grouping', () => {
     expectInSection('Current game', /SLOT 1 .* COURT 1/);
     expect(screen.queryByText('Past games (1)')).not.toBeInTheDocument();
     expectInSection('Next game', /SLOT 1 .* COURT 2/);
-    expect(screen.getByText('Future games (6)')).toBeInTheDocument();
+    expect(screen.getByText('Future games (5)')).toBeInTheDocument();
   });
 
   it('keeps a partially completed slot in Current game instead of folding it into past', () => {
@@ -112,5 +112,14 @@ describe('ScheduleGrid grouping', () => {
     expect(status.getAllByText('Slot 1').length).toBeGreaterThan(0);
     expect(status.getByText('Court 2')).toBeInTheDocument();
     expect(status.getByText('Waiting')).toBeInTheDocument();
+  });
+
+  it('fills the next queue to the planned court count across future slots', () => {
+    renderGrid({ liveCapacity: 3 });
+
+    const next = sectionFor('Next game');
+    expect(within(next).getByText(/SLOT 2 .* COURT 1/)).toBeInTheDocument();
+    expect(within(next).getByText(/SLOT 2 .* COURT 2/)).toBeInTheDocument();
+    expect(within(next).getByText(/SLOT 3 .* COURT 1/)).toBeInTheDocument();
   });
 });
