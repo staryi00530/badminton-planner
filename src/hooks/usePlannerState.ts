@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   winLoss: 'bp-winloss',
   savedPlans: 'bp-saved-plans',
   preferMixedTeams: 'bp-prefer-mixed-teams',
+  preferredPairs: 'bp-preferred-pairs',
   isConfirmed: 'bp-is-confirmed',
   loadedPlanId: 'bp-loaded-plan-id',
 } as const;
@@ -100,6 +101,7 @@ function createInitialState(): PlannerState {
     shareToken: loadSession('bp-share-token', null),
     isSharedSession: loadSession('bp-is-shared-session', false),
     preferMixedTeams: loadState(STORAGE_KEYS.preferMixedTeams, false),
+    preferredPairs: loadState(STORAGE_KEYS.preferredPairs, []),
     isConfirmed: loadState(STORAGE_KEYS.isConfirmed, false),
     pendingOverwrite: null,
     shareNotice: null,
@@ -143,6 +145,7 @@ export function usePlannerState() {
       winLoss: state.winLoss,
       savedPlans: state.savedPlans,
       preferMixedTeams: state.preferMixedTeams,
+      preferredPairs: state.preferredPairs,
       isConfirmed: state.isConfirmed,
       loadedPlanId: state.loadedPlanId,
     };
@@ -173,6 +176,7 @@ export function usePlannerState() {
     state.winLoss,
     state.savedPlans,
     state.preferMixedTeams,
+    state.preferredPairs,
     state.isConfirmed,
     state.loadedPlanId,
     state.isSharedSession,

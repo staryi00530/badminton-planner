@@ -11,6 +11,7 @@ export interface ExtraCourt {
 }
 
 export type StaggerMode = 'none' | 'group' | 'custom';
+export type PreferredPair = [string, string];
 
 export interface PlannerResult {
   schedule: SlotResult[];
@@ -110,6 +111,7 @@ export interface PlannerState {
   shareToken: string | null;
   isSharedSession: boolean;
   preferMixedTeams: boolean;
+  preferredPairs: PreferredPair[];
   isConfirmed: boolean;
   pendingOverwrite: 'generate' | 'clear' | 'import' | 'regenerateRemaining' | null;
   shareNotice: 'expired' | null;
@@ -134,6 +136,7 @@ export interface PlannerPersistedState {
   savedPlans: SavedPlan[];
   isConfirmed: boolean;
   preferMixedTeams: boolean;
+  preferredPairs: PreferredPair[];
   loadedPlanId: number | null;
 }
 

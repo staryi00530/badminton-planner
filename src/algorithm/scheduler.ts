@@ -28,6 +28,7 @@ export function groupKey(idxs: number[]): string {
 
 export interface ScheduleOptions {
   preferMixedTeams?: boolean; // pack 2F+2M on one court rather than spreading 1F per court
+  preferredPairs?: Array<[number, number]>; // soft teammate preferences, expressed as player indices
 }
 
 export function* generateScheduleGen(
@@ -42,6 +43,7 @@ export function* generateScheduleGen(
 ): Generator<GeneratorYield> {
   const n = players.length;
   if (n < 4) return null;
+  const preferredPairKeys = new Set((options.preferredPairs ?? []).map(([a, b]) => `${Math.min(a, b)}:${Math.max(a, b)}`));
 
   const schedule: SlotResult[] = initialState ? [...initialState.keptSlots] : [];
   const gamesPlayed: number[] = initialState ? [...initialState.gamesPlayed] : new Array(n).fill(0);
@@ -475,6 +477,8 @@ export function* generateScheduleGen(
         let score = 0;
         score += (partnerCount[tA[0]]![tA[1]] ?? 0) * 3;
         score += (partnerCount[tB[0]]![tB[1]] ?? 0) * 3;
+        if (preferredPairKeys.has(`${Math.min(tA[0], tA[1])}:${Math.max(tA[0], tA[1])}`)) score -= 24;
+        if (preferredPairKeys.has(`${Math.min(tB[0], tB[1])}:${Math.max(tB[0], tB[1])}`)) score -= 24;
         score += (opponentCount[tA[0]]![tB[0]] ?? 0) + (opponentCount[tA[0]]![tB[1]] ?? 0);
         score += (opponentCount[tA[1]]![tB[0]] ?? 0) + (opponentCount[tA[1]]![tB[1]] ?? 0);
         // Penalise unbalanced gender matchups (MF vs MM, MF vs FF, MM vs FF).

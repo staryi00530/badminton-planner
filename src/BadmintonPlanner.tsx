@@ -124,6 +124,7 @@ function BadmintonPlanner() {
     shareToken,
     isSharedSession,
     preferMixedTeams,
+    preferredPairs,
     isConfirmed,
     pendingOverwrite,
     loadedPlanId,
@@ -259,6 +260,17 @@ function BadmintonPlanner() {
   );
 
   const getPlayersWithAvailability = useCallback(() => applyAvailability(players), [applyAvailability, players]);
+  const getScheduleOptions = useCallback((schedulePlayers: Player[]) => {
+    const indexByName = new Map(schedulePlayers.map((player, index) => [player.name, index]));
+    return {
+      preferMixedTeams,
+      preferredPairs: preferredPairs.flatMap(([first, second]) => {
+        const firstIndex = indexByName.get(first);
+        const secondIndex = indexByName.get(second);
+        return firstIndex != null && secondIndex != null ? [[firstIndex, secondIndex] as [number, number]] : [];
+      }),
+    };
+  }, [preferMixedTeams, preferredPairs]);
 
   const buildSharePayload = useCallback(
     () => buildSharePayloadUtil({ result, playersWithAvailability: getPlayersWithAvailability(), gameMinutes, numCourts, scores, isConfirmed }),
@@ -288,7 +300,7 @@ function BadmintonPlanner() {
     if (players.length < 4 || isGenerating) return;
     patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-    const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, { preferMixedTeams });
+    const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, getScheduleOptions(playersWithSkill));
     let lastValue: GeneratorYield | null = null;
     function step() {
       const { value, done } = gen.next();
@@ -300,7 +312,7 @@ function BadmintonPlanner() {
       else requestAnimationFrame(step);
     }
     requestAnimationFrame(step);
-  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, isGenerating, players.length, preferMixedTeams, totalSlots]);
+  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, players.length, totalSlots]);
 
   const generate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
@@ -320,7 +332,7 @@ function BadmintonPlanner() {
     if (targetCourts > 0) {
       for (let i = targetFromSlot - 1; i < totalSlots; i++) courtsArr[i] = targetCourts;
     }
-    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, null, { preferMixedTeams });
+    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, null, getScheduleOptions(playersWithSkill));
     if (!newResult) return;
     const nextScores: ScoresMap = {};
     for (const key in scores) {
@@ -340,7 +352,7 @@ function BadmintonPlanner() {
       fromSlot: targetFromSlot,
       fromSlotCourts: targetCourts,
     });
-  }, [completedGames, computeSkill, getCourtsPerSlot, getPlayersWithAvailability, liveGames, players.length, preferMixedTeams, result, scores, totalSlots]);
+  }, [completedGames, computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, players.length, result, scores, totalSlots]);
 
   const runRegenerateRemaining = useCallback(() => {
     runRegenerateFromSlotWithCourts(fromSlot, fromSlotCourts);
@@ -418,7 +430,7 @@ function BadmintonPlanner() {
     const keptSlots = baseResult.schedule.slice(0, targetFromSlot - 1);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const courtsArr = getCourtsPerSlot();
-    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, forcedFirstSlot, { preferMixedTeams });
+    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));
     if (!newResult) return null;
     const nextScores: ScoresMap = {};
     const sourceScores = overrideScores ?? scores;
@@ -427,7 +439,7 @@ function BadmintonPlanner() {
       if (m && parseInt(m[1]!, 10) < targetFromSlot && sourceScores[key]) nextScores[key] = sourceScores[key];
     }
     return { newResult, nextScores };
-  }, [applyAvailability, getCourtsPerSlot, players, preferMixedTeams, result, scores, totalSlots, winLoss]);
+  }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss]);
 
   const setPlayerBack = useCallback((idx: number) => {
     patchState({ players: players.map((p, i) => i === idx ? { ...p, leavesAt: null } : p) });
@@ -541,7 +553,7 @@ function BadmintonPlanner() {
       return names.map(name => nameToIdx.get(name)).filter(i => i !== undefined);
     });
     if (courtsForced.some(c => c.length !== 4)) return;
-    const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, { preferMixedTeams });
+    const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, getScheduleOptions(playersWithSkill));
     if (!newResult) return;
     const nextScores: ScoresMap = {};
     for (const key in scores) {
@@ -558,7 +570,7 @@ function BadmintonPlanner() {
       editLayout: null,
       copied: false,
     });
-  }, [completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, liveGames, result, scores, totalSlots]);
+  }, [completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, result, scores, totalSlots]);
 
   const applySlotEditOnly = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
@@ -889,6 +901,8 @@ function BadmintonPlanner() {
           extraCourt={extraCourt}
           staggerMode={staggerMode}
           preferMixedTeams={preferMixedTeams}
+          players={players}
+          preferredPairs={preferredPairs}
           patchState={patchState}
         />
 

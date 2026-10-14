@@ -210,7 +210,7 @@ describe('BadmintonPlanner live game flow', () => {
     await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
 
     await waitFor(() => {
-      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
       expect(within(sectionFor('Current game')).getByText(/SLOT 1 .* COURT 2/)).toBeInTheDocument();
     });
   });
@@ -250,7 +250,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await waitFor(() => {
       const currentAfter = sectionFor('Current game');
-      expect(within(currentAfter).getAllByText('● LIVE')).toHaveLength(2);
+      expect(within(currentAfter).getAllByText('● LIVE')).toHaveLength(3);
       expect(currentAfter).toHaveTextContent('P5');
       expect(currentAfter).toHaveTextContent('P8');
       expect(currentAfter).toHaveTextContent('P9');

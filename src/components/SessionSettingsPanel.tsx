@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { C, FONT } from '../constants';
-import type { ExtraCourt, StaggerMode } from '../types';
+import type { ExtraCourt, Player, PreferredPair, StaggerMode } from '../types';
 
 interface SessionSettingsPanelProps {
   sessionStart: string;
@@ -9,7 +10,9 @@ interface SessionSettingsPanelProps {
   extraCourt: ExtraCourt;
   staggerMode: StaggerMode;
   preferMixedTeams: boolean;
-  patchState: (patch: Partial<SessionSettingsPanelProps>) => void;
+  players?: Player[];
+  preferredPairs?: PreferredPair[];
+  patchState: (patch: Partial<SessionSettingsPanelProps> & { preferredPairs?: PreferredPair[] }) => void;
 }
 
 export default function SessionSettingsPanel({
@@ -20,8 +23,22 @@ export default function SessionSettingsPanel({
   extraCourt,
   staggerMode,
   preferMixedTeams,
+  players = [],
+  preferredPairs = [],
   patchState,
 }: SessionSettingsPanelProps) {
+  const sortedPlayers = [...players].sort((a, b) => a.name.localeCompare(b.name));
+  const addPreferredPair = (first: string, second: string) => {
+    if (!first || !second || first === second) return;
+    const pair: PreferredPair = [first, second].sort((a, b) => a.localeCompare(b)) as PreferredPair;
+    if (preferredPairs.some(existing => existing[0] === pair[0] && existing[1] === pair[1])) return;
+    patchState({ preferredPairs: [...preferredPairs, pair] });
+  };
+  const removePreferredPair = (pair: PreferredPair) => {
+    patchState({ preferredPairs: preferredPairs.filter(existing => existing[0] !== pair[0] || existing[1] !== pair[1]) });
+  };
+  const [pairFirst, setPairFirst] = useState('');
+  const [pairSecond, setPairSecond] = useState('');
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20, boxShadow: C.shadow }}>
       <h3 style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, margin: '0 0 14px' }}>Session</h3>
@@ -95,6 +112,22 @@ export default function SessionSettingsPanel({
               {preferMixedTeams ? '1F+1M / side' : 'Spread F'}
             </button>
           </div>
+        </div>
+        <div style={{ flex: '1 1 260px', minWidth: 240 }}>
+          <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Preferred pairings</label>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select aria-label="Preferred pairing first player" value={pairFirst} onChange={e => setPairFirst(e.target.value)} style={{ flex: '1 1 90px', minWidth: 90, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: '6px 5px', color: C.text, fontSize: 12, fontFamily: FONT }}>
+              <option value="">Player 1</option>
+              {sortedPlayers.map(player => <option key={player.name} value={player.name}>{player.name}</option>)}
+            </select>
+            <span style={{ color: C.textMuted }}>+</span>
+            <select aria-label="Preferred pairing second player" value={pairSecond} onChange={e => setPairSecond(e.target.value)} style={{ flex: '1 1 90px', minWidth: 90, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: '6px 5px', color: C.text, fontSize: 12, fontFamily: FONT }}>
+              <option value="">Player 2</option>
+              {sortedPlayers.map(player => <option key={player.name} value={player.name}>{player.name}</option>)}
+            </select>
+            <button onClick={() => { addPreferredPair(pairFirst, pairSecond); setPairFirst(''); setPairSecond(''); }} disabled={!pairFirst || !pairSecond || pairFirst === pairSecond} style={{ background: C.card, color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 4, padding: '6px 8px', fontSize: 12, fontFamily: FONT }}>Add</button>
+          </div>
+          {preferredPairs.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>{preferredPairs.map(pair => <span key={pair.join('|')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(125,211,252,0.08)', border: `1px solid ${C.border}`, borderRadius: 4, padding: '3px 6px', color: C.textDim, fontSize: 11 }}>{pair[0]} + {pair[1]}<button onClick={() => removePreferredPair(pair)} aria-label={`Remove preferred pairing ${pair[0]} and ${pair[1]}`} style={{ background: 'none', border: 'none', color: C.textMuted, padding: 0, cursor: 'pointer' }}>×</button></span>)}</div>}
         </div>
       </div>
     </div>
