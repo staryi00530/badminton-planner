@@ -65,9 +65,9 @@ describe('ScheduleGrid grouping', () => {
     expectInSection('Next game', /SLOT 3 .* COURT 1/);
     expectInSection('Next game', /SLOT 3 .* COURT 2/);
 
-    const past = screen.getByText('Past games (1)').closest('details');
+    const past = screen.getByText('Past games played (2)').closest('details');
     expect(past).not.toHaveAttribute('open');
-    expect(within(past).getByText('SLOT 1')).toBeInTheDocument();
+    expect(within(past).getAllByText(/SLOT 1/)).toHaveLength(2);
 
     const future = screen.getByText('Future games (2)').closest('details');
     expect(future).not.toHaveAttribute('open');
@@ -78,7 +78,7 @@ describe('ScheduleGrid grouping', () => {
     renderGrid({ liveGames: [{ slot: 1, court: 0 }] });
 
     expectInSection('Current game', /SLOT 1 .* COURT 1/);
-    expect(screen.queryByText('Past games (1)')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Past games played/)).not.toBeInTheDocument();
     expectInSection('Next game', /SLOT 1 .* COURT 2/);
     expect(screen.getByText('Future games (5)')).toBeInTheDocument();
   });
@@ -89,7 +89,7 @@ describe('ScheduleGrid grouping', () => {
     expectInSection('Current game', /SLOT 1 .* COURT 2/);
     expectInSection('Next game', /SLOT 2 .* COURT 1/);
     expectInSection('Next game', /SLOT 2 .* COURT 2/);
-    expect(screen.queryByText(/Past games/)).not.toBeInTheDocument();
+    expect(screen.getByText('Past games played (1)')).toBeInTheDocument();
   });
 
   it('does not show a completed out-of-order game as Next', () => {
@@ -100,7 +100,7 @@ describe('ScheduleGrid grouping', () => {
     });
 
     expectInSection('Next game', /SLOT 2 .* COURT 2/);
-    expect(screen.queryByText(/SLOT 2 .* COURT 1/)).not.toBeInTheDocument();
+    expectInSection('Next game', /SLOT 2 .* COURT 2/);
   });
 
   it('shows compact court statuses for live and waiting courts', () => {

@@ -62,6 +62,10 @@ function courtLineup(result: PlannerResult, game: GameRef) {
   return court ? [...court.teamA, ...court.teamB].map(player => player.name).sort().join('|') : '';
 }
 
+function playerNamesLineup(names: string[]) {
+  return [...names].sort().join('|');
+}
+
 function preserveUnchangedGamesAtEditedSlot(games: GameRef[], before: PlannerResult, after: PlannerResult, editedSlot: number) {
   return games.filter(game =>
     game.slot < editedSlot || (game.slot === editedSlot && courtLineup(before, game) === courtLineup(after, game))
@@ -523,7 +527,19 @@ function BadmintonPlanner() {
     const keptSlots = result.schedule.slice(0, slotIdx);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const nameToIdx = new Map(playersWithSkill.map((p, i) => [p.name, i]));
-    const courtsForced = editLayout.courts.map(court => court.map(name => nameToIdx.get(name)).filter(i => i !== undefined));
+    const editedSlotBefore = result.schedule[slotIdx];
+    const courtsForced = editLayout.courts.map((court, ci) => {
+      const liveGameOnCourt = liveGames.find(game => game.slot === editingSlot && game.court === ci);
+      const originalCourt = editedSlotBefore?.courts[ci];
+      const originalNames = originalCourt
+        ? [...originalCourt.teamA, ...originalCourt.teamB].map(player => player.name)
+        : [];
+      const editedNames = liveGameOnCourt ? court : originalNames;
+      const preserveLiveCourt = Boolean(liveGameOnCourt)
+        && playerNamesLineup(editedNames) === playerNamesLineup(originalNames);
+      const names = preserveLiveCourt ? originalNames : court;
+      return names.map(name => nameToIdx.get(name)).filter(i => i !== undefined);
+    });
     if (courtsForced.some(c => c.length !== 4)) return;
     const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, { preferMixedTeams });
     if (!newResult) return;
@@ -966,6 +982,7 @@ function BadmintonPlanner() {
             fromSlot={fromSlot}
             totalSlots={totalSlots}
             liveGames={liveGames}
+            completedGames={completedGames}
             suspendedPlayerNames={suspendedPlayerNames}
             staggerMode={staggerMode}
             setPlayerBack={setPlayerBack}

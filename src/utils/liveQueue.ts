@@ -2,6 +2,8 @@ export interface GameRef {
   slot: number;
   court: number;
   players?: string[];
+  /** Physical live-court lane used for stable Current game ordering. */
+  displayCourt?: number;
 }
 
 const LIVE_QUEUE_LOG_LIMIT = 500;
@@ -43,7 +45,12 @@ export function normalizeGameRefs(
     const key = `${game.slot}:${game.court}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    normalized.push({ slot: game.slot, court: game.court, ...(game.players ? { players: [...game.players] } : {}) });
+    normalized.push({
+      slot: game.slot,
+      court: game.court,
+      ...(game.players ? { players: [...game.players] } : {}),
+      ...(game.displayCourt != null ? { displayCourt: game.displayCourt } : {}),
+    });
     if (normalized.length >= maxCount) break;
   }
   return normalized;

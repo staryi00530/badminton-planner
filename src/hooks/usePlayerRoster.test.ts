@@ -103,7 +103,7 @@ describe('usePlayerRoster — bank management', () => {
   it('addToBank adds a trimmed name+gender, rejecting a case-insensitive duplicate', () => {
     const { result, patchState } = setup({ playerHistory: [{ name: 'Bob', gender: 'M' }] });
     act(() => result.current.addToBank('  Carol  ', 'F'));
-    expect(patchState).toHaveBeenCalledWith({ playerHistory: [{ name: 'Bob', gender: 'M' }, { name: 'Carol', gender: 'F' }] });
+    expect(patchState).toHaveBeenCalledWith({ playerHistory: [{ name: 'Bob', gender: 'M' }, { name: 'Carol', gender: 'F', level: 2 }] });
 
     patchState.mockClear();
     act(() => result.current.addToBank('bob', 'M'));

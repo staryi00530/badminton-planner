@@ -60,6 +60,24 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
     expect(mHeader.compareDocumentPosition(fHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('orders the player bank by gender and then alphabetically', () => {
+    renderPlayerList({
+      playerHistory: [
+        { name: 'Zed', gender: 'F', level: 2 },
+        { name: 'Maya', gender: 'F', level: 2 },
+        { name: 'Zack', gender: 'M' , level: 2 },
+        { name: 'Aaron', gender: 'M', level: 2 },
+      ],
+    });
+
+    const bank = screen.getByText('Player bank').parentElement!;
+    const names = ['Aaron', 'Zack', 'Maya', 'Zed'];
+    const positions = names.map(name => within(bank).getByRole('button', { name: new RegExp(`\\+ ${name}`) }));
+    expect(positions[0]!.compareDocumentPosition(positions[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(positions[1]!.compareDocumentPosition(positions[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(positions[2]!.compareDocumentPosition(positions[3]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('removing a player by its displayed row calls removePlayer with the ORIGINAL array index, not the display position', async () => {
     const user = userEvent.setup();
     const handlers = renderPlayerList();

@@ -116,10 +116,16 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
     await waitFor(() => {
-      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+      const current = sectionFor('Current game');
+      expect(within(current).getAllByText('● LIVE')).toHaveLength(3);
+      const cards = current.querySelectorAll('.schedule-grid > div');
+      expect(cards[0]).toHaveTextContent(/SLOT 2/);
+      expect(cards[1]).toHaveTextContent(/SLOT 1 .* COURT 2/);
+      expect(cards[2]).toHaveTextContent(/SLOT 1 .* COURT 3/);
     });
 
-    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    // Court 1 is now the promoted game, so finish the unchanged court 2 lane.
+    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[1]);
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
       expect(within(sectionFor('Current game')).getAllByText(/SLOT 2/).length).toBeGreaterThan(0);
@@ -206,6 +212,49 @@ describe('BadmintonPlanner live game flow', () => {
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
       expect(within(sectionFor('Current game')).getByText(/SLOT 1 .* COURT 2/)).toBeInTheDocument();
+    });
+  });
+
+  it('keeps every other live court running when one current court is regenerated', async () => {
+    const user = userEvent.setup();
+    const players = Array.from({ length: 13 }, (_, i) => makePlayer(`P${i + 1}`));
+    const result = {
+      schedule: [
+        makeSlot(1, [
+          ['P1', 'P2', 'P3', 'P4'],
+          ['P5', 'P6', 'P7', 'P8'],
+          ['P9', 'P10', 'P11', 'P12'],
+        ], ['P13']),
+        makeSlot(2, [
+          ['P1', 'P5', 'P9', 'P10'],
+          ['P2', 'P6', 'P11', 'P12'],
+          ['P3', 'P4', 'P7', 'P8'],
+        ], ['P13']),
+      ],
+      gamesPlayed: players.map(() => 1),
+    };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(result));
+    localStorage.setItem('bp-numCourts', JSON.stringify(3));
+
+    render(<BadmintonPlanner />);
+
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    const current = sectionFor('Current game');
+    await user.click(within(current).getAllByTitle('Edit who plays in this slot')[0]);
+    const editors = screen.getAllByRole('combobox');
+    await user.selectOptions(editors[0]!, 'P13');
+    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
+
+    await waitFor(() => {
+      const currentAfter = sectionFor('Current game');
+      expect(within(currentAfter).getAllByText('● LIVE')).toHaveLength(2);
+      expect(currentAfter).toHaveTextContent('P5');
+      expect(currentAfter).toHaveTextContent('P8');
+      expect(currentAfter).toHaveTextContent('P9');
+      expect(currentAfter).toHaveTextContent('P12');
     });
   });
 

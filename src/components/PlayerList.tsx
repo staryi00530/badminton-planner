@@ -8,7 +8,7 @@ type PlayerFieldValue = string | number | null;
 
 interface PlayerListProps {
   players: Player[];
-  playerHistory: Array<Pick<Player, 'name' | 'gender'>>;
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   winLoss: WinLossMap;
   staggerMode: StaggerMode;
   totalSlots: number;
@@ -21,7 +21,7 @@ interface PlayerListProps {
   setGenderInput: (value: 'M' | 'F') => void;
   setLevelInput?: (value: 1 | 2 | 3) => void;
   addPlayer: () => void;
-  addSelectedFromBank: (entries: Array<Pick<Player, 'name' | 'gender'>>) => void;
+  addSelectedFromBank: (entries: Array<Pick<Player, 'name' | 'gender' | 'level'>>) => void;
   addToBank: (name: string, gender: 'M' | 'F') => void;
   removeFromHistory: (name: string) => void;
   loadDefaults: () => void;
@@ -80,7 +80,8 @@ export default function PlayerList({
   const [bankNameInput, setBankNameInput] = useState('');
   const [bankGenderInput, setBankGenderInput] = useState<'M' | 'F'>('M');
   const currentNames = new Set(players.map(p => p.name.toLowerCase()));
-  const bankPlayers = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
+  const bankUnsorted = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
+  const bankPlayers = sortPlayerIndicesForDisplay(bankUnsorted).map(index => bankUnsorted[index]!);
   const sortedIndices = sortPlayerIndicesForDisplay(players);
 
   const toggleSelected = (name: string) => {

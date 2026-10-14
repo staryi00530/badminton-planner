@@ -29,6 +29,7 @@ interface SlotCardProps {
   canStartGame?: boolean;
   visibleCourtIndexes?: number[];
   compactGameView?: boolean;
+  displayCourt?: number;
 }
 
 export default function SlotCard({
@@ -54,6 +55,7 @@ export default function SlotCard({
   canStartGame = true,
   visibleCourtIndexes,
   compactGameView = false,
+  displayCourt,
 }: SlotCardProps) {
   const stepBtnStyle = { background: 'none', border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontSize: 12, fontWeight: 700, fontFamily: FONT, width: 20, height: 20, lineHeight: 1, cursor: 'pointer' };
   const visibleCourts = (visibleCourtIndexes ?? slot.courts.map((_, ci) => ci))
@@ -180,7 +182,7 @@ export default function SlotCard({
         <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: visibleIdx < visibleCourts.length - 1 ? 6 : 0 }}>
           {(slot.courts.length > 1 || isSingleCourtView || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
             <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {(slot.courts.length > 1 || isSingleCourtView) && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci] }}>Court {court.court}</span>}
+              {(slot.courts.length > 1 || isSingleCourtView) && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci] }}>Court {displayCourt != null ? displayCourt + 1 : court.court}</span>}
               {slot.repeatedCourts?.includes(ci) && <span style={{ color: C.amber }}>⚠ repeat group</span>}
               {isLive && <span style={{ color: '#ef4444' }}>● LIVE</span>}
               {isCompleted && !isLive && <span style={{ color: C.green }}>✓ DONE</span>}

@@ -10,7 +10,7 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     patchState({
       players: [
         ...players,
-        ...toAdd.map(p => ({ ...p, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null })),
+        ...toAdd.map(p => ({ ...p, level: p.level ?? 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null })),
       ],
       result: null,
     });
@@ -18,7 +18,7 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
 
   const resetPlayers = useCallback(() => {
     patchState({
-      players: DEFAULT_PLAYERS.map(p => ({ ...p, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null })),
+      players: DEFAULT_PLAYERS.map(p => ({ ...p, level: p.level ?? 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null })),
       result: null,
     });
   }, [totalSlots]);
@@ -48,7 +48,7 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
   const addToBank = useCallback((name, gender) => {
     const trimmed = name.trim();
     if (!trimmed || playerHistory.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) return;
-    patchState({ playerHistory: [...playerHistory, { name: trimmed, gender }] });
+    patchState({ playerHistory: [...playerHistory, { name: trimmed, gender, level: 2 }] });
   }, [playerHistory]);
 
   const removeFromHistory = useCallback((name) => {

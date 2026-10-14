@@ -96,6 +96,9 @@ try {
       const live = await liveCount();
       maxLive = Math.max(maxLive, live);
       assert.ok(live <= courtCount, `live queue exceeded ${courtCount} courts at step ${step}`);
+      if (courtCount >= 4) {
+        assert.equal(live, courtCount, `all configured courts should remain live at step ${step}`);
+      }
       await assertVisibleCourts(courtCount, `${courtCount}-court/${step}`);
 
       if (step === 3) {

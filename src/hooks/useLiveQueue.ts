@@ -41,11 +41,34 @@ interface LiveQueueOptions {
   patchState: (patch: Record<string, unknown>) => void;
 }
 
+function assignDisplayCourts(games: GameRef[], capacity: number): GameRef[] {
+  const laneCount = Math.max(0, capacity, games.length);
+  const used = new Set<number>();
+  const assigned = games.map(game => ({ ...game }));
+
+  for (const game of assigned) {
+    const lane = game.displayCourt;
+    if (lane != null && lane >= 0 && lane < laneCount && !used.has(lane)) used.add(lane);
+    else delete game.displayCourt;
+  }
+  for (const game of assigned) {
+    if (game.displayCourt != null) continue;
+    const preferred = game.court;
+    const lane = preferred >= 0 && preferred < laneCount && !used.has(preferred)
+      ? preferred
+      : Array.from({ length: laneCount }, (_, index) => index).find(index => !used.has(index));
+    if (lane == null) continue;
+    used.add(lane);
+    game.displayCourt = lane;
+  }
+  return assigned;
+}
+
 export interface QueueAdjustmentNotice {
   queuedGame: { slot: number; court: number; players: string[] };
-  promotedGame: { slot: number; court: number; players: string[] };
+  promotedGame: { slot: number; court: number; displayCourt: number; players: string[] };
   unavailablePlayers: string[];
-  replacements: Array<{ replacee: string; replacer: string }>;
+  replacements: Array<{ replacee: string; replacer: string; court: number }>;
 }
 
 export function useLiveQueue({
@@ -140,7 +163,7 @@ export function useLiveQueue({
       extraPatch: Object.keys(extraPatch),
     });
     let nextCompletedGames = newCompletedGames;
-    let nextLiveGames = normalizeGameRefs(newLiveGames, result?.schedule ?? null, targetLiveCount)
+    let nextLiveGames = assignDisplayCourts(normalizeGameRefs(newLiveGames, result?.schedule ?? null, targetLiveCount), targetLiveCount)
       .filter(game => !hasGame(nextCompletedGames, game.slot, game.court));
     let nextResult = result;
     let nextSuspendedPlayerNames = options.suspendedPlayerNames ?? suspendedPlayerNames;
@@ -274,11 +297,17 @@ export function useLiveQueue({
           const queuedNames = new Set(queuedDescription.players);
           const promotedNames = new Set(promotedDescription.players);
           const replacers = promotedDescription.players.filter(name => !queuedNames.has(name));
+          const promotedWithLane = assignDisplayCourts([...nextLiveGames, queuedGame], targetLiveCount)
+            .find(game => game.slot === queuedGame.slot && game.court === queuedGame.court);
+          const displayCourt = promotedWithLane?.displayCourt ?? queuedGame.court;
           setQueueAdjustment({
             queuedGame: queuedDescription,
-            promotedGame: promotedDescription,
+            promotedGame: { ...promotedDescription, displayCourt },
             unavailablePlayers: unavailableQueuedPlayers,
-            replacements: unavailableQueuedPlayers.map((replacee, index) => ({ replacee, replacer: replacers[index] ?? 'another available player' })),
+            replacements: unavailableQueuedPlayers.flatMap((replacee, index) => {
+              const replacer = replacers[index];
+              return replacer ? [{ replacee, replacer, court: displayCourt + 1 }] : [];
+            }),
           });
         } else {
           setQueueAdjustment(null);
@@ -287,7 +316,7 @@ export function useLiveQueue({
       }
     }
 
-    nextLiveGames = normalizeGameRefs(nextLiveGames, nextResult?.schedule ?? null, targetLiveCount);
+    nextLiveGames = assignDisplayCourts(normalizeGameRefs(nextLiveGames, nextResult?.schedule ?? null, targetLiveCount), targetLiveCount);
     patch.liveGames = nextLiveGames;
     patch.completedGames = nextCompletedGames;
     patch.suspendedPlayerNames = nextSuspendedPlayerNames;
