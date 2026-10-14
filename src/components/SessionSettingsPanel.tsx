@@ -10,9 +10,10 @@ interface SessionSettingsPanelProps {
   extraCourt: ExtraCourt;
   staggerMode: StaggerMode;
   preferMixedTeams: boolean;
+  scheduleActive?: boolean;
   players?: Player[];
   preferredPairs?: PreferredPair[];
-  patchState: (patch: Partial<SessionSettingsPanelProps> & { preferredPairs?: PreferredPair[] }) => void;
+  patchState: (patch: Partial<SessionSettingsPanelProps> & { preferredPairs?: PreferredPair[]; scheduleDirty?: boolean }) => void;
 }
 
 export default function SessionSettingsPanel({
@@ -23,6 +24,7 @@ export default function SessionSettingsPanel({
   extraCourt,
   staggerMode,
   preferMixedTeams,
+  scheduleActive = false,
   players = [],
   preferredPairs = [],
   patchState,
@@ -32,10 +34,10 @@ export default function SessionSettingsPanel({
     if (!first || !second || first === second) return;
     const pair: PreferredPair = [first, second].sort((a, b) => a.localeCompare(b)) as PreferredPair;
     if (preferredPairs.some(existing => existing[0] === pair[0] && existing[1] === pair[1])) return;
-    patchState({ preferredPairs: [...preferredPairs, pair] });
+    patchState({ preferredPairs: [...preferredPairs, pair], ...(scheduleActive ? { scheduleDirty: true } : {}) });
   };
   const removePreferredPair = (pair: PreferredPair) => {
-    patchState({ preferredPairs: preferredPairs.filter(existing => existing[0] !== pair[0] || existing[1] !== pair[1]) });
+    patchState({ preferredPairs: preferredPairs.filter(existing => existing[0] !== pair[0] || existing[1] !== pair[1]), ...(scheduleActive ? { scheduleDirty: true } : {}) });
   };
   const [pairFirst, setPairFirst] = useState('');
   const [pairSecond, setPairSecond] = useState('');

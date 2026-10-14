@@ -87,6 +87,19 @@ describe('SessionSettingsPanel', () => {
     expect(patchState).toHaveBeenCalledWith({ preferredPairs: [['Alice', 'Bob']] });
   });
 
+  it('marks an existing schedule dirty when a preferred pairing changes', async () => {
+    const user = userEvent.setup();
+    const patchState = renderPanel({
+      scheduleActive: true,
+      players: [{ name: 'Alice', gender: 'F' }, { name: 'Bob', gender: 'M' }],
+      preferredPairs: [],
+    });
+    await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'Alice');
+    await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'Bob');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(patchState).toHaveBeenCalledWith({ preferredPairs: [['Alice', 'Bob']], scheduleDirty: true });
+  });
+
   it('shows a clear button for sessionStart only when set, and clears it on click', async () => {
     const user = userEvent.setup();
     const { rerender } = render(

@@ -88,6 +88,14 @@ describe('Preferred pairings', () => {
     const teams = [court.teamA.map(player => player.name), court.teamB.map(player => player.name)];
     expect(teams.some(team => team.includes('P1') && team.includes('P2'))).toBe(true);
   });
+
+  it('co-locates a preferred pair on a multi-court slot when the roster permits it', () => {
+    const players = makePlayers(8, 0, 1);
+    const result = generateSchedule(players, 1, [2], 0, null, null, { preferredPairs: [[0, 4]] }, seededRng(3));
+    expect(result).not.toBeNull();
+    const courts = result!.schedule[0]!.courts;
+    expect(courts.some(court => [...court.teamA, ...court.teamB].some(a => a.name === 'P1') && [...court.teamA, ...court.teamB].some(b => b.name === 'P5'))).toBe(true);
+  });
 });
 
 describe('Level balancing', () => {

@@ -920,6 +920,7 @@ function BadmintonPlanner() {
           extraCourt={extraCourt}
           staggerMode={staggerMode}
           preferMixedTeams={preferMixedTeams}
+          scheduleActive={Boolean(result)}
           players={players}
           preferredPairs={preferredPairs}
           patchState={patchState}
