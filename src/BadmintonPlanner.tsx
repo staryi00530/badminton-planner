@@ -72,6 +72,12 @@ function preserveUnchangedGamesAtEditedSlot(games: GameRef[], before: PlannerRes
   );
 }
 
+function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, editedSlot: number) {
+  return games.filter(game =>
+    game.slot < editedSlot || (game.slot === editedSlot && Boolean(after.schedule.find(slot => slot.slot === game.slot)?.courts[game.court]))
+  );
+}
+
 function BadmintonPlanner() {
   const { state, setField, patchState } = usePlannerState();
   const scheduleRef = useRef<HTMLDivElement | null>(null);
@@ -560,17 +566,23 @@ function BadmintonPlanner() {
       const match = key.match(/^s(\d+)c/);
       if (match && parseInt(match[1]!, 10) < editingSlot && scores[key]) nextScores[key] = scores[key];
     }
-    patchState({
-      result: newResult,
-      scheduleDirty: false,
-      scores: nextScores,
-      liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, newResult, editingSlot),
-      completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot),
-      editingSlot: null,
-      editLayout: null,
-      copied: false,
-    });
-  }, [completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, result, scores, totalSlots]);
+    const preservedLiveGames = preserveLiveGamesAtEditedSlot(liveGames, newResult, editingSlot);
+    const preservedCompletedGames = preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot);
+    applyLiveGamesUpdate(
+      preservedLiveGames,
+      editingSlot,
+      preservedCompletedGames,
+      {
+        result: newResult,
+        scheduleDirty: false,
+        scores: nextScores,
+        editingSlot: null,
+        editLayout: null,
+        copied: false,
+      },
+      { targetLiveCount: liveGames.length, overrideResult: newResult },
+    );
+  }, [applyLiveGamesUpdate, completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, result, scores, totalSlots]);
 
   const applySlotEditOnly = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
@@ -588,16 +600,23 @@ function BadmintonPlanner() {
       i === slotIdx ? { ...slot, courts: newCourts, sitting: newSitting } : slot
     );
     const { schedule: newSchedule, gamesPlayed } = recomputeStats(newScheduleRaw, players);
-    patchState({
-      result: { schedule: newSchedule, gamesPlayed },
-      scheduleDirty: false,
-      liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
-      completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
-      editingSlot: null,
-      editLayout: null,
-      copied: false,
-    });
-  }, [completedGames, editingSlot, editLayout, liveGames, players, result]);
+    const newResult = { schedule: newSchedule, gamesPlayed };
+    const preservedLiveGames = preserveLiveGamesAtEditedSlot(liveGames, newResult, editingSlot);
+    const preservedCompletedGames = preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot);
+    applyLiveGamesUpdate(
+      preservedLiveGames,
+      editingSlot,
+      preservedCompletedGames,
+      {
+        result: newResult,
+        scheduleDirty: false,
+        editingSlot: null,
+        editLayout: null,
+        copied: false,
+      },
+      { targetLiveCount: liveGames.length, overrideResult: newResult },
+    );
+  }, [applyLiveGamesUpdate, completedGames, editingSlot, editLayout, liveGames, players, result]);
 
   const updateScore = useCallback((slot: number, courtIdx: number, aVal: string, bVal: string, teamA: string[], teamB: string[]) => {
     const key = `s${slot}c${courtIdx}`;

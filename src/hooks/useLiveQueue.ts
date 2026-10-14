@@ -153,7 +153,8 @@ export function useLiveQueue({
     return null;
   }, [livePlayerNamesFor]);
 
-  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: Record<string, unknown> = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[] } = {}) => {
+  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: Record<string, unknown> = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult } = {}) => {
+    const scheduleResult = options.overrideResult ?? result;
     const targetLiveCount = options.targetLiveCount ?? newLiveGames.length;
     liveQueueDebug('apply:start', {
       changedSlot,
@@ -163,9 +164,9 @@ export function useLiveQueue({
       extraPatch: Object.keys(extraPatch),
     });
     let nextCompletedGames = newCompletedGames;
-    let nextLiveGames = assignDisplayCourts(normalizeGameRefs(newLiveGames, result?.schedule ?? null, targetLiveCount), targetLiveCount)
+    let nextLiveGames = assignDisplayCourts(normalizeGameRefs(newLiveGames, scheduleResult?.schedule ?? null, targetLiveCount), targetLiveCount)
       .filter(game => !hasGame(nextCompletedGames, game.slot, game.court));
-    let nextResult = result;
+    let nextResult = scheduleResult;
     let nextSuspendedPlayerNames = options.suspendedPlayerNames ?? suspendedPlayerNames;
     const shouldPromote = targetLiveCount > nextLiveGames.length;
     const queuedPreviewGame = shouldPromote && nextResult
@@ -193,9 +194,9 @@ export function useLiveQueue({
       : false;
     if (reservedGroupRepeats && reservedQueuedGame) {
       liveQueueDebug('queue:reservation-rejected-repeat', {
-        queuedGame: describeGames([reservedQueuedGame], result)[0],
-        liveGames: describeGames(nextLiveGames, result),
-        completedGames: describeGames(nextCompletedGames, result),
+        queuedGame: describeGames([reservedQueuedGame], scheduleResult)[0],
+        liveGames: describeGames(nextLiveGames, scheduleResult),
+        completedGames: describeGames(nextCompletedGames, scheduleResult),
       });
     }
     const unavailableQueuedPlayers = queuedPreviewGame && nextResult
@@ -210,6 +211,7 @@ export function useLiveQueue({
       fromSlot: firstIncomplete(nextCompletedGames, nextResult),
       ...extraPatch,
     };
+    if (options.overrideResult) patch.result = options.overrideResult;
 
     const regenerateFrom = (regenFromSlot: number) => {
       if (regenFromSlot > totalSlots || !nextResult) return false;
@@ -284,7 +286,7 @@ export function useLiveQueue({
         nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
         if (nextLiveGames.length === beforeCount) break;
         liveQueueDebug('queue:promote', {
-          queuedGame: reservedQueuedGame ? describeGames([reservedQueuedGame], result)[0] : null,
+          queuedGame: reservedQueuedGame ? describeGames([reservedQueuedGame], scheduleResult)[0] : null,
           promotedGame: describeGames([queuedGame], nextResult)[0],
           unavailableQueuedPlayers,
           beforeLiveGames: describeGames(nextLiveGames.slice(0, beforeCount), nextResult),
@@ -292,7 +294,7 @@ export function useLiveQueue({
           completedGames: describeGames(nextCompletedGames, nextResult),
         });
         if (reservedQueuedGame && unavailableQueuedPlayers.length > 0) {
-          const queuedDescription = describeGames([reservedQueuedGame], result)[0]!;
+          const queuedDescription = describeGames([reservedQueuedGame], scheduleResult)[0]!;
           const promotedDescription = describeGames([queuedGame], nextResult)[0]!;
           const queuedNames = new Set(queuedDescription.players);
           const promotedNames = new Set(promotedDescription.players);

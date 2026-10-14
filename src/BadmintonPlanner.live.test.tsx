@@ -256,6 +256,18 @@ describe('BadmintonPlanner live game flow', () => {
       expect(currentAfter).toHaveTextContent('P9');
       expect(currentAfter).toHaveTextContent('P12');
     });
+
+    // Editing another current court must reconcile the queue again rather than
+    // leaving only the edited court visible.
+    const currentAfterFirstEdit = sectionFor('Current game');
+    await user.click(within(currentAfterFirstEdit).getAllByTitle('Edit who plays in this slot')[2]!);
+    const secondEditSelects = within(sectionFor('Current game')).getAllByRole('combobox');
+    await user.selectOptions(secondEditSelects[0]!, 'P13');
+    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
+
+    await waitFor(() => {
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+    });
   });
 
   it('skips a player from the immediate next selection and clears the skip after regeneration', async () => {
