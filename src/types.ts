@@ -121,6 +121,14 @@ export interface PlannerState {
   suspendedPlayerNames: string[];
 }
 
+/** State fields that may be changed by a runtime queue transition. */
+export type RuntimePatch = Pick<Partial<PlannerState>,
+  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' |
+  'suspendedPlayerNames' | 'fromSlot' | 'scheduleDirty' | 'copied' | 'isConfirmed' |
+  'loadedPlanId' | 'editingSlot' | 'editLayout' | 'isGenerating' | 'genSlot' |
+  'pendingOverwrite' | 'fromSlotCourts'
+>;
+
 export interface PlannerPersistedState {
   players: Player[];
   playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;

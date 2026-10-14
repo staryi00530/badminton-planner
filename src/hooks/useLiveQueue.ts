@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { Player, ForcedFirstSlot } from '../algorithm/types';
-import type { PlannerResult, ScoresMap, WinLossMap } from '../types';
+import type { PlannerResult, RuntimePatch, ScoresMap, WinLossMap } from '../types';
 import {
   addUniqueGame,
   contiguousGamesForSlot,
@@ -39,7 +39,7 @@ interface LiveQueueOptions {
   canPlayerJoin: boolean;
   getCourtsPerSlot: () => number[];
   regenerate: (args: RegenerateArgs) => RegeneratedPlan | null;
-  patchState: (patch: Record<string, unknown>) => void;
+  patchState: (patch: RuntimePatch) => void;
 }
 
 function assignDisplayCourts(games: GameRef[], capacity: number): GameRef[] {
@@ -137,7 +137,7 @@ export function useLiveQueue({
     return forcedCourts;
   }, [players, result]);
 
-  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: Record<string, unknown> = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult } = {}) => {
+  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: RuntimePatch = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult } = {}) => {
     const scheduleResult = options.overrideResult ?? result;
     const targetLiveCount = options.targetLiveCount ?? newLiveGames.length;
     liveQueueDebug('apply:start', {
@@ -197,7 +197,7 @@ export function useLiveQueue({
         .map(player => player.name)
         .filter(name => livePlayerNamesFor(nextLiveGames, nextResult).has(name))
       : [];
-    const patch: Record<string, unknown> = {
+    const patch: RuntimePatch = {
       liveGames: nextLiveGames,
       completedGames: nextCompletedGames,
       suspendedPlayerNames: nextSuspendedPlayerNames,
