@@ -11,6 +11,7 @@ import {
   normalizeGameRefs,
 } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
+import { reconcileLiveQueue } from '../utils/liveQueueTransition';
 
 interface RegenerateArgs {
   targetFromSlot: number;
@@ -136,23 +137,6 @@ export function useLiveQueue({
     return forcedCourts;
   }, [players, result]);
 
-  const nextPlayableQueuedGame = useCallback((scheduleResult: PlannerResult | null, gamesCompleted: GameRef[], gamesLive: GameRef[], startSlot: number) => {
-    if (!scheduleResult) return null;
-    const blockedNames = livePlayerNamesFor(gamesLive, scheduleResult);
-    for (const slot of scheduleResult.schedule) {
-      if (slot.slot < startSlot) continue;
-      for (let court = 0; court < slot.courts.length; court++) {
-        if (hasGame(gamesCompleted, slot.slot, court) || hasGame(gamesLive, slot.slot, court)) continue;
-        const selectedCourt = slot.courts[court];
-        if (!selectedCourt) continue;
-        if (![...selectedCourt.teamA, ...selectedCourt.teamB].some(player => blockedNames.has(player.name))) {
-          return { slot: slot.slot, court };
-        }
-      }
-    }
-    return null;
-  }, [livePlayerNamesFor]);
-
   const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: Record<string, unknown> = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult } = {}) => {
     const scheduleResult = options.overrideResult ?? result;
     const targetLiveCount = options.targetLiveCount ?? newLiveGames.length;
@@ -163,9 +147,18 @@ export function useLiveQueue({
       completedGames: describeGames(newCompletedGames),
       extraPatch: Object.keys(extraPatch),
     });
-    let nextCompletedGames = newCompletedGames;
-    let nextLiveGames = assignDisplayCourts(normalizeGameRefs(newLiveGames, scheduleResult?.schedule ?? null, targetLiveCount), targetLiveCount)
-      .filter(game => !hasGame(nextCompletedGames, game.slot, game.court));
+    const normalized = scheduleResult
+      ? reconcileLiveQueue({
+        schedule: scheduleResult.schedule,
+        liveGames: newLiveGames,
+        completedGames: newCompletedGames,
+        capacity: targetLiveCount,
+        changedSlot: totalSlots,
+        suspendedPlayerNames: options.suspendedPlayerNames ?? suspendedPlayerNames,
+      })
+      : { liveGames: normalizeGameRefs(newLiveGames, null, targetLiveCount), completedGames: newCompletedGames, promotedGames: [] };
+    let nextCompletedGames = normalized.completedGames;
+    let nextLiveGames = assignDisplayCourts(normalized.liveGames, targetLiveCount);
     let nextResult = scheduleResult;
     let nextSuspendedPlayerNames = options.suspendedPlayerNames ?? suspendedPlayerNames;
     const shouldPromote = targetLiveCount > nextLiveGames.length;
@@ -274,13 +267,15 @@ export function useLiveQueue({
     const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
     if (regenerateFrom(initialRegenSlot) || initialRegenSlot > totalSlots) {
       while (nextLiveGames.length < targetLiveCount) {
-        const reservedIsPlayable = reservedQueuedGame && nextResult
-          ? ![...(nextResult.schedule.find(slot => slot.slot === reservedQueuedGame.slot)?.courts[reservedQueuedGame.court]?.teamA ?? []), ...(nextResult.schedule.find(slot => slot.slot === reservedQueuedGame.slot)?.courts[reservedQueuedGame.court]?.teamB ?? [])]
-            .some(player => livePlayerNamesFor(nextLiveGames, nextResult).has(player.name))
-          : false;
-        const queuedGame = reservedIsPlayable && !reservedGroupRepeats && reservedQueuedGame && !hasGame(nextLiveGames, reservedQueuedGame.slot, reservedQueuedGame.court)
-          ? reservedQueuedGame
-          : nextPlayableQueuedGame(nextResult, nextCompletedGames, nextLiveGames, changedSlot + 1);
+        const transition = reconcileLiveQueue({
+          schedule: nextResult?.schedule ?? [],
+          liveGames: nextLiveGames,
+          completedGames: nextCompletedGames,
+          capacity: nextLiveGames.length + 1,
+          changedSlot,
+          suspendedPlayerNames: nextSuspendedPlayerNames,
+        });
+        const queuedGame = transition.promotedGames[0] ?? null;
         if (!queuedGame) break;
         const beforeCount = nextLiveGames.length;
         nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
@@ -331,7 +326,7 @@ export function useLiveQueue({
       regenerated: Boolean(patch.result),
     });
     patchState(patch);
-  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, nextPlayableQueuedGame, regenerate, result, suspendedPlayerNames, totalSlots]);
+  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, regenerate, result, suspendedPlayerNames, totalSlots]);
 
   const toggleLiveGame = useCallback((slotNum: number, court: number) => {
     const isLive = hasGame(liveGames, slotNum, court);
