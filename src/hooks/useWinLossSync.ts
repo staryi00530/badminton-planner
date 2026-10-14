@@ -40,7 +40,7 @@ export function useWinLossSync({ winLoss, scores, isAdmin, patchState }) {
     saveWinLoss(winLoss).then(() => setDbSynced('synced')).catch(() => setDbSynced('error'));
   }, [winLoss, isAdmin]);
 
-  const computeSkill = useCallback((name) => computeSkillUtil(name, winLoss), [winLoss]);
+  const computeSkill = useCallback((name, level) => computeSkillUtil(name, winLoss, level), [winLoss]);
 
   const updateScore = useCallback((slot, courtIdx, aVal, bVal, teamA, teamB) => {
     if (!isAdmin) return;

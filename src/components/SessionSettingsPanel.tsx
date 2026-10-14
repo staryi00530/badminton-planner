@@ -1,5 +1,16 @@
-// @ts-nocheck
 import { C, FONT } from '../constants';
+import type { ExtraCourt, StaggerMode } from '../types';
+
+interface SessionSettingsPanelProps {
+  sessionStart: string;
+  totalMinutes: number;
+  gameMinutes: number;
+  numCourts: number;
+  extraCourt: ExtraCourt;
+  staggerMode: StaggerMode;
+  preferMixedTeams: boolean;
+  patchState: (patch: Partial<SessionSettingsPanelProps>) => void;
+}
 
 export default function SessionSettingsPanel({
   sessionStart,
@@ -10,7 +21,7 @@ export default function SessionSettingsPanel({
   staggerMode,
   preferMixedTeams,
   patchState,
-}) {
+}: SessionSettingsPanelProps) {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20, boxShadow: C.shadow }}>
       <h3 style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, margin: '0 0 14px' }}>Session</h3>
@@ -39,14 +50,14 @@ export default function SessionSettingsPanel({
         <div style={{ flex: '0 0 auto' }}>
           <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Courts</label>
           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            {[1, 2, 3, 4].map(nc => (
+            {[1, 2, 3, 4, 5].map(nc => (
               <button key={nc} onClick={() => patchState({ numCourts: nc })} style={{ background: numCourts === nc ? C.accentDim : C.card, color: numCourts === nc ? '#fff' : C.textDim, border: `1px solid ${numCourts === nc ? C.accentDim : C.border}`, borderRadius: 6, padding: '8px 14px', fontSize: 14, fontWeight: 600, fontFamily: FONT }}>
                 {nc}
               </button>
             ))}
           </div>
         </div>
-        {numCourts < 4 && (
+        {numCourts < 5 && (
           <div style={{ flex: '0 0 auto' }}>
             <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Extra court</label>
             <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
@@ -68,7 +79,7 @@ export default function SessionSettingsPanel({
         <div style={{ flex: '1 1 200px' }}>
           <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Availability</label>
           <div className="avail-buttons" style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            {[['none', 'All here'], ['group', 'Early / Late'], ['custom', 'Per player']].map(([val, label]) => (
+            {([['none', 'All here'], ['group', 'Early / Late'], ['custom', 'Per player']] as const).map(([val, label]) => (
               <button key={val} onClick={() => patchState({ staggerMode: val })} style={{ background: staggerMode === val ? C.accentDim : C.card, color: staggerMode === val ? '#fff' : C.textDim, border: `1px solid ${staggerMode === val ? C.accentDim : C.border}`, borderRadius: 6, padding: '8px 10px', fontSize: 12, fontWeight: 600, fontFamily: FONT, flex: 1 }}>
                 {label}
               </button>

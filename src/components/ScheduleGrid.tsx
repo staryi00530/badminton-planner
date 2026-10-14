@@ -1,9 +1,10 @@
 import type { ComponentType, RefObject } from 'react';
 import type { Court, Player, SlotResult } from '../algorithm/types';
 import { C } from '../constants';
-import { gameMatches, isSlotCompleted } from '../utils/liveQueue';
+import { gameMatches, isSlotCompleted, liveQueueDebug } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
 import type { EditLayout, PlannerResult, ScoresMap } from '../types';
+import type { QueueAdjustmentNotice } from '../hooks/useLiveQueue';
 import SlotCard from './SlotCard';
 
 // SlotCard is still on the legacy untyped boundary; keep that boundary explicit here.
@@ -32,6 +33,8 @@ interface ScheduleGridProps {
   onAdjustCourts?: (slot: number, delta: number) => void;
   blockedPlayerNames?: Set<string>;
   fromSlot: number;
+  liveCapacity?: number;
+  queueAdjustment?: QueueAdjustmentNotice | null;
 }
 
 export default function ScheduleGrid({
@@ -57,6 +60,8 @@ export default function ScheduleGrid({
   onAdjustCourts,
   blockedPlayerNames,
   fromSlot,
+  liveCapacity = Number.POSITIVE_INFINITY,
+  queueAdjustment = null,
 }: ScheduleGridProps) {
   const courtHasBlockedPlayer = (court: Court) => {
     const blocked = blockedPlayerNames ?? new Set<string>();
@@ -64,15 +69,15 @@ export default function ScheduleGrid({
   };
   const isCourtCompleted = (slot: SlotResult, ci: number) => completedGames.some(game => gameMatches(game, slot.slot, ci));
   const gameKey = (slotNum: number, courtIdx: number) => `${slotNum}:${courtIdx}`;
-  const pastSlots = result.schedule.filter(slot => isSlotCompleted(slot, completedGames));
+  const completedKeys = new Set(completedGames.map(game => gameKey(game.slot, game.court)));
   const firstIncomplete = result.schedule.find(slot => !isSlotCompleted(slot, completedGames));
   const liveGameRefs = (liveGames ?? [])
     .map(game => {
       const slot = result.schedule.find(s => s.slot === game.slot);
-      return slot?.courts[game.court] ? { slot, court: game.court } : null;
+      return slot?.courts[game.court] ? { slot, court: game.court, game } : null;
     })
-    .filter((ref): ref is { slot: SlotResult; court: number } => ref !== null)
-    .sort((a, b) => a.slot.slot - b.slot.slot || a.court - b.court);
+    .filter((ref): ref is { slot: SlotResult; court: number; game: GameRef } => ref !== null)
+    .sort((a, b) => (a.game.displayCourt ?? a.court) - (b.game.displayCourt ?? b.court));
   const fallbackCurrentRefs = liveGameRefs.length > 0 || !firstIncomplete
     ? []
     : firstIncomplete.courts
@@ -85,16 +90,27 @@ export default function ScheduleGrid({
     .flatMap(slot => slot.courts.map((_, ci) => ({ slot, court: ci })))
     .filter(ref =>
       ref.slot.slot >= queueStartSlot &&
-      !isCourtCompleted(ref.slot, ref.court) &&
+      !completedKeys.has(gameKey(ref.slot.slot, ref.court)) &&
       !currentGameKeys.has(gameKey(ref.slot.slot, ref.court))
     );
-  const nextFutureSlot = upcomingGameRefs[0]?.slot.slot;
-  const nextFutureGames = nextFutureSlot == null
-    ? []
-    : upcomingGameRefs.filter(ref => ref.slot.slot === nextFutureSlot);
-  const foldedFutureGames = nextFutureSlot == null
-    ? []
-    : upcomingGameRefs.filter(ref => ref.slot.slot !== nextFutureSlot);
+  // Keep the visible queue wide enough to fill every planned court. If the
+  // next slot has fewer games because availability temporarily limits it, pull
+  // the remaining cards from subsequent slots instead of silently showing a
+  // short queue.
+  const plannedNextCount = Number.isFinite(liveCapacity)
+    ? Math.max(0, liveCapacity)
+    : result.schedule.find(slot => slot.courts.length > 0)?.courts.length ?? 0;
+  const nextFutureGames = upcomingGameRefs.slice(0, plannedNextCount);
+  const nextFutureKeys = new Set(nextFutureGames.map(ref => gameKey(ref.slot.slot, ref.court)));
+  const foldedFutureGames = upcomingGameRefs.filter(ref => !nextFutureKeys.has(gameKey(ref.slot.slot, ref.court)));
+  liveQueueDebug('render', {
+    liveGames: liveGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, displayCourt: ref.game.displayCourt, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
+    completedGames: completedGames.map(game => ({ slot: game.slot, court: game.court + 1 })),
+    fromSlot,
+    current: currentGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
+    next: nextFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
+    future: foldedFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
+  });
   const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
     const liveGame = liveGames
@@ -139,10 +155,11 @@ export default function ScheduleGrid({
       onAdjustCourts={onAdjustCourts}
       blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
       canShowReady={slot.slot === fromSlot + 1}
+      canStartGame={(liveGames?.length ?? 0) < liveCapacity}
     />
   );
 
-  const renderGame = ({ slot, court }: { slot: SlotResult; court: number }) => (
+  const renderGame = ({ slot, court, displayCourt }: { slot: SlotResult; court: number; displayCourt?: number }) => (
     <TypedSlotCard
       key={`${slot.slot}-${court}`}
       slot={slot}
@@ -163,8 +180,10 @@ export default function ScheduleGrid({
       onToggleLive={onToggleLive}
       blockedPlayerNames={(slot.slot === fromSlot || slot.slot === fromSlot + 1) ? blockedPlayerNames : undefined}
       canShowReady={slot.slot === fromSlot + 1}
+      canStartGame={(liveGames?.length ?? 0) < liveCapacity}
       visibleCourtIndexes={[court]}
       compactGameView={true}
+      displayCourt={displayCourt}
     />
   );
 
@@ -227,7 +246,7 @@ export default function ScheduleGrid({
       {currentGameRefs.length > 0 && (
         <section style={sectionStyle}>
           <h3 style={sectionTitleStyle}>Current game</h3>
-          <div className="schedule-grid">
+          <div className="schedule-grid" style={{ gridTemplateColumns: '1fr' }}>
             {currentGameRefs.map(renderGame)}
           </div>
         </section>
@@ -236,6 +255,18 @@ export default function ScheduleGrid({
       {nextFutureGames.length > 0 && (
         <section style={sectionStyle}>
           <h3 style={sectionTitleStyle}>Next game</h3>
+          {queueAdjustment && (
+            <p role="status" style={{ margin: '0 0 10px', padding: '8px 10px', borderLeft: `3px solid ${C.amber}`, background: 'rgba(245,158,11,0.10)', color: C.textDim, fontSize: 12 }}>
+              Queue adjusted because {queueAdjustment.unavailablePlayers.length === 1 ? 'a player was' : 'players were'} still playing.{' '}
+              {queueAdjustment.replacements.length > 0 ? queueAdjustment.replacements.map(({ replacee, replacer, court }, index) => (
+                <span key={`${court}-${replacee}-${replacer}`}>
+                  {index > 0 && ', '}Court {court}: <strong>{replacer}</strong> replaced <strong>{replacee}</strong>
+                </span>
+              )) : (
+                <>Court {queueAdjustment.promotedGame.displayCourt + 1} now uses {queueAdjustment.promotedGame.players.map(player => <strong key={player}>{player} </strong>)}</>
+              )}
+            </p>
+          )}
           <div className="schedule-grid">
             {nextFutureGames.map(renderGame)}
           </div>
@@ -253,13 +284,16 @@ export default function ScheduleGrid({
         </details>
       )}
 
-      {pastSlots.length > 0 && (
+      {completedGames.length > 0 && (
         <details style={{ ...sectionStyle, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px' }}>
           <summary style={{ ...sectionTitleStyle, margin: 0, cursor: 'pointer' }}>
-            Past games ({pastSlots.length})
+            Past games played ({completedGames.length})
           </summary>
           <div className="schedule-grid" style={{ marginTop: 12 }}>
-            {pastSlots.map(renderSlot)}
+            {completedGames.map(game => {
+              const slot = result.schedule.find(item => item.slot === game.slot);
+              return slot?.courts[game.court] ? renderGame({ slot, court: game.court }) : null;
+            })}
           </div>
         </details>
       )}

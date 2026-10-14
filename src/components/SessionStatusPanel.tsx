@@ -7,6 +7,7 @@ interface SessionStatusPanelProps {
   fromSlot: number;
   totalSlots: number;
   liveGames?: GameRef[];
+  completedGames?: GameRef[];
   suspendedPlayerNames?: string[];
   staggerMode: 'none' | 'group' | 'custom';
   setPlayerBack: (index: number) => void;
@@ -20,6 +21,7 @@ export default function SessionStatusPanel({
   fromSlot,
   totalSlots,
   liveGames = [],
+  completedGames = [],
   suspendedPlayerNames = [],
   staggerMode,
   setPlayerBack,
@@ -29,14 +31,24 @@ export default function SessionStatusPanel({
 }: SessionStatusPanelProps) {
   const suspendedSet = new Set(suspendedPlayerNames);
   const sessionComplete = fromSlot > totalSlots && liveGames.length === 0;
+  const nextSlotIdx = fromSlot - 1;
+  const offCount = players.filter(player => {
+    const departed = player.leavesAt != null && player.leavesAt < nextSlotIdx;
+    const notArrived = staggerMode === 'custom' && player.availFrom != null && player.availFrom > nextSlotIdx;
+    return departed || notArrived;
+  }).length;
+  const onCount = players.length - offCount;
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
       <div style={{ fontSize: 11, color: C.textDim, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
         {sessionComplete ? `Session Status · complete · ${totalSlots} done` : `Session Status · next: ${Math.min(fromSlot, totalSlots)}${liveGames.length > 0 ? ` · ${liveGames.length} live` : ` · ${fromSlot - 1} done`}`}
       </div>
+      <div role="status" style={{ color: C.textDim, fontSize: 12, marginBottom: 10 }}>
+        On: <strong style={{ color: C.green }}>{onCount}</strong> · Off: <strong style={{ color: C.textMuted }}>{offCount}</strong> · Live: <strong style={{ color: C.accent }}>{liveGames.length}</strong> · Done: <strong style={{ color: C.text }}>{completedGames.length}</strong>
+      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {players.map((p, idx) => {
-          const nextSlotIdx = fromSlot - 1; // 0-based index of next upcoming slot
+          // 0-based index of the next upcoming slot.
           const departed = p.leavesAt != null && p.leavesAt < nextSlotIdx;
           const notArrived = staggerMode === 'custom' && p.availFrom != null && p.availFrom > nextSlotIdx;
           const leavingScheduled = p.leavesAt != null && !departed;

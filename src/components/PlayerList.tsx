@@ -1,12 +1,41 @@
-// @ts-nocheck
 import { Fragment, useState } from 'react';
 import { C, DEFAULT_PLAYERS, FONT } from '../constants';
+import type { Player, StaggerMode, WinLossMap } from '../types';
 import { sortPlayerIndicesForDisplay } from '../utils/sortPlayers';
 
-function SkillDot({ name, winLoss }) {
+type PlayerField = 'name' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
+type PlayerFieldValue = string | number | null;
+
+interface PlayerListProps {
+  players: Player[];
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
+  winLoss: WinLossMap;
+  staggerMode: StaggerMode;
+  totalSlots: number;
+  nameInput: string;
+  genderInput: 'M' | 'F';
+  levelInput?: 1 | 2 | 3;
+  allDefaultsLoaded: boolean;
+  showPrivateFields?: boolean;
+  setNameInput: (value: string) => void;
+  setGenderInput: (value: 'M' | 'F') => void;
+  setLevelInput?: (value: 1 | 2 | 3) => void;
+  addPlayer: () => void;
+  addSelectedFromBank: (entries: Array<Pick<Player, 'name' | 'gender' | 'level'>>) => void;
+  addToBank: (name: string, gender: 'M' | 'F') => void;
+  removeFromHistory: (name: string) => void;
+  loadDefaults: () => void;
+  resetPlayers: () => void;
+  clearPlayers: () => void;
+  clearWinLoss: () => void;
+  updatePlayer: (index: number, field: PlayerField, value: PlayerFieldValue) => void;
+  removePlayer: (index: number) => void;
+}
+
+function SkillDot({ name, winLoss }: { name: string; winLoss: WinLossMap }) {
   const wl = winLoss[name];
   const total = wl ? (wl.wins ?? 0) + (wl.losses ?? 0) : 0;
-  if (total < 3) return null;
+  if (!wl || total < 3) return null;
   const rate = wl.wins / total;
   const color = rate > 0.6 ? C.green : rate < 0.4 ? '#ef4444' : C.amber;
   const pct = Math.round(rate * 100);
@@ -29,9 +58,12 @@ export default function PlayerList({
   totalSlots,
   nameInput,
   genderInput,
+  levelInput = 2,
   allDefaultsLoaded,
+  showPrivateFields = true,
   setNameInput,
   setGenderInput,
+  setLevelInput = () => {},
   addPlayer,
   addSelectedFromBank,
   addToBank,
@@ -42,16 +74,17 @@ export default function PlayerList({
   clearWinLoss,
   updatePlayer,
   removePlayer,
-}) {
-  const [editingNameIdx, setEditingNameIdx] = useState(null);
-  const [selectedBank, setSelectedBank] = useState(() => new Set());
+}: PlayerListProps) {
+  const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
+  const [selectedBank, setSelectedBank] = useState<Set<string>>(() => new Set());
   const [bankNameInput, setBankNameInput] = useState('');
-  const [bankGenderInput, setBankGenderInput] = useState('M');
+  const [bankGenderInput, setBankGenderInput] = useState<'M' | 'F'>('M');
   const currentNames = new Set(players.map(p => p.name.toLowerCase()));
-  const bankPlayers = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
+  const bankUnsorted = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
+  const bankPlayers = sortPlayerIndicesForDisplay(bankUnsorted).map(index => bankUnsorted[index]!);
   const sortedIndices = sortPlayerIndicesForDisplay(players);
 
-  const toggleSelected = (name) => {
+  const toggleSelected = (name: string) => {
     setSelectedBank(prev => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
@@ -108,7 +141,7 @@ export default function PlayerList({
           style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', color: C.text, fontSize: 14, fontFamily: FONT, outline: 'none' }}
         />
         <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `1px solid ${C.border}`, flexShrink: 0 }}>
-          {['M', 'F'].map(g => (
+          {(['M', 'F'] as const).map(g => (
             <button
               key={g}
               onClick={() => setGenderInput(g)}
@@ -128,6 +161,12 @@ export default function PlayerList({
             </button>
           ))}
         </div>
+        {showPrivateFields && <div title="Private level used for balancing" style={{ display: 'flex', alignItems: 'center', gap: 3, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 4px' }}>
+          <span style={{ fontSize: 10, color: C.textMuted, padding: '0 3px' }}>Level</span>
+          {([1, 2, 3] as const).map(level => (
+            <button key={level} onClick={() => setLevelInput(level)} style={{ background: levelInput === level ? C.accentDim : 'transparent', color: levelInput === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 4, padding: '5px 7px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>{level}</button>
+          ))}
+        </div>}
         <button onClick={addPlayer} style={{ background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '10px 18px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}>
           ADD
         </button>
@@ -176,7 +215,7 @@ export default function PlayerList({
               style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 10px', color: C.text, fontSize: 12, fontFamily: FONT, outline: 'none' }}
             />
             <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `1px solid ${C.border}`, flexShrink: 0 }}>
-              {['M', 'F'].map(g => (
+              {(['M', 'F'] as const).map(g => (
                 <button
                   key={g}
                   onClick={() => setBankGenderInput(g)}
@@ -229,7 +268,10 @@ export default function PlayerList({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
           {sortedIndices.map((i, idx) => {
             const p = players[i];
-            const prevGender = idx > 0 ? players[sortedIndices[idx - 1]].gender : null;
+            const previousIndex = idx > 0 ? sortedIndices[idx - 1] : undefined;
+            const previous = previousIndex == null ? undefined : players[previousIndex];
+            const prevGender = previous?.gender ?? null;
+            if (!p) return null;
             return (
             <Fragment key={`${p.name}-${i}`}>
               {p.gender !== prevGender && (
@@ -249,9 +291,18 @@ export default function PlayerList({
                   style={{ color: p.gender === 'F' ? C.pink : C.accent, fontWeight: 700, fontSize: 14, minWidth: 70, cursor: 'text' }}>{p.name}</span>
               )}
               <span style={{ fontSize: 11, color: C.textDim }}>{p.gender === 'F' ? '♀' : '♂'}</span>
-              {winLoss[p.name] && winLoss[p.name].wins + winLoss[p.name].losses > 0 && (
+              {showPrivateFields && <div title="Private balancing level" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <span style={{ fontSize: 10, color: C.textMuted }}>L</span>
+                {([1, 2, 3] as const).map(level => (
+                  <button key={level} onClick={() => updatePlayer(i, 'level', level)} style={{ background: (p.level ?? 2) === level ? C.accentDim : 'transparent', color: (p.level ?? 2) === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 3, padding: '2px 4px', fontSize: 10, fontWeight: 700, fontFamily: FONT }}>{level}</button>
+                ))}
+              </div>}
+              {winLoss[p.name] && (() => {
+                const record = winLoss[p.name];
+                return !!record && record.wins + record.losses > 0;
+              })() && (
                 <span style={{ fontSize: 11, color: C.textMuted }}>
-                  {winLoss[p.name].wins}W–{winLoss[p.name].losses}L
+                  {winLoss[p.name]?.wins}W–{winLoss[p.name]?.losses}L
                 </span>
               )}
               <SkillDot name={p.name} winLoss={winLoss} />
@@ -280,7 +331,7 @@ export default function PlayerList({
               )}
 
               {staggerMode === 'custom' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: staggerMode === 'group' ? 0 : 'auto' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
                   <span style={{ fontSize: 11, color: C.textDim }}>Slots</span>
                   <input
                     type="number"

@@ -36,8 +36,8 @@ describe('SessionSettingsPanel', () => {
     expect(patchState).toHaveBeenCalledWith({ numCourts: 3 });
   });
 
-  it('hides the "Extra court" section once at the 4-court max', () => {
-    renderPanel({ numCourts: 4 });
+  it('hides the "Extra court" section once at the 5-court max', () => {
+    renderPanel({ numCourts: 5 });
     expect(screen.queryByText('Extra court')).not.toBeInTheDocument();
   });
 

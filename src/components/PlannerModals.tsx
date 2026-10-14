@@ -1,7 +1,8 @@
-// @ts-nocheck
+import type { ReactNode } from 'react';
 import { C, FONT, ICONS } from '../constants';
+import type { SavedPlan, SharePayload } from '../types';
 
-function ModalShell({ children, maxWidth = 400 }) {
+function ModalShell({ children, maxWidth = 400 }: { children: ReactNode; maxWidth?: number }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 24, width: '100%', maxWidth, boxShadow: C.shadow }}>
@@ -11,15 +12,15 @@ function ModalShell({ children, maxWidth = 400 }) {
   );
 }
 
-export function LucideIcon({ name, size = 16 }) {
+export function LucideIcon({ name, size = 16 }: { name: keyof typeof ICONS; size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
-      {ICONS[name].map((d, i) => <path key={i} d={d} />)}
+      {(ICONS[name] ?? []).map((d, i) => <path key={i} d={d} />)}
     </svg>
   );
 }
 
-export function PinPromptModal({ pinInput, pinError, setPinInput, submitPin, close }) {
+export function PinPromptModal({ pinInput, pinError, setPinInput, submitPin, close }: { pinInput: string; pinError: boolean; setPinInput: (value: string) => void; submitPin: () => void; close: () => void }) {
   return (
     <ModalShell maxWidth={280}>
       <p style={{ fontWeight: 700, marginBottom: 12 }}>Enter admin PIN</p>
@@ -33,7 +34,7 @@ export function PinPromptModal({ pinInput, pinError, setPinInput, submitPin, clo
   );
 }
 
-export function ConfirmOverwriteModal({ onConfirm, onCancel }) {
+export function ConfirmOverwriteModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return (
     <ModalShell maxWidth={360}>
       <p style={{ fontWeight: 700, marginBottom: 4 }}>Overwrite confirmed schedule?</p>
@@ -48,7 +49,20 @@ export function ConfirmOverwriteModal({ onConfirm, onCancel }) {
   );
 }
 
-export function SavePlanModal({ needsPin, pinInput, pinError, setPinInput, submitPin, saveTag, setSaveTag, savePlan, canUpdate, savedPlans, isSharedSession, close }) {
+export function SavePlanModal({ needsPin, pinInput, pinError, setPinInput, submitPin, saveTag, setSaveTag, savePlan, canUpdate, savedPlans, isSharedSession, close }: {
+  needsPin: boolean;
+  pinInput: string;
+  pinError: boolean;
+  setPinInput: (value: string) => void;
+  submitPin: () => void;
+  saveTag: string;
+  setSaveTag: (value: string) => void;
+  savePlan: (mode?: 'update' | 'new') => void;
+  canUpdate: boolean;
+  savedPlans: SavedPlan[];
+  isSharedSession: boolean;
+  close: () => void;
+}) {
   const trimmedTag = saveTag.trim().toLowerCase();
   const duplicateTag = !canUpdate && trimmedTag && (savedPlans || []).some(p => p.tag.trim().toLowerCase() === trimmedTag);
   return (
@@ -94,7 +108,7 @@ export function SavePlanModal({ needsPin, pinInput, pinError, setPinInput, submi
   );
 }
 
-export function ShareLinkModal({ copiedShareUrl, sharedUrl, shareIsUpdate, hasExisting, copyShareUrl, newShareLink, close }) {
+export function ShareLinkModal({ copiedShareUrl, sharedUrl, shareIsUpdate, hasExisting, copyShareUrl, newShareLink, close }: { copiedShareUrl: boolean; sharedUrl: string; shareIsUpdate: boolean; hasExisting: boolean; copyShareUrl: () => void; newShareLink: () => void; close: () => void }) {
   const statusText = shareIsUpdate ? '✓ Schedule updated — same link reflects your latest changes.'
     : 'Link copied to clipboard. Anyone who opens it sees this schedule. Hit Save after editing to push your changes to the same link.';
   return (
@@ -119,7 +133,7 @@ export function ShareLinkModal({ copiedShareUrl, sharedUrl, shareIsUpdate, hasEx
   );
 }
 
-export function ShareLoadModal({ pendingShare, loadSharedSchedule, dismiss }) {
+export function ShareLoadModal({ pendingShare, loadSharedSchedule, dismiss }: { pendingShare: SharePayload; loadSharedSchedule: () => void; dismiss: () => void }) {
   return (
     <ModalShell>
       <p style={{ fontWeight: 700, marginBottom: 4 }}>Load shared schedule?</p>
@@ -135,7 +149,7 @@ export function ShareLoadModal({ pendingShare, loadSharedSchedule, dismiss }) {
   );
 }
 
-export function ImportModal({ importText, importError, setImportText, importSchedule, close }) {
+export function ImportModal({ importText, importError, setImportText, importSchedule, close }: { importText: string; importError: string; setImportText: (value: string) => void; importSchedule: () => void; close: () => void }) {
   return (
     <ModalShell maxWidth={520}>
       <p style={{ fontWeight: 700, marginBottom: 8 }}>Import schedule from text</p>
@@ -150,7 +164,7 @@ export function ImportModal({ importText, importError, setImportText, importSche
   );
 }
 
-export function ArchiveTab({ savedPlans, loadPlan, deletePlan }) {
+export function ArchiveTab({ savedPlans, loadPlan, deletePlan }: { savedPlans: SavedPlan[]; loadPlan: (plan: SavedPlan) => void; deletePlan: (id: number) => void }) {
   if (savedPlans.length === 0) {
     return (
       <p style={{ color: C.textDim, fontSize: 13, textAlign: 'center', padding: '40px 0' }}>

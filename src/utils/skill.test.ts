@@ -21,4 +21,9 @@ describe('computeSkill', () => {
   it('returns 0 for an all-losses record', () => {
     expect(computeSkill('A', { A: { wins: 0, losses: 5 } })).toBe(0);
   });
+
+  it('uses the private level as the starting rating when no results exist', () => {
+    expect(computeSkill('Beginner', {}, 1)).toBe(0);
+    expect(computeSkill('Advanced', {}, 3)).toBe(1);
+  });
 });

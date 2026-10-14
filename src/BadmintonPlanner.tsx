@@ -1,5 +1,5 @@
-// @ts-nocheck
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ForcedFirstSlot, GeneratorYield, Player, PlayerInGame } from './algorithm/types';
 import { generateSchedule, generateScheduleGen, extractState, recomputeStats } from './algorithm/scheduler';
 import { C, DEFAULT_PLAYERS, FONT } from './constants';
 import { usePlannerState } from './hooks/usePlannerState';
@@ -11,10 +11,12 @@ import { computeCourtsPerSlot } from './utils/courtsPerSlot';
 import { applyAvailability as applyAvailabilityUtil } from './utils/availability';
 import { formatSlotTime } from './utils/slotTime';
 import { isValidBadmintonScore } from './utils/scoreValidation';
-import { keepGamesBeforeSlot } from './utils/liveQueue';
+import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot } from './utils/liveQueue';
+import type { GameRef } from './utils/liveQueue';
 import { useLiveQueue } from './hooks/useLiveQueue';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
+import PastGamesTab from './components/PastGamesTab';
 import PlayerList from './components/PlayerList';
 import ScheduleGrid from './components/ScheduleGrid';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
@@ -35,12 +37,13 @@ import {
   updateShare,
   fetchShare,
 } from './firebase';
+import type { EditLayout, PlannerResult, SavedPlan, ScoresMap, SharePayload, WinLossMap } from './types';
 
-function normalizeApiBase(base) {
+function normalizeApiBase(base: string | null | undefined) {
   return base ? base.replace(/\/+$/, '') : null;
 }
 
-function copyText(text, onCopied) {
+function copyText(text: string, onCopied?: () => void) {
   const ta = document.createElement('textarea');
   ta.value = text;
   ta.style.position = 'fixed';
@@ -54,15 +57,34 @@ function copyText(text, onCopied) {
   document.body.removeChild(ta);
 }
 
+function courtLineup(result: PlannerResult, game: GameRef) {
+  const court = result.schedule.find(slot => slot.slot === game.slot)?.courts[game.court];
+  return court ? [...court.teamA, ...court.teamB].map(player => player.name).sort().join('|') : '';
+}
+
+function playerNamesLineup(names: string[]) {
+  return [...names].sort().join('|');
+}
+
+function preserveUnchangedGamesAtEditedSlot(games: GameRef[], before: PlannerResult, after: PlannerResult, editedSlot: number) {
+  return games.filter(game =>
+    game.slot < editedSlot || (game.slot === editedSlot && courtLineup(before, game) === courtLineup(after, game))
+  );
+}
+
 function BadmintonPlanner() {
   const { state, setField, patchState } = usePlannerState();
-  const scheduleRef = useRef(null);
+  const scheduleRef = useRef<HTMLDivElement | null>(null);
+  const [debugQueueEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage?.getItem('bp-debug-live-queue') === 'true');
+  const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
+  const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
 
   const {
     players,
     playerHistory,
     nameInput,
     genderInput,
+    levelInput,
     totalMinutes,
     gameMinutes,
     numCourts,
@@ -70,6 +92,7 @@ function BadmintonPlanner() {
     staggerMode,
     sessionStart,
     result,
+    scheduleDirty,
     scores,
     winLoss,
     fromSlot,
@@ -117,6 +140,12 @@ function BadmintonPlanner() {
   const allDefaultsLoaded = DEFAULT_PLAYERS.every(dp => players.some(p => p.name.toLowerCase() === dp.name.toLowerCase()));
 
   const { isAdmin, submitPin, toggleAdminLock } = useAdminAuth({ pinInput, patchState });
+  useEffect(() => {
+    if (isAdmin && privateLevelUnlockRequested) {
+      setPrivateLevelsVisible(true);
+      setPrivateLevelUnlockRequested(false);
+    }
+  }, [isAdmin, privateLevelUnlockRequested]);
   const {
     loadDefaults,
     resetPlayers,
@@ -127,7 +156,7 @@ function BadmintonPlanner() {
     removeFromHistory,
     removePlayer,
     updatePlayer,
-  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, totalSlots, patchState });
+  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, scheduleActive: Boolean(result), patchState });
   const { dbSynced, computeSkill, updateScore: updateScoreBase, clearWinLoss } = useWinLossSync({ winLoss, scores, isAdmin, patchState });
 
   useEffect(() => {
@@ -136,7 +165,7 @@ function BadmintonPlanner() {
     const newOnes = players.filter(p => !known.has(p.name.toLowerCase()));
     if (newOnes.length === 0) return;
     patchState({
-      playerHistory: [...playerHistory, ...newOnes.map(p => ({ name: p.name, gender: p.gender }))],
+      playerHistory: [...playerHistory, ...newOnes.map(p => ({ name: p.name, gender: p.gender, level: p.level }))],
     });
   }, [players]);
 
@@ -217,7 +246,7 @@ function BadmintonPlanner() {
     }
   }, []);
 
-  const slotTime = useCallback((slotIdx) => formatSlotTime(slotIdx, { gameMinutes, sessionStart }), [gameMinutes, sessionStart]);
+  const slotTime = useCallback((slotIdx: number) => formatSlotTime(slotIdx, { gameMinutes, sessionStart }), [gameMinutes, sessionStart]);
 
   const getCourtsPerSlot = useCallback(
     () => computeCourtsPerSlot({ totalSlots, gameMinutes, numCourts, extraCourt }),
@@ -225,7 +254,7 @@ function BadmintonPlanner() {
   );
 
   const applyAvailability = useCallback(
-    (basePlayers) => applyAvailabilityUtil(basePlayers, { staggerMode, totalSlots }),
+    (basePlayers: Player[]) => applyAvailabilityUtil(basePlayers, { staggerMode, totalSlots }),
     [staggerMode, totalSlots]
   );
 
@@ -236,7 +265,7 @@ function BadmintonPlanner() {
     [gameMinutes, getPlayersWithAvailability, isConfirmed, numCourts, result, scores]
   );
 
-  const parseScheduleText = useCallback((text) => parseScheduleTextUtil(text, players), [players]);
+  const parseScheduleText = useCallback((text: string) => parseScheduleTextUtil(text, players), [players]);
 
   const runImport = useCallback(() => {
     const parsed = parseScheduleText(importText);
@@ -244,7 +273,7 @@ function BadmintonPlanner() {
       patchState({ importError: 'Could not parse schedule — paste the full copied text.' });
       return;
     }
-    patchState({ result: parsed, scores: {}, showImport: false, importText: '', importError: '', isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
+    patchState({ result: parsed, scheduleDirty: false, scores: {}, showImport: false, importText: '', importError: '', isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, [importText, parseScheduleText]);
 
   const importSchedule = useCallback(() => {
@@ -257,17 +286,17 @@ function BadmintonPlanner() {
 
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
-    patchState({ isGenerating: true, result: null, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
+    patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
+    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, { preferMixedTeams });
-    let lastValue = null;
+    let lastValue: GeneratorYield | null = null;
     function step() {
       const { value, done } = gen.next();
       if (value) {
         lastValue = value;
         patchState({ genSlot: value.schedule.length });
       }
-      if (done) patchState({ result: lastValue, isGenerating: false });
+      if (done) patchState({ result: lastValue, scheduleDirty: false, isGenerating: false });
       else requestAnimationFrame(step);
     }
     requestAnimationFrame(step);
@@ -282,9 +311,9 @@ function BadmintonPlanner() {
     runGenerate();
   }, [isConfirmed, isGenerating, players.length, runGenerate]);
 
-  const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot, targetCourts) => {
+  const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
     if (players.length < 4 || !result) return;
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
+    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const keptSlots = result.schedule.slice(0, targetFromSlot - 1);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const courtsArr = getCourtsPerSlot();
@@ -293,13 +322,14 @@ function BadmintonPlanner() {
     }
     const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, null, { preferMixedTeams });
     if (!newResult) return;
-    const nextScores = {};
+    const nextScores: ScoresMap = {};
     for (const key in scores) {
       const match = key.match(/^s(\d+)c/);
-      if (match && parseInt(match[1]) < targetFromSlot) nextScores[key] = scores[key];
+      if (match && parseInt(match[1]!, 10) < targetFromSlot && scores[key]) nextScores[key] = scores[key];
     }
     patchState({
       result: newResult,
+      scheduleDirty: false,
       scores: nextScores,
       copied: false,
       isConfirmed: false,
@@ -328,13 +358,13 @@ function BadmintonPlanner() {
   // Inline "+/-" court stepper on a SlotCard: adds/removes a court starting at that
   // slot and cascading to the end of the session (same semantics as the "Re-generate
   // from slot" bar), without needing to scroll to that bar and type the slot number.
-  const adjustCourtsAtSlot = useCallback((slotNum, delta) => {
+  const adjustCourtsAtSlot = useCallback((slotNum: number, delta: number) => {
     if (!result) return;
     const slotData = result.schedule.find(s => s.slot === slotNum);
     const current = slotData ? slotData.courts.length : 0;
     // Never land on 0: fromSlotCourts===0 means "auto" (fall back to the settings-based
     // count), a different concept from "no courts" — keep the stepper's floor at 1.
-    const next = Math.max(1, Math.min(4, current + delta));
+    const next = Math.max(1, Math.min(5, current + delta));
     if (next === current) return;
     if (isConfirmed) {
       patchState({ fromSlot: slotNum, fromSlotCourts: next, pendingOverwrite: 'regenerateRemaining' });
@@ -344,7 +374,7 @@ function BadmintonPlanner() {
   }, [isConfirmed, result, runRegenerateFromSlotWithCourts]);
 
   const runClearSchedule = useCallback(() => {
-    patchState({ result: null, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
+    patchState({ result: null, scheduleDirty: false, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, []);
 
   const clearSchedule = useCallback(() => {
@@ -361,15 +391,18 @@ function BadmintonPlanner() {
   // Regen helper for session-status handlers (late arrivals / early departures).
   // overridePlayers lets the caller pass a pre-modified player list so the new
   // availability takes effect without waiting for a state round-trip.
-  const doRegen = useCallback((targetFromSlot, overridePlayers, blockedForFirstSlot = new Set(), overrideWinLoss = null, overrideScores = null, baseResult = result, forcedFirstSlot = null) => {
+  const doRegen = useCallback((targetFromSlot: number, overridePlayers: Player[] | null, blockedForFirstSlot: Set<string> = new Set(), overrideWinLoss: WinLossMap | null = null, overrideScores: ScoresMap | null = null, baseResult: PlannerResult | null = result, forcedFirstSlot: ForcedFirstSlot | null = null) => {
     if (!baseResult) return null;
     const basePlayers = overridePlayers ?? players;
     const targetSlotIdx = targetFromSlot - 1;
     const sourceWinLoss = overrideWinLoss ?? winLoss;
-    const skillFor = (name) => {
+    const skillFor = (name: string, level?: 1 | 2 | 3) => {
       const wl = sourceWinLoss[name];
-      if (!wl || wl.wins + wl.losses === 0) return 0.5;
-      return wl.wins / (wl.wins + wl.losses);
+      const games = (wl?.wins ?? 0) + (wl?.losses ?? 0);
+      if (level == null) return games === 0 ? 0.5 : wl!.wins / games;
+      const prior = (level - 1) / 2;
+      if (games === 0) return prior;
+      return (prior * 3 + (wl!.wins / games) * games) / (3 + games);
     };
     const playersWithSkill = applyAvailability(basePlayers).map(p => {
       const shouldBlock =
@@ -378,7 +411,7 @@ function BadmintonPlanner() {
         targetSlotIdx <= p.availTo;
       return {
         ...p,
-        skill: skillFor(p.name),
+        skill: skillFor(p.name, p.level),
         ...(shouldBlock ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}),
       };
     });
@@ -387,22 +420,23 @@ function BadmintonPlanner() {
     const courtsArr = getCourtsPerSlot();
     const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, forcedFirstSlot, { preferMixedTeams });
     if (!newResult) return null;
-    const nextScores = {};
+    const nextScores: ScoresMap = {};
     const sourceScores = overrideScores ?? scores;
     for (const key in sourceScores) {
       const m = key.match(/^s(\d+)c/);
-      if (m && parseInt(m[1]) < targetFromSlot) nextScores[key] = sourceScores[key];
+      if (m && parseInt(m[1]!, 10) < targetFromSlot && sourceScores[key]) nextScores[key] = sourceScores[key];
     }
     return { newResult, nextScores };
   }, [applyAvailability, getCourtsPerSlot, players, preferMixedTeams, result, scores, totalSlots, winLoss]);
 
-  const setPlayerBack = useCallback((idx) => {
+  const setPlayerBack = useCallback((idx: number) => {
     patchState({ players: players.map((p, i) => i === idx ? { ...p, leavesAt: null } : p) });
   }, [players]);
 
   const {
     applyLiveGamesUpdate,
     blockedPlayerNames,
+    queueAdjustment,
     setPlayerJoining,
     setPlayerLeaving,
     toggleLiveGame,
@@ -434,7 +468,7 @@ function BadmintonPlanner() {
 
   const cancelOverwrite = useCallback(() => patchState({ pendingOverwrite: null }), []);
 
-  const startSlotEdit = useCallback((slotNum) => {
+  const startSlotEdit = useCallback((slotNum: number) => {
     const s = result?.schedule.find(slot => slot.slot === slotNum);
     if (!s) return;
     patchState({
@@ -446,11 +480,14 @@ function BadmintonPlanner() {
     });
   }, [result]);
 
-  const assignToPosition = useCallback((pos, newName) => {
+  const assignToPosition = useCallback((pos: { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number }, newName: string) => {
     if (!editLayout) return;
-    const findPos = name => {
+    type Position = { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number };
+    const findPos = (name: string): Position | null => {
       for (let ci = 0; ci < editLayout.courts.length; ci++) {
-        const idx = editLayout.courts[ci].indexOf(name);
+        const court = editLayout.courts[ci];
+        if (!court) continue;
+        const idx = court.indexOf(name);
         if (idx >= 0) return { type: 'court', ci, idx };
       }
       const idx = editLayout.sitting.indexOf(name);
@@ -459,12 +496,17 @@ function BadmintonPlanner() {
     const other = findPos(newName);
     const courts = editLayout.courts.map(c => [...c]);
     const sitting = [...editLayout.sitting];
-    const get = p => p.type === 'court' ? courts[p.ci][p.idx] : sitting[p.idx];
-    const set = (p, value) => {
-      if (p.type === 'court') courts[p.ci][p.idx] = value;
-      else sitting[p.idx] = value;
+    const get = (p: Position): string | undefined => p.type === 'court' ? courts[p.ci]?.[p.idx] : sitting[p.idx];
+    const set = (p: Position, value: string) => {
+      if (p.type === 'court') {
+        const court = courts[p.ci];
+        if (court) court[p.idx] = value;
+      } else {
+        sitting[p.idx] = value;
+      }
     };
     const av = get(pos);
+    if (!av) return;
     if (!other) {
       set(pos, newName);
       if (pos.type === 'court' && av && !sitting.includes(av)) sitting.push(av);
@@ -472,6 +514,7 @@ function BadmintonPlanner() {
       return;
     }
     const bv = get(other);
+    if (!bv) return;
     set(pos, bv);
     set(other, av);
     patchState({ editLayout: { courts, sitting } });
@@ -480,24 +523,37 @@ function BadmintonPlanner() {
   const applySlotEdit = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
     const slotIdx = editingSlot - 1;
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name) }));
+    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const keptSlots = result.schedule.slice(0, slotIdx);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const nameToIdx = new Map(playersWithSkill.map((p, i) => [p.name, i]));
-    const courtsForced = editLayout.courts.map(court => court.map(name => nameToIdx.get(name)).filter(i => i !== undefined));
+    const editedSlotBefore = result.schedule[slotIdx];
+    const courtsForced = editLayout.courts.map((court, ci) => {
+      const liveGameOnCourt = liveGames.find(game => game.slot === editingSlot && game.court === ci);
+      const originalCourt = editedSlotBefore?.courts[ci];
+      const originalNames = originalCourt
+        ? [...originalCourt.teamA, ...originalCourt.teamB].map(player => player.name)
+        : [];
+      const editedNames = liveGameOnCourt ? court : originalNames;
+      const preserveLiveCourt = Boolean(liveGameOnCourt)
+        && playerNamesLineup(editedNames) === playerNamesLineup(originalNames);
+      const names = preserveLiveCourt ? originalNames : court;
+      return names.map(name => nameToIdx.get(name)).filter(i => i !== undefined);
+    });
     if (courtsForced.some(c => c.length !== 4)) return;
     const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, { preferMixedTeams });
     if (!newResult) return;
-    const nextScores = {};
+    const nextScores: ScoresMap = {};
     for (const key in scores) {
       const match = key.match(/^s(\d+)c/);
-      if (match && parseInt(match[1]) < editingSlot) nextScores[key] = scores[key];
+      if (match && parseInt(match[1]!, 10) < editingSlot && scores[key]) nextScores[key] = scores[key];
     }
     patchState({
       result: newResult,
+      scheduleDirty: false,
       scores: nextScores,
-      liveGames: keepGamesBeforeSlot(liveGames, editingSlot),
-      completedGames: keepGamesBeforeSlot(completedGames, editingSlot),
+      liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, newResult, editingSlot),
+      completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot),
       editingSlot: null,
       editLayout: null,
       copied: false,
@@ -507,29 +563,31 @@ function BadmintonPlanner() {
   const applySlotEditOnly = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
     const slotIdx = editingSlot - 1;
-    const nameToPlayer = new Map(players.map(p => [p.name, { name: p.name, gender: p.gender }]));
     const origSlot = result.schedule[slotIdx];
+    if (!origSlot) return;
+    const playerFor = (name: string): PlayerInGame => ({ name, gender: players.find(p => p.name === name)?.gender ?? 'M' });
     const newCourts = editLayout.courts.map((court, ci) => ({
       court: origSlot.courts[ci]?.court ?? ci + 1,
-      teamA: [nameToPlayer.get(court[0]), nameToPlayer.get(court[1])],
-      teamB: [nameToPlayer.get(court[2]), nameToPlayer.get(court[3])],
+      teamA: [playerFor(court[0] ?? ''), playerFor(court[1] ?? '')] as [PlayerInGame, PlayerInGame],
+      teamB: [playerFor(court[2] ?? ''), playerFor(court[3] ?? '')] as [PlayerInGame, PlayerInGame],
     }));
-    const newSitting = editLayout.sitting.map(name => nameToPlayer.get(name));
+    const newSitting = editLayout.sitting.map(playerFor);
     const newScheduleRaw = result.schedule.map((slot, i) =>
       i === slotIdx ? { ...slot, courts: newCourts, sitting: newSitting } : slot
     );
     const { schedule: newSchedule, gamesPlayed } = recomputeStats(newScheduleRaw, players);
     patchState({
       result: { schedule: newSchedule, gamesPlayed },
-      liveGames: keepGamesBeforeSlot(liveGames, editingSlot),
-      completedGames: keepGamesBeforeSlot(completedGames, editingSlot),
+      scheduleDirty: false,
+      liveGames: preserveUnchangedGamesAtEditedSlot(liveGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
+      completedGames: preserveUnchangedGamesAtEditedSlot(completedGames, result, { schedule: newSchedule, gamesPlayed }, editingSlot),
       editingSlot: null,
       editLayout: null,
       copied: false,
     });
   }, [completedGames, editingSlot, editLayout, liveGames, players, result]);
 
-  const updateScore = useCallback((slot, courtIdx, aVal, bVal, teamA, teamB) => {
+  const updateScore = useCallback((slot: number, courtIdx: number, aVal: string, bVal: string, teamA: string[], teamB: string[]) => {
     const key = `s${slot}c${courtIdx}`;
     const aNum = parseInt(aVal);
     const bNum = parseInt(bVal);
@@ -556,17 +614,23 @@ function BadmintonPlanner() {
     winners.forEach(name => { nextWinLoss[name] = { wins: (nextWinLoss[name]?.wins ?? 0) + 1, losses: nextWinLoss[name]?.losses ?? 0 }; });
     losers.forEach(name => { nextWinLoss[name] = { wins: nextWinLoss[name]?.wins ?? 0, losses: (nextWinLoss[name]?.losses ?? 0) + 1 }; });
 
-    const nextScores = { ...scores, [key]: { a: aVal, b: bVal, applied: true, teamA, teamB } };
+    const nextScores: ScoresMap = { ...scores, [key]: { a: aVal, b: bVal, applied: true, teamA, teamB } };
     const nextLiveGames = liveGames.filter(lg => !(lg.slot === slot && lg.court === courtIdx));
+    const scheduledCourt = result?.schedule.find(item => item.slot === slot)?.courts[courtIdx];
+    const completedRef = {
+      slot,
+      court: courtIdx,
+      players: scheduledCourt ? [...scheduledCourt.teamA, ...scheduledCourt.teamB].map(player => player.name) : [...teamA, ...teamB],
+    };
     const nextCompletedGames = [
       ...completedGames.filter(game => !gameMatches(game, slot, courtIdx)),
-      { slot, court: courtIdx },
+      completedRef,
     ];
     applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount: liveGames.length });
-  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, scores, updateScoreBase, winLoss]);
+  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, result, scores, updateScoreBase, winLoss]);
 
   const buildCopyText = useCallback(
-    (mode) => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
+    (mode: 'full' | 'games') => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
     [extraCourt, gameMinutes, numCourts, players, result, scores, sessionStart, totalSlots]
   );
 
@@ -595,14 +659,26 @@ function BadmintonPlanner() {
         document.head.appendChild(script);
       });
     }
-    const canvas = await window.html2canvas(scheduleRef.current, { backgroundColor: C.bg, scale: 2 });
+    const renderCanvas = window.html2canvas;
+    if (!renderCanvas) return;
+    const canvas = await renderCanvas(scheduleRef.current, { backgroundColor: C.bg, scale: 2 });
     const link = document.createElement('a');
     link.download = 'badminton-schedule.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
   }, []);
 
-  const savePlan = useCallback((mode) => {
+  const exportDebugLogs = useCallback(() => {
+    const blob = new Blob([exportLiveQueueLogs()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = `badminton-live-queue-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const savePlan = useCallback((mode?: 'update' | 'new') => {
     if (!result || !saveTag.trim()) return;
     const trimmedTag = saveTag.trim();
     const targetId = mode === 'new'
@@ -634,11 +710,11 @@ function BadmintonPlanner() {
     }
   }, [buildSharePayload, isSharedSession, loadedPlanId, result, saveTag, savedPlans, shareId]);
 
-  const loadPlan = useCallback((plan) => {
-    patchState({ result: plan.result, scores: {}, activeTab: 'schedule', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
+  const loadPlan = useCallback((plan: SavedPlan) => {
+    patchState({ result: plan.result, scheduleDirty: false, scores: {}, activeTab: 'schedule', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, []);
 
-  const deletePlan = useCallback((id) => {
+  const deletePlan = useCallback((id: number) => {
     patchState({
       savedPlans: savedPlans.filter(plan => plan.id !== id),
       ...(id === loadedPlanId ? { loadedPlanId: null } : {}),
@@ -709,19 +785,19 @@ function BadmintonPlanner() {
     });
   }, [sharedUrl]);
 
-  const applySharePayload = useCallback((data: SharePayload, sourceShareId) => {
-    const decoded = reconstructScheduleFromSharePayload(data, { currentGameMinutes: gameMinutes, currentNumCourts: numCourts });
-    const { savedPlans: nextSavedPlans, loadedPlanId: newLoadedPlanId } = upsertSavedPlanFromShare(savedPlans, sourceShareId, decoded.result);
+  const applySharePayload = useCallback((data: SharePayload, sourceShareId?: string) => {
+    const decoded = reconstructScheduleFromSharePayload(data as unknown as { p: [string, string][]; cfg?: { g?: number; c?: number }; slots: any[]; scores?: Record<string, any>; confirmed?: boolean }, { currentGameMinutes: gameMinutes, currentNumCourts: numCourts });
+    const { savedPlans: nextSavedPlans, loadedPlanId: newLoadedPlanId } = upsertSavedPlanFromShare(savedPlans as unknown as { id: number | string; sourceShareId?: string }[], sourceShareId ?? null, decoded.result);
 
     patchState({
-      players: decoded.players,
-      gameMinutes: decoded.gameMinutes,
+      players: decoded.players as unknown as Player[],
+      gameMinutes: typeof decoded.gameMinutes === 'number' ? decoded.gameMinutes : gameMinutes,
       numCourts: decoded.numCourts,
-      result: decoded.result,
+      result: decoded.result as PlannerResult,
       scores: decoded.scores,
       isConfirmed: decoded.isConfirmed,
-      loadedPlanId: newLoadedPlanId,
-      savedPlans: nextSavedPlans,
+      loadedPlanId: typeof newLoadedPlanId === 'number' ? newLoadedPlanId : null,
+      savedPlans: nextSavedPlans as SavedPlan[],
       liveGames: [],
       completedGames: [],
       suspendedPlayerNames: [],
@@ -732,7 +808,7 @@ function BadmintonPlanner() {
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: FONT, padding: '24px 16px' }}>
       <div style={{ maxWidth: 780, margin: '0 auto' }}>
         {showPinPrompt && <PinPromptModal pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} close={() => patchState({ showPinPrompt: false, pinInput: '', pinError: false })} />}
-        {showSavePlan && <SavePlanModal needsPin={window.ADMIN_PIN && !isAdmin} pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} saveTag={saveTag} setSaveTag={value => patchState({ saveTag: value })} savePlan={savePlan} canUpdate={loadedPlanId != null && savedPlans.some(p => p.id === loadedPlanId)} savedPlans={savedPlans} isSharedSession={isSharedSession} close={() => patchState({ showSavePlan: false, pinInput: '', pinError: false })} />}
+        {showSavePlan && <SavePlanModal needsPin={Boolean(window.ADMIN_PIN && !isAdmin)} pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} saveTag={saveTag} setSaveTag={value => patchState({ saveTag: value })} savePlan={savePlan} canUpdate={loadedPlanId != null && savedPlans.some(p => p.id === loadedPlanId)} savedPlans={savedPlans} isSharedSession={isSharedSession} close={() => patchState({ showSavePlan: false, pinInput: '', pinError: false })} />}
         {showShareModal && <ShareLinkModal copiedShareUrl={copiedShareUrl} sharedUrl={sharedUrl} shareIsUpdate={shareIsUpdate} hasExisting={isFirebaseConfigured() ? !!shareId : !!(shareId && shareToken)} copyShareUrl={copyShareUrl} newShareLink={() => shareLink(true)} close={() => patchState({ showShareModal: false })} />}
         {showImport && <ImportModal importText={importText} importError={importError} setImportText={value => patchState({ importText: value, importError: '' })} importSchedule={importSchedule} close={() => patchState({ showImport: false, importText: '', importError: '' })} />}
 
@@ -754,6 +830,18 @@ function BadmintonPlanner() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+            {debugQueueEnabled && <button onClick={exportDebugLogs} title="Download live queue debug logs" aria-label="Export debug logs" style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}><LucideIcon name="download" size={13} /> Debug</button>}
+            {!isSharedSession && <button onClick={() => {
+              if (privateLevelsVisible) {
+                setPrivateLevelsVisible(false);
+                return;
+              }
+              setPrivateLevelUnlockRequested(true);
+              if (isAdmin) setPrivateLevelsVisible(true);
+              else toggleAdminLock();
+            }} title={privateLevelsVisible ? 'Exit admin view' : 'Open admin view with the admin PIN'} style={{ background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}>
+              {privateLevelsVisible ? 'Exit admin view' : 'Admin view'}
+            </button>}
             {isFirebaseConfigured() && <span title={dbSynced === 'synced' ? 'Win-loss synced to cloud' : dbSynced === 'syncing' ? 'Syncing…' : dbSynced === 'error' ? 'Sync failed' : 'Cloud sync ready'} style={{ fontSize: 13, color: dbSynced === 'synced' ? C.green : dbSynced === 'error' ? '#ef4444' : C.textMuted }}>{dbSynced === 'synced' ? '☁ Synced' : dbSynced === 'syncing' ? '⟳' : dbSynced === 'error' ? '☁ ✗' : '☁'}</span>}
             {window.ADMIN_PIN && (
               <button onClick={toggleAdminLock} title={isAdmin ? 'Click to lock score entry' : 'Click to unlock score entry'} style={{ background: isAdmin ? C.accentDim : C.card, color: isAdmin ? '#fff' : C.textMuted, border: `1px solid ${isAdmin ? 'transparent' : C.border}`, borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, fontFamily: FONT }}>
@@ -771,7 +859,7 @@ function BadmintonPlanner() {
         )}
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
-          {[['schedule', 'Schedule'], ['archive', `Saved Plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How It Works']].map(([val, label]) => (
+          {([['schedule', 'Schedule'], ['past', `Past games${completedGames.length ? ` (${completedGames.length})` : ''}`], ['archive', `Saved Plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How It Works']] as const).map(([val, label]) => (
             <button key={val} onClick={() => patchState({ activeTab: val })}
               style={{
                 flex: 1, background: activeTab === val ? C.accentDim : C.card, color: activeTab === val ? '#fff' : C.textDim,
@@ -786,6 +874,8 @@ function BadmintonPlanner() {
         {activeTab === 'archive' && (
           <ArchiveTab savedPlans={savedPlans} loadPlan={loadPlan} deletePlan={deletePlan} />
         )}
+
+        {activeTab === 'past' && <PastGamesTab result={result} completedGames={completedGames} scores={scores} />}
 
         {activeTab === 'about' && <AboutTab />}
 
@@ -810,9 +900,12 @@ function BadmintonPlanner() {
           totalSlots={totalSlots}
           nameInput={nameInput}
           genderInput={genderInput}
+          levelInput={levelInput}
           allDefaultsLoaded={allDefaultsLoaded}
+          showPrivateFields={!isSharedSession && privateLevelsVisible}
           setNameInput={value => setField('nameInput', value)}
           setGenderInput={value => setField('genderInput', value)}
+          setLevelInput={value => setField('levelInput', value)}
           addPlayer={addPlayer}
           addSelectedFromBank={addSelectedFromBank}
           addToBank={addToBank}
@@ -867,11 +960,12 @@ function BadmintonPlanner() {
 
         {result && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
+            {scheduleDirty && <span style={{ width: '100%', color: C.amber, fontSize: 12 }}>Roster changed — choose the first affected slot below, then apply regeneration to update the remaining schedule.</span>}
             <span style={{ fontSize: 12, color: C.textDim }}>Re-generate from slot</span>
             <input type="number" min={1} max={totalSlots} value={fromSlot} onChange={e => patchState({ fromSlot: Math.min(totalSlots, Math.max(1, +e.target.value)) })} style={{ width: 48, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', color: C.text, fontSize: 13, fontFamily: FONT, textAlign: 'center' }} />
             <span style={{ fontSize: 12, color: C.textDim }}>with</span>
             <div style={{ display: 'flex', gap: 4 }}>
-              {[0, 1, 2, 3, 4].map(n => (
+              {[0, 1, 2, 3, 4, 5].map(n => (
                 <button key={n} onClick={() => patchState({ fromSlotCourts: n })} style={{ padding: '4px 8px', fontSize: 12, fontWeight: 600, fontFamily: FONT, borderRadius: 4, border: `1px solid ${fromSlotCourts === n ? C.accent : C.border}`, background: fromSlotCourts === n ? C.accentDim : C.bg, color: fromSlotCourts === n ? '#fff' : C.textDim, cursor: 'pointer' }}>{n === 0 ? 'auto' : `${n}C`}</button>
               ))}
             </div>
@@ -888,6 +982,7 @@ function BadmintonPlanner() {
             fromSlot={fromSlot}
             totalSlots={totalSlots}
             liveGames={liveGames}
+            completedGames={completedGames}
             suspendedPlayerNames={suspendedPlayerNames}
             staggerMode={staggerMode}
             setPlayerBack={setPlayerBack}
@@ -921,6 +1016,8 @@ function BadmintonPlanner() {
             onAdjustCourts={adjustCourtsAtSlot}
             blockedPlayerNames={blockedPlayerNames}
             fromSlot={fromSlot}
+            liveCapacity={getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? numCourts}
+            queueAdjustment={queueAdjustment}
           />
         )}
         </>

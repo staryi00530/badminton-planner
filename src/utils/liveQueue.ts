@@ -1,6 +1,23 @@
 export interface GameRef {
   slot: number;
   court: number;
+  players?: string[];
+  /** Physical live-court lane used for stable Current game ordering. */
+  displayCourt?: number;
+}
+
+const LIVE_QUEUE_LOG_LIMIT = 500;
+const liveQueueLogBuffer: Array<{ timestamp: string; label: string; details: Record<string, unknown> }> = [];
+
+export function liveQueueDebug(label: string, details: Record<string, unknown> = {}) {
+  if (typeof window === 'undefined' || window.localStorage?.getItem('bp-debug-live-queue') !== 'true') return;
+  liveQueueLogBuffer.push({ timestamp: new Date().toISOString(), label, details });
+  if (liveQueueLogBuffer.length > LIVE_QUEUE_LOG_LIMIT) liveQueueLogBuffer.shift();
+  console.log(`[live-queue] ${label}`, JSON.stringify(details));
+}
+
+export function exportLiveQueueLogs() {
+  return JSON.stringify({ exportedAt: new Date().toISOString(), logs: liveQueueLogBuffer }, null, 2);
 }
 
 export function gameMatches(game: GameRef, slot: number, court: number) {
@@ -28,7 +45,12 @@ export function normalizeGameRefs(
     const key = `${game.slot}:${game.court}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    normalized.push({ slot: game.slot, court: game.court });
+    normalized.push({
+      slot: game.slot,
+      court: game.court,
+      ...(game.players ? { players: [...game.players] } : {}),
+      ...(game.displayCourt != null ? { displayCourt: game.displayCourt } : {}),
+    });
     if (normalized.length >= maxCount) break;
   }
   return normalized;

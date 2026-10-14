@@ -51,11 +51,16 @@ function createInitialState(): PlannerState {
     localStorage.removeItem('bp-share-token');
   } catch {}
 
+  const storedPlayers = loadState<PlannerState['players']>(STORAGE_KEYS.players, []);
+  const storedHistory = loadState<PlannerState['playerHistory']>(STORAGE_KEYS.playerHistory, []);
   return {
-    players: loadState(STORAGE_KEYS.players, []),
-    playerHistory: loadState(STORAGE_KEYS.playerHistory, []),
+    // Older rosters and the original defaults did not store a level. Normalize those
+    // records so the private setting survives reloads and future persistence writes.
+    players: storedPlayers.map(player => ({ ...player, level: player.level ?? 2 })),
+    playerHistory: storedHistory.map(player => ({ ...player, level: player.level ?? 2 })),
     nameInput: '',
     genderInput: 'M',
+    levelInput: 2,
     totalMinutes: loadState(STORAGE_KEYS.totalMinutes, DEFAULT_TOTAL_MINUTES),
     gameMinutes: loadState(STORAGE_KEYS.gameMinutes, DEFAULT_GAME_MINUTES),
     numCourts: loadState(STORAGE_KEYS.numCourts, 1),
@@ -63,6 +68,7 @@ function createInitialState(): PlannerState {
     staggerMode: loadState(STORAGE_KEYS.staggerMode, 'none'),
     sessionStart: loadState(STORAGE_KEYS.sessionStart, ''),
     result: loadState(STORAGE_KEYS.result, null),
+    scheduleDirty: false,
     scores: loadState(STORAGE_KEYS.scores, {}),
     winLoss: loadState(STORAGE_KEYS.winLoss, {}),
     fromSlot: 1,

@@ -3,11 +3,13 @@ export type Gender = 'M' | 'F';
 export interface Player {
   name: string;
   gender: Gender;
+  /** Private 1-3 starting level; omitted from share payloads and public schedule text. */
+  level?: 1 | 2 | 3;
   skill?: number;
   availFrom: number;
   availTo: number;
   group?: string;
-  leavesAt?: number;
+  leavesAt?: number | null;
 }
 
 export type PlayerInGame = {

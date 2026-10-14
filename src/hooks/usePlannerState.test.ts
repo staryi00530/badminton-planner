@@ -25,7 +25,7 @@ describe('usePlannerState — defaults & loading', () => {
     localStorage.setItem('bp-players', JSON.stringify([{ name: 'Alice', gender: 'F' }]));
     const { result } = renderHook(() => usePlannerState());
     expect(result.current.state.numCourts).toBe(3);
-    expect(result.current.state.players).toEqual([{ name: 'Alice', gender: 'F' }]);
+    expect(result.current.state.players).toEqual([{ name: 'Alice', gender: 'F', level: 2 }]);
   });
 
   it('cleans up legacy bp-share-id/bp-share-token localStorage keys on init', () => {
@@ -61,6 +61,15 @@ describe('usePlannerState — persistence to localStorage', () => {
     const { result } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ numCourts: 4 }));
     expect(JSON.parse(localStorage.getItem('bp-numCourts')!)).toBe(4);
+  });
+
+  it('persists private player levels across reloads', () => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ players: [{ name: 'Alice', gender: 'F', level: 3, availFrom: 0, availTo: 11 }] }));
+    expect(JSON.parse(localStorage.getItem('bp-players')!)[0].level).toBe(3);
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.players[0]?.level).toBe(3);
   });
 
   it('removes the result key from localStorage when cleared to null', () => {

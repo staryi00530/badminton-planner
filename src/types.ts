@@ -67,9 +67,10 @@ export interface SharePayload {
 
 export interface PlannerState {
   players: Player[];
-  playerHistory: Player[];
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   nameInput: string;
   genderInput: 'M' | 'F';
+  levelInput: 1 | 2 | 3;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;
@@ -77,6 +78,7 @@ export interface PlannerState {
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;
+  scheduleDirty: boolean;
   scores: ScoresMap;
   winLoss: WinLossMap;
   fromSlot: number;
@@ -95,7 +97,7 @@ export interface PlannerState {
   savedPlans: SavedPlan[];
   showSavePlan: boolean;
   saveTag: string;
-  activeTab: 'schedule' | 'archive' | 'about';
+  activeTab: 'schedule' | 'past' | 'archive' | 'about';
   editingSlot: number | null;
   editLayout: EditLayout | null;
   pendingShare: SharePayload | null;
@@ -119,7 +121,7 @@ export interface PlannerState {
 
 export interface PlannerPersistedState {
   players: Player[];
-  playerHistory: Player[];
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;
@@ -157,12 +159,13 @@ export interface ScheduleGridProps {
 
 declare global {
   interface Window {
-    ADMIN_PIN?: string;
+    ADMIN_PIN: string | null;
     DB?: {
       load: () => Promise<WinLossMap>;
       save: (data: WinLossMap) => Promise<void>;
     };
-    SHARE_API_BASE?: string | null;
+    SHARE_API_BASE: string | null;
     html2canvas?: (node: HTMLElement, options?: unknown) => Promise<HTMLCanvasElement>;
+    DEBUG_LIVE_QUEUE?: boolean;
   }
 }

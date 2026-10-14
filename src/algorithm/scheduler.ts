@@ -313,6 +313,76 @@ export function* generateScheduleGen(
       }
     }
 
+    // Spread extreme levels across courts when the selected roster allows it.
+    // This is deliberately a soft constraint: forced lineups and unavoidable
+    // roster shapes must remain valid even when they contain a level gap.
+    if (!isForcedSlot && courtGroups.length > 1) {
+      const levelOf = (pid: number) => players[pid]!.level ?? 2;
+      const groupSpan = (group: number[]) => {
+        const levels = group.map(levelOf);
+        return Math.max(...levels) - Math.min(...levels);
+      };
+      const totalSpan = () => courtGroups.reduce((sum, group) => sum + groupSpan(group), 0);
+
+      for (let pass = 0; pass < courtGroups.length; pass++) {
+        let improved = false;
+        for (let a = 0; a < courtGroups.length; a++) {
+          for (let b = a + 1; b < courtGroups.length; b++) {
+            const before = totalSpan();
+            // A single swap cannot improve two equally mixed courts. Try
+            // exchanging two same-gender players first so those courts can
+            // become level-homogeneous when the roster permits it.
+            for (let ai1 = 0; ai1 < courtGroups[a]!.length && !improved; ai1++) {
+              for (let ai2 = ai1 + 1; ai2 < courtGroups[a]!.length && !improved; ai2++) {
+                if (players[courtGroups[a]![ai1]!]!.gender !== players[courtGroups[a]![ai2]!]!.gender) continue;
+                for (let bi1 = 0; bi1 < courtGroups[b]!.length && !improved; bi1++) {
+                  for (let bi2 = bi1 + 1; bi2 < courtGroups[b]!.length; bi2++) {
+                    if (players[courtGroups[b]![bi1]!]!.gender !== players[courtGroups[b]![bi2]!]!.gender) continue;
+                    const left1 = courtGroups[a]![ai1]!;
+                    const left2 = courtGroups[a]![ai2]!;
+                    const right1 = courtGroups[b]![bi1]!;
+                    const right2 = courtGroups[b]![bi2]!;
+                    if (players[left1]!.gender !== players[right1]!.gender || players[left2]!.gender !== players[right2]!.gender) continue;
+                    courtGroups[a]![ai1] = right1;
+                    courtGroups[a]![ai2] = right2;
+                    courtGroups[b]![bi1] = left1;
+                    courtGroups[b]![bi2] = left2;
+                    if (totalSpan() < before) {
+                      improved = true;
+                      break;
+                    }
+                    courtGroups[a]![ai1] = left1;
+                    courtGroups[a]![ai2] = left2;
+                    courtGroups[b]![bi1] = right1;
+                    courtGroups[b]![bi2] = right2;
+                  }
+                }
+              }
+            }
+            if (improved) break;
+            for (let ai = 0; ai < courtGroups[a]!.length && !improved; ai++) {
+              for (let bi = 0; bi < courtGroups[b]!.length; bi++) {
+                const left = courtGroups[a]![ai]!;
+                const right = courtGroups[b]![bi]!;
+                if (players[left]!.gender !== players[right]!.gender) continue;
+                courtGroups[a]![ai] = right;
+                courtGroups[b]![bi] = left;
+                if (totalSpan() < before) {
+                  improved = true;
+                  break;
+                }
+                courtGroups[a]![ai] = left;
+                courtGroups[b]![bi] = right;
+              }
+            }
+            if (improved) break;
+          }
+          if (improved) break;
+        }
+        if (!improved) break;
+      }
+    }
+
     // ── Group-repeat detection & fix ─────────────────────────────────────────
     // Try to replace 2 players (then 1) to avoid repeating the exact same
     // 4-player group on a court.  mustRest players are used as subs when
@@ -412,6 +482,11 @@ export function* generateScheduleGen(
         const skillA = (players[tA[0]]!.skill ?? 0.5) + (players[tA[1]]!.skill ?? 0.5);
         const skillB = (players[tB[0]]!.skill ?? 0.5) + (players[tB[1]]!.skill ?? 0.5);
         score += Math.abs(skillA - skillB) * 2;
+        // Keep a level-1 and level-3 player from being teammates where another
+        // pairing is available. A one-level difference is acceptable; larger
+        // gaps are penalized softly so hard availability/format constraints win.
+        const teamLevelGap = (team: [number, number]) => Math.max(0, Math.abs((players[team[0]]!.level ?? 2) - (players[team[1]]!.level ?? 2)) - 1);
+        score += (teamLevelGap(tA) + teamLevelGap(tB)) * 12;
         score += rng() * 1.5;
         if (score < bestScore) {
           bestScore = score;

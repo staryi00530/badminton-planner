@@ -79,6 +79,39 @@ describe('Equal games', () => {
   });
 });
 
+describe('Level balancing', () => {
+  it('avoids putting level-1 and level-3 players on the same team when possible', () => {
+    const players = makePlayers(4).map((player, index) => ({
+      ...player,
+      level: (index < 2 ? 1 : 3) as 1 | 3,
+    }));
+    for (let seed = 1; seed <= 10; seed++) {
+      const result = generateSchedule(players, 1, [1], 0, null, null, {}, seededRng(seed));
+      expect(result).not.toBeNull();
+      const court = result!.schedule[0]!.courts[0]!;
+      for (const team of [court.teamA, court.teamB]) {
+        const levels = team.map(player => players.find(p => p.name === player.name)!.level!);
+        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('separates level-1 and level-3 players onto different courts when possible', () => {
+    const players = makePlayers(8).map((player, index) => ({
+      ...player,
+      level: (index < 4 ? 1 : 3) as 1 | 3,
+    }));
+    for (let seed = 1; seed <= 10; seed++) {
+      const result = generateSchedule(players, 1, [2], 0, null, null, {}, seededRng(seed));
+      expect(result).not.toBeNull();
+      for (const court of result!.schedule[0]!.courts) {
+        const levels = [...court.teamA, ...court.teamB].map(player => players.find(p => p.name === player.name)!.level!);
+        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
 describe('Availability windows respected', () => {
   it('player with availTo: 4 never appears after slot 5 (0-indexed slot 4)', () => {
     for (let seed = 1; seed <= 20; seed++) {
@@ -468,6 +501,15 @@ describe('Forced court count from a mid-session slot onward (per-slot "add court
         expect(court.teamA.length).toBe(2);
         expect(court.teamB.length).toBe(2);
       }
+    }
+  });
+
+  it('forcing 5 courts with 20 players actually uses all 5', () => {
+    const players = makePlayers(20, 0, 8);
+    const { regen } = regenerateFromWithForcedCourts(players, 8, 1, 3, 5, 1);
+    for (let i = 2; i < 8; i++) {
+      expect(regen.schedule[i]!.courts.length).toBe(5);
+      expect(regen.schedule[i]!.courts.every(court => court.teamA.length === 2 && court.teamB.length === 2)).toBe(true);
     }
   });
 });
