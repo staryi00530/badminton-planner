@@ -1,10 +1,13 @@
-import { C } from '../constants';
+import { C, FONT } from '../constants';
 import type { StaggerMode } from '../types';
+import { LucideIcon } from './PlannerModals';
 import { SessionSummary } from './SessionStatusPanel';
 import ScheduleGrid, { ScheduleGame, type ScheduledGame, type ScheduleGridProps } from './ScheduleGrid';
 
 interface LiveSessionBoardProps extends ScheduleGridProps {
   staggerMode?: StaggerMode;
+  changeSlot?: number;
+  changeCapacity?: number;
 }
 
 const key = (slot: number, court: number) => `${slot}:${court}`;
@@ -21,6 +24,11 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
   const pending = allGames.filter(game => !completed.has(key(game.slot.slot, game.court)) && !liveKeys.has(key(game.slot.slot, game.court)));
   const plannedCapacity = props.liveCapacity ?? Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const capacity = Number.isFinite(plannedCapacity) ? plannedCapacity : 5;
+  const changeSlot = props.changeSlot ?? fromSlot;
+  const changeCapacity = props.changeCapacity ?? capacity;
+  const lastSlot = Math.max(0, ...result.schedule.map(slot => slot.slot));
+  const canChange = changeSlot <= lastSlot;
+  const upcomingSlot = result.schedule.find(slot => slot.slot >= changeSlot);
   const laneCount = Math.min(5, Math.max(capacity, ...result.schedule.map(slot => slot.courts.length), ...live.map(game => game.displayCourt + 1)));
   const busyPlayers = new Map<string, number>();
   for (const game of live) {
@@ -50,7 +58,6 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
     const current = live.find(game => game.displayCourt === index);
     const game = laneGames.get(index);
     const reason = !current && game ? waitingReason(game) : '';
-    const upcomingSlot = result.schedule.find(slot => slot.slot >= fromSlot);
     const unfilled = !game && index < capacity && upcomingSlot != null && upcomingSlot.courts.length < capacity;
     const notYetAvailable = !game && index >= capacity && pending.some(game => game.court === index);
     const explanation = notYetAvailable ? 'This court is not available in the current slot.'
@@ -72,6 +79,18 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
   const gameProps = { ...props, blockedPlayerNames };
   return <div ref={props.scheduleRef} role="region" aria-label="Live session board" style={{ minWidth: 0, marginBottom: 24 }}>
     <SessionSummary players={props.players} liveGames={liveGames} completedGames={completedGames} result={result} fromSlot={fromSlot} staggerMode={props.staggerMode ?? 'none'} />
+    {props.onAdjustCourts && <section aria-label="Court capacity" style={{ marginBottom: 16 }}>
+      <p style={{ margin: '0 0 8px', color: C.textDim, fontSize: 12 }}>
+        {canChange ? `Court changes from slot ${changeSlot}: ${changeCapacity} court${changeCapacity === 1 ? '' : 's'} planned.` : 'No upcoming slot can be changed.'}
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {([{ label: 'Add court', delta: 1, icon: 'chevron-up', disabled: changeCapacity >= 5 }, { label: 'Remove court', delta: -1, icon: 'chevron-down', disabled: changeCapacity <= 1 }]).map(action =>
+          <button key={action.label} onClick={() => props.onAdjustCourts?.(changeSlot, action.delta)} disabled={!canChange || action.disabled} title={`${action.label} from slot ${changeSlot}; current games stay on court`} style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontFamily: FONT, fontSize: 12, opacity: !canChange || action.disabled ? 0.5 : 1 }}>
+            <LucideIcon name={action.icon} size={14} />{action.label}
+          </button>
+        )}
+      </div>
+    </section>}
     <section aria-label="What happens now?" style={{ borderLeft: `3px solid ${waiting && !ready ? C.amber : C.green}`, padding: '8px 12px', marginBottom: 16, overflowWrap: 'anywhere' }}>
       <h2 style={{ fontSize: 15, margin: '0 0 6px' }}>What happens now?</h2>
       <p role="status" style={{ margin: 0, fontSize: 14 }}>{instruction}</p>
@@ -94,8 +113,9 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
         </div>)}
       </div>
     </section>
-    {nextGames.length > 0 && <section style={{ marginBottom: 18 }}>
+    {(nextGames.length > 0 || (upcomingSlot && upcomingSlot.courts.length < capacity)) && <section style={{ marginBottom: 18 }}>
       <h3 style={{ fontSize: 14, margin: '0 0 10px' }}>Next game</h3>
+      {upcomingSlot && upcomingSlot.courts.length < capacity && <p role="status" style={{ color: C.amber, fontSize: 12 }}>Slot {upcomingSlot.slot}: fewer than four eligible players are available for every planned court. Current games remain on court.</p>}
       <div className="schedule-grid">{nextGames.map(game => <ScheduleGame key={key(game.slot.slot, game.court)} props={gameProps} game={game} sessionActions waitingReason={waitingReason(game)} />)}</div>
     </section>}
     <ScheduleGrid {...gameProps} futureGames={futureGames} />

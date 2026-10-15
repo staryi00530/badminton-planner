@@ -23,7 +23,7 @@ function renderPanel(overrides = {}) {
 }
 
 function rowFor(name: string) {
-  return screen.getByText(name).closest('div')!;
+  return screen.getByRole('group', { name: `Availability for ${name}` });
 }
 
 const groupPlayers: Player[] = [
@@ -46,6 +46,13 @@ describe('SessionStatusPanel', () => {
   it('shows a completed status after the final slot is done', () => {
     renderPanel({ fromSlot: 13, totalSlots: 12 });
     expect(screen.getByText('Session Status · complete · 12 done')).toBeInTheDocument();
+  });
+
+  it('names Leaving explicitly and disables availability actions when no future slot remains', () => {
+    const handlers = renderPanel({ fromSlot: 13, liveGames: [{ slot: 12, court: 0 }] });
+    expect(within(rowFor('Here')).getByRole('button', { name: 'Leaving' })).toBeDisabled();
+    expect(screen.getByText(/no upcoming slot/i)).toBeInTheDocument();
+    expect(handlers.setPlayerLeaving).not.toHaveBeenCalled();
   });
 
   it('a currently-available player shows skip-next and leaving controls', async () => {

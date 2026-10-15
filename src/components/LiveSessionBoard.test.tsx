@@ -39,7 +39,7 @@ function guidance() { return within(screen.getByRole('region', { name: 'What hap
 function InteractiveBoard({ result, completedGames }: { result: PlannerResult; completedGames: GameRef[] }) {
   const [state, setState] = useState({ result, completedGames, liveGames: [] as GameRef[], fromSlot: 1 });
   const queue = useLiveQueue({
-    ...state, players, suspendedPlayerNames: [], totalSlots: result.schedule.length,
+    ...state, players, suspendedPlayerNames: [], scores: {}, courtOverrides: {}, isConfirmed: false, totalSlots: result.schedule.length,
     canPlayerJoin: true, getCourtsPerSlot: () => result.schedule.map(() => 2),
     regenerate: () => null,
     patchState: (patch: RuntimePatch) => setState(previous => ({ ...previous, ...patch, result: patch.result ?? previous.result })),
@@ -48,6 +48,22 @@ function InteractiveBoard({ result, completedGames }: { result: PlannerResult; c
 }
 
 describe('LiveSessionBoard', () => {
+  it('offers bounded court changes from the first mutable slot and delegates the command', async () => {
+    const input = props({ liveCapacity: 4, changeSlot: 2, changeCapacity: 4, onAdjustCourts: vi.fn() });
+    const { rerender } = render(<LiveSessionBoard {...input} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Add court' }));
+    expect(input.onAdjustCourts).toHaveBeenCalledWith(2, 1);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove court' }));
+    expect(input.onAdjustCourts).toHaveBeenCalledWith(2, -1);
+    rerender(<LiveSessionBoard {...input} changeCapacity={5} />);
+    expect(screen.getByRole('button', { name: 'Add court' })).toBeDisabled();
+    rerender(<LiveSessionBoard {...input} changeCapacity={1} />);
+    expect(screen.getByRole('button', { name: 'Remove court' })).toBeDisabled();
+    rerender(<LiveSessionBoard {...input} changeSlot={4} />);
+    expect(screen.getByRole('button', { name: 'Add court' })).toBeDisabled();
+    expect(screen.getByText(/no upcoming slot/i)).toBeInTheDocument();
+  });
+
   it('keeps all five physical lanes stable when a promoted game has another schedule court index', () => {
     const initial = props({ liveGames: [0, 1, 2, 3, 4].map(ci => ({ slot: 1, court: ci, displayCourt: ci })) });
     const { rerender } = render(<LiveSessionBoard {...initial} />);

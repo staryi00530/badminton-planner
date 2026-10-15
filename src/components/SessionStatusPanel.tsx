@@ -61,6 +61,7 @@ export default function SessionStatusPanel({
 }: SessionStatusPanelProps) {
   const suspendedSet = new Set(suspendedPlayerNames);
   const sessionComplete = fromSlot > totalSlots && liveGames.length === 0;
+  const noUpcomingSlot = fromSlot > totalSlots;
   const nextSlotIdx = fromSlot - 1;
   const resolvedPlayers = applyAvailability(players, { staggerMode, totalSlots });
   const offCount = resolvedPlayers.filter(player => !(player.availFrom <= nextSlotIdx && player.availTo >= nextSlotIdx)).length;
@@ -73,6 +74,7 @@ export default function SessionStatusPanel({
       <div role="status" style={{ color: C.textDim, fontSize: 12, marginBottom: 10 }}>
         Available: <strong style={{ color: C.green }}>{onCount}</strong> · Unavailable: <strong style={{ color: C.textMuted }}>{offCount}</strong> · Active courts: <strong style={{ color: C.accent }}>{liveGames.length}</strong> · Completed games: <strong style={{ color: C.text }}>{completedGames.length}</strong>
       </div>
+      {noUpcomingSlot && <p style={{ color: C.textDim, fontSize: 12 }}>No upcoming slot can be changed. Current games remain on court.</p>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {players.map((p, idx) => {
           // 0-based index of the next upcoming slot.
@@ -87,22 +89,22 @@ export default function SessionStatusPanel({
             : availability.availFrom > nextSlotIdx ? `Arrives slot ${availability.availFrom + 1}`
               : leavingScheduled ? `Leaving after slot ${availability.availTo + 1}` : 'Available';
           return (
-            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 4, background: isSuspended ? 'rgba(245,158,11,0.10)' : !isAvailable ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${isSuspended ? C.amber + '88' : !isAvailable ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: !isAvailable ? 0.6 : 1 }}>
+            <div key={p.name} role="group" aria-label={`Availability for ${p.name}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, maxWidth: '100%', overflowWrap: 'anywhere', background: isSuspended ? 'rgba(245,158,11,0.10)' : !isAvailable ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${isSuspended ? C.amber + '88' : !isAvailable ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: !isAvailable ? 0.6 : 1 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: p.gender === 'F' ? C.pink : (isAvailable ? C.text : C.textMuted) }}>{p.name}</span>
               <span style={{ fontSize: 10, color: C.textMuted }}>{availabilityLabel}</span>
               {isHere && !leavingScheduled && togglePlayerSuspended && (
-                <button onClick={() => togglePlayerSuspended(idx)} title={isSuspended ? 'Undo skip-next for this player' : 'Skip this player for the next generated game only'} style={{ background: isSuspended ? C.amber : 'none', border: `1px solid ${isSuspended ? C.amber : C.border}`, color: isSuspended ? C.bg : C.textMuted, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>
+                <button disabled={noUpcomingSlot} onClick={() => togglePlayerSuspended(idx)} title={isSuspended ? 'Undo skip-next for this player' : 'Skip this player for the next generated game only'} style={{ background: isSuspended ? C.amber : 'none', border: `1px solid ${isSuspended ? C.amber : C.border}`, color: isSuspended ? C.bg : C.textMuted, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>
                   {isSuspended ? 'Skipping next' : 'Skip next'}
                 </button>
               )}
               {(departed || leavingScheduled) && (
-                <button onClick={() => setPlayerBack(idx)} title="Restore player to session" style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 13, padding: '0 2px', cursor: 'pointer', fontFamily: FONT, lineHeight: 1 }}>↩</button>
+                <button disabled={noUpcomingSlot} aria-label={`Restore ${p.name} to session`} onClick={() => setPlayerBack(idx)} title="Restore player to session" style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 13, padding: '0 2px', cursor: 'pointer', fontFamily: FONT, lineHeight: 1 }}>↩</button>
               )}
               {notArrived && (
-                <button onClick={() => setPlayerJoining(idx)} title="Player is here — add to upcoming round" style={{ background: 'none', border: `1px solid ${C.accentDim}`, color: C.accent, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>Here now</button>
+                <button disabled={noUpcomingSlot} onClick={() => setPlayerJoining(idx)} title="Player is here — add to upcoming round" style={{ background: 'none', border: `1px solid ${C.accentDim}`, color: C.accent, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>Here now</button>
               )}
               {isHere && !leavingScheduled && (
-                <button onClick={() => setPlayerLeaving(idx)} title="Player is done for today" style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 13, padding: '0 2px', cursor: 'pointer', fontFamily: FONT, lineHeight: 1 }}>↗</button>
+                <button disabled={noUpcomingSlot} onClick={() => setPlayerLeaving(idx)} title="Player is done for today" style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontSize: 10, padding: '1px 6px', cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>Leaving</button>
               )}
             </div>
           );

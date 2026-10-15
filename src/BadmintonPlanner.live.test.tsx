@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BadmintonPlanner from './BadmintonPlanner';
 import { fetchShare, isFirebaseConfigured } from './firebase';
 import type { SharePayload } from './types';
+import { generateSchedule } from './algorithm/scheduler';
+import type { Player } from './algorithm/types';
 
 vi.mock('./firebase', () => ({
   isFirebaseConfigured: vi.fn(() => false),
@@ -82,6 +84,204 @@ describe('BadmintonPlanner live game flow', () => {
     vi.restoreAllMocks();
   });
 
+  describe('mid-session changes', () => {
+    function seed(courts = 2, roster?: Player[]) {
+      const players: Player[] = roster ?? Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 5 }));
+      const plan = generateSchedule(players, 6, Array(6).fill(courts), 0, null, null, {}, () => 0.5)!;
+      localStorage.setItem('bp-players', JSON.stringify(players));
+      localStorage.setItem('bp-result', JSON.stringify(plan));
+      localStorage.setItem('bp-totalMinutes', '90');
+      localStorage.setItem('bp-numCourts', JSON.stringify(courts));
+      localStorage.setItem('bp-staggerMode', JSON.stringify('custom'));
+      return plan;
+    }
+    const stored = (key: string) => JSON.parse(localStorage.getItem(key)!);
+    const lane = (n: number) => screen.getByRole('region', { name: `Court ${n}` });
+    const availability = (name: string) => within(screen.getByRole('group', { name: `Availability for ${name}` }));
+    async function start(user: ReturnType<typeof userEvent.setup>, count: number) {
+      for (let i = 0; i < count; i++) await startNextVisibleGame(user);
+    }
+
+    it.each([2, 3, 4, 5])('changes %i courts future-only from Live and Setup, retaining scores and next-game capacity', async courts => {
+      const user = userEvent.setup();
+      const original = seed(courts);
+      const score = { a: '21', b: '18', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] };
+      localStorage.setItem('bp-scores', JSON.stringify({ s1c0: score }));
+      render(<BadmintonPlanner />);
+      await start(user, courts);
+      const lineups = Array.from({ length: courts }, (_, i) => lane(i + 1).textContent);
+      const target = courts === 5 ? 4 : courts + 1;
+      await user.click(screen.getByRole('button', { name: courts === 5 ? 'Remove court' : 'Add court' }));
+      expect(stored('bp-courtOverrides')).toEqual({ 2: target });
+      expect(stored('bp-numCourts')).toBe(courts);
+      expect(stored('bp-result').schedule[0]).toEqual(original.schedule[0]);
+      expect(stored('bp-scores')).toEqual({ s1c0: score });
+      for (let i = 0; i < courts; i++) expect(lane(i + 1).textContent).toBe(lineups[i]);
+      expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(target);
+      expect(screen.getByRole('status', { name: 'Session change' })).toHaveTextContent(`slot 2. ${target} courts`);
+      await user.click(screen.getByRole('button', { name: 'Setup' }));
+      await user.click(screen.getByRole('button', { name: 'Remove court' }));
+      expect(stored('bp-courtOverrides')).toEqual({ 2: target - 1 });
+      expect(stored('bp-result').schedule[0]).toEqual(original.schedule[0]);
+      expect(stored('bp-scores')).toEqual({ s1c0: score });
+    });
+
+    it('applies Here now, Leaving and return to upcoming games without changing current lineups', async () => {
+      const user = userEvent.setup();
+      seed(3, Array.from({ length: 12 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: i === 11 ? 4 : 0, availTo: 5 })));
+      const score = { a: '21', b: '17', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] };
+      localStorage.setItem('bp-scores', JSON.stringify({ s1c0: score }));
+      render(<BadmintonPlanner />);
+      await start(user, 2);
+      const before = stored('bp-result').schedule[0];
+      const current = [lane(1).textContent, lane(2).textContent];
+      await user.click(availability('P12').getByRole('button', { name: 'Here now' }));
+      expect(stored('bp-result').schedule[0]).toEqual(before);
+      expect(stored('bp-result').schedule[1].courts).toHaveLength(3);
+      expect(stored('bp-result').schedule[1].courts.flatMap((c: any) => [...c.teamA, ...c.teamB]).map((p: any) => p.name)).toContain('P12');
+      await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
+      expect(stored('bp-result').schedule.slice(1).flatMap((s: any) => s.courts.flatMap((c: any) => [...c.teamA, ...c.teamB])).some((p: any) => p.name === 'P1')).toBe(false);
+      expect(lane(1).textContent).toBe(current[0]);
+      expect(lane(2).textContent).toBe(current[1]);
+      expect(stored('bp-scores')).toEqual({ s1c0: score });
+      expect(screen.getByRole('status', { name: 'Session change' })).toHaveTextContent(/P1 leaving from slot 2/);
+      await user.click(availability('P1').getByTitle('Restore player to session'));
+      expect(stored('bp-players').find((p: any) => p.name === 'P1').leavesAt).toBeNull();
+      expect(stored('bp-result').schedule[1].courts).toHaveLength(3);
+    });
+
+    it('preserves completed and pulled-up games and their scores during a later capacity change', async () => {
+      const user = userEvent.setup();
+      seed();
+      const score = { a: '21', b: '17', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] };
+      localStorage.setItem('bp-scores', JSON.stringify({ s1c0: score }));
+      render(<BadmintonPlanner />);
+      await start(user, 2);
+      await user.click(within(lane(1)).getByRole('button', { name: 'Finish game' }));
+      const substitute = screen.queryByRole('button', { name: 'Substitute unavailable players' });
+      if (substitute) await user.click(substitute);
+      expect(screen.getByRole('button', { name: 'Past games (1)' })).toBeInTheDocument();
+      const before = stored('bp-result');
+      const lineups = [lane(1).textContent, lane(2).textContent];
+      await user.click(screen.getByRole('button', { name: 'Add court' }));
+      expect(stored('bp-courtOverrides')).toEqual({ 3: 3 });
+      expect(stored('bp-result').schedule.slice(0, 2)).toEqual(before.schedule.slice(0, 2));
+      expect(lane(1).textContent).toBe(lineups[0]);
+      expect(lane(2).textContent).toBe(lineups[1]);
+      expect(stored('bp-scores')).toEqual({ s1c0: score });
+      expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(3);
+      await user.click(screen.getByRole('button', { name: 'Past games (1)' }));
+      expect(screen.getByText(/Game 1.*Slot 1.*Court 1/)).toBeInTheDocument();
+      expect(screen.getByText('21–17')).toBeInTheDocument();
+    });
+
+    it('cancels a confirmed change without mutation and confirms only future games', async () => {
+      const user = userEvent.setup();
+      seed();
+      localStorage.setItem('bp-is-confirmed', 'true');
+      render(<BadmintonPlanner />);
+      await start(user, 2);
+      const before = localStorage.getItem('bp-result');
+      await user.click(screen.getByRole('button', { name: 'Add court' }));
+      const dialog = screen.getByRole('dialog', { name: 'Update upcoming games?' });
+      expect(dialog).toHaveTextContent(/slot 2.*3 courts/);
+      expect(localStorage.getItem('bp-result')).toBe(before);
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      expect(localStorage.getItem('bp-result')).toBe(before);
+      expect(stored('bp-is-confirmed')).toBe(true);
+      await user.click(screen.getByRole('button', { name: 'Add court' }));
+      await user.click(screen.getByRole('button', { name: 'Update upcoming games' }));
+      expect(stored('bp-is-confirmed')).toBe(false);
+      expect(stored('bp-courtOverrides')).toEqual({ 2: 3 });
+      expect(stored('bp-result').schedule[0]).toEqual(JSON.parse(before!).schedule[0]);
+    });
+
+    it('cancels a confirmed departure with Escape before applying it to future games', async () => {
+      const user = userEvent.setup();
+      seed();
+      localStorage.setItem('bp-is-confirmed', 'true');
+      render(<BadmintonPlanner />);
+      await start(user, 2);
+      const rosterBefore = stored('bp-players');
+      const scheduleBefore = stored('bp-result');
+      await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
+      expect(screen.getByRole('dialog', { name: 'Update upcoming games?' })).toHaveTextContent('P1 leaving from slot 2');
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(stored('bp-players')).toEqual(rosterBefore);
+      expect(stored('bp-result')).toEqual(scheduleBefore);
+      expect(stored('bp-is-confirmed')).toBe(true);
+      await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
+      await user.click(screen.getByRole('button', { name: 'Update upcoming games' }));
+      expect(stored('bp-is-confirmed')).toBe(false);
+      expect(stored('bp-players')[0].leavesAt).toBe(0);
+      expect(stored('bp-result').schedule[0]).toEqual(scheduleBefore.schedule[0]);
+    });
+
+    it('applies selected Setup capacity through the same confirmation and future-only boundary', async () => {
+      const user = userEvent.setup();
+      seed();
+      localStorage.setItem('bp-is-confirmed', 'true');
+      render(<BadmintonPlanner />);
+      await start(user, 2);
+      const before = stored('bp-result').schedule.slice(0, 3);
+      await user.click(screen.getByRole('button', { name: 'Setup' }));
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Regenerate from slot' }), { target: { value: '4' } });
+      await user.click(screen.getByRole('button', { name: '4C' }));
+      await user.click(screen.getByRole('button', { name: 'Apply' }));
+      const dialog = screen.getByRole('dialog', { name: 'Update upcoming games?' });
+      expect(dialog).toHaveTextContent(/slot 4.*4 courts/);
+      await user.click(within(dialog).getByRole('button', { name: 'Update upcoming games' }));
+      expect(stored('bp-result').schedule.slice(0, 3)).toEqual(before);
+      expect(stored('bp-courtOverrides')).toEqual({ 4: 4 });
+    });
+
+    it('explains unfilled future courts without dropping the current game', async () => {
+      const user = userEvent.setup();
+      seed(1, Array.from({ length: 4 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 5 })));
+      render(<BadmintonPlanner />);
+      await start(user, 1);
+      await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
+      expect(within(sectionFor('Next game')).getByText(/fewer than four eligible players/i)).toBeInTheDocument();
+      expect(within(lane(1)).getByRole('button', { name: 'Finish game' })).toBeEnabled();
+    });
+
+    it('disables future changes while the final slot stays live', async () => {
+      const user = userEvent.setup();
+      const plan = seed(1);
+      localStorage.setItem('bp-result', JSON.stringify({ ...plan, schedule: plan.schedule.slice(0, 1) }));
+      localStorage.setItem('bp-totalMinutes', '15');
+      render(<BadmintonPlanner />);
+      await start(user, 1);
+      expect(screen.getByRole('button', { name: 'Add court' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Remove court' })).toBeDisabled();
+      expect(availability('P1').getByRole('button', { name: 'Leaving' })).toBeDisabled();
+      expect(within(lane(1)).getByRole('button', { name: 'Finish game' })).toBeEnabled();
+    });
+
+    it.each(['import', 'saved'] as const)('clears previous session overrides on %s load', async source => {
+      const user = userEvent.setup();
+      const plan = seed();
+      localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
+      localStorage.setItem('bp-saved-plans', JSON.stringify([{ id: 7, tag: 'Replacement', result: plan, savedAt: new Date().toISOString() }]));
+      render(<BadmintonPlanner />);
+      await user.click(screen.getByRole('button', { name: 'Remove court' }));
+      expect(screen.getByRole('status', { name: 'Session change' })).toBeInTheDocument();
+      if (source === 'saved') {
+        await user.click(screen.getByRole('button', { name: 'Saved plans (1)' }));
+        await user.click(screen.getByRole('button', { name: 'Load' }));
+      } else {
+        await user.click(screen.getByRole('button', { name: 'Setup' }));
+        await user.click(screen.getByRole('button', { name: 'Import' }));
+        await user.type(screen.getByPlaceholderText(/Badminton Schedule/), '--- Slot 1 (~0-15m) ---\n  P1 & P2  vs  P3 & P4');
+        await user.click(within(screen.getByText('Import schedule from text').parentElement!).getByRole('button', { name: 'Import' }));
+      }
+      expect(stored('bp-courtOverrides')).toEqual({});
+      expect(screen.queryByRole('status', { name: 'Session change' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add court' })).toBeEnabled();
+    });
+  });
+
   describe.each(['firebase', 'api', 'hash'] as const)('opening a %s share', source => {
     it.each(['about', 'archive'] as const)('selects Live session without replacing the personal %s selection', async activeTab => {
       const payload: SharePayload = {
@@ -91,6 +291,7 @@ describe('BadmintonPlanner live game flow', () => {
         slots: [{ s: 1, c: [[[0, 1], [2, 3]]], sit: [] }],
       };
       localStorage.setItem('bp-active-tab', JSON.stringify(activeTab));
+      localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
       localStorage.setItem('bp-players', JSON.stringify(Array.from({ length: 12 }, (_, i) => ({ ...makePlayer(`P${i + 1}`), level: 2 }))));
       const personalResult = localStorage.getItem('bp-result');
       const personalPlayers = localStorage.getItem('bp-players');
@@ -115,6 +316,8 @@ describe('BadmintonPlanner live game flow', () => {
       expect(JSON.parse(localStorage.getItem('bp-active-tab')!)).toBe(activeTab);
       expect(localStorage.getItem('bp-result')).toBe(personalResult);
       expect(localStorage.getItem('bp-players')).toBe(personalPlayers);
+      expect(JSON.parse(localStorage.getItem('bp-courtOverrides')!)).toEqual({ 1: 5 });
+      expect(screen.getByRole('button', { name: 'Remove court' })).toBeDisabled();
 
       unmount();
       sessionStorage.clear();
@@ -127,6 +330,7 @@ describe('BadmintonPlanner live game flow', () => {
   it('generates a schedule into Live session with all initial courts live', async () => {
     const user = userEvent.setup();
     localStorage.removeItem('bp-result');
+    localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
     render(<BadmintonPlanner />);
 
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
@@ -140,10 +344,12 @@ describe('BadmintonPlanner live game flow', () => {
     expect(screen.getByRole('region', { name: 'Live session board' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('bp-courtOverrides')!)).toEqual({});
   });
 
   it('re-rolls from Setup into Live session with all initial courts live', async () => {
     const user = userEvent.setup();
+    localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
     render(<BadmintonPlanner />);
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     await user.click(screen.getByRole('button', { name: 'Re-roll' }));
@@ -152,6 +358,7 @@ describe('BadmintonPlanner live game flow', () => {
       expect(screen.getByRole('button', { name: 'Live session' })).toHaveAttribute('aria-current', 'page');
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
     });
+    expect(JSON.parse(localStorage.getItem('bp-courtOverrides')!)).toEqual({});
   });
 
   it('retains Setup on refresh and can return to Live session', async () => {
@@ -169,6 +376,7 @@ describe('BadmintonPlanner live game flow', () => {
 
   it('returns to Setup when the active schedule is cleared', async () => {
     const user = userEvent.setup();
+    localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
     render(<BadmintonPlanner />);
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     await user.click(screen.getByRole('button', { name: 'Clear' }));
@@ -176,6 +384,7 @@ describe('BadmintonPlanner live game flow', () => {
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Generate \(3 slots\)/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Live session' })).toBeDisabled();
+    expect(JSON.parse(localStorage.getItem('bp-courtOverrides')!)).toEqual({});
   });
 
   it('keeps setup and admin controls off Live and one navigation action away', async () => {
