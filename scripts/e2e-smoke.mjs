@@ -98,6 +98,8 @@ async function verifySessionWorkflows(newContext) {
     page.on('pageerror', error => errors.push(error.message));
     // A persisted fixture makes history and availability checks independent of shuffle.
     await page.addInitScript(courts => {
+      // Init scripts also run in reCAPTCHA's same-origin about:blank child frames.
+      if (window !== window.top) return;
       const players = Array.from({ length: 24 }, (_, i) => ({ name: i === 0 ? 'Alexandra Montgomery' : i === 23 ? 'Jordan Williamson' : `Session Player ${String(i + 1).padStart(2, '0')}`, gender: 'M', availFrom: i === 23 ? 4 : 0, availTo: 5 }));
       const schedule = Array.from({ length: 6 }, (_, i) => ({ slot: i + 1, courts: Array.from({ length: courts }, (_, c) => ({ court: c + 1, teamA: players.slice(c * 4, c * 4 + 2), teamB: players.slice(c * 4 + 2, c * 4 + 4) })), sitting: players.slice(courts * 4), repeatedCourts: [], playerState: [] }));
       localStorage.clear(); sessionStorage.clear();
@@ -112,8 +114,15 @@ async function verifySessionWorkflows(newContext) {
     const nav = name => page.getByRole('button', { name, exact: true });
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await expect(nav('Live session')).toHaveAttribute('aria-current', 'page');
-    // The initial persistence effect also normalizes legacy player records.
-    await expect.poll(() => stored('courtOverrides')).toEqual({});
+    // Wait for every unseeded snapshot value, including legacy player normalization.
+    await expect.poll(async () => {
+      const state = await snapshot();
+      return {
+        levels: state.players?.map(player => player.level),
+        courtOverrides: state.courtOverrides,
+        savedPlans: state['saved-plans'],
+      };
+    }).toEqual({ levels: Array(24).fill(2), courtOverrides: {}, savedPlans: [] });
     await assertLayout(page, `${stage}/ready`);
     for (let n = 1; n <= courts; n++) await lane(n).getByRole('button', { name: 'Start game', exact: true }).click();
     const original = await snapshot();

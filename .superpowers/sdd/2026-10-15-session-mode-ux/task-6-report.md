@@ -1,5 +1,8 @@
 # Task 6: Standard E2E Workflow and Redesign Verification
 
+Current status: verification completed in the follow-up against `928692b` below.
+The initial handoff and its failed verification history are retained for context.
+
 Base: `f54c697`. Test implementation committed; verification incomplete.
 Stopped at the user's explicit request. No agents used. Production application files are unchanged;
 pre-existing untracked plans, spec and logs are preserved.
@@ -27,7 +30,7 @@ pre-existing untracked plans, spec and logs are preserved.
   Bounds: 10s startup/navigation, 500ms readiness fetch, 5s actions/assertions,
   5s screenshots (3s on failure), 180s overall watchdog with stage reporting.
 
-## Verification
+## Initial Verification (Historical)
 
 - Baseline runner: passed all 40 games within a 40s command cap. The previous
   network-idle/font timeout did not reproduce in this session.
@@ -75,7 +78,7 @@ Logs: `/tmp/task6-{baseline-e2e,historical-red,unit,unit-final,build,e2e,e2e-fin
 Actual screenshots: `/tmp/badminton-e2e/live-1280-{2,3}.png`,
 `setup-1280-{2,3,4}.png`, and `failure.png`. Artifacts may be overwritten by later runs.
 
-## Decisions and Review
+## Initial Decisions and Review (Historical)
 
 - Use a separate historical archive for the planned pre-implementation RED check:
   Tasks 1-5 were already reviewed at the user's baseline, so production code must
@@ -92,3 +95,62 @@ Actual screenshots: `/tmp/badminton-e2e/live-1280-{2,3}.png`,
   an agent because the user explicitly prohibited agents.
 - Existing build warning: the minified application chunk exceeds 500 kB.
   This task does not change runtime dependencies or application behavior.
+
+## Follow-up: Snapshot Stabilization and Completed Verification
+
+Baseline: `928692b`. No agents used. Only the standard E2E runner and this report
+changed; production code, dependencies, docs/plans/specs and existing logs are untouched.
+
+### Root Cause and Fix
+
+- Reproduced the unchanged runner's strict cancellation failure at 1280px/4 courts
+  (exit 1). The snapshot contained raw players and missing defaults.
+- Added one combined bounded readiness assertion for all 24 normalized player
+  levels (`2`), `courtOverrides: {}` and `saved-plans: []`. The remaining snapshot
+  fields are explicitly seeded. Readiness alone still failed at 1280px/3 courts
+  (exit 1): storage reverted to raw fixture values after readiness had passed.
+- Temporary init-script tracing reproduced that failure and showed reCAPTCHA's
+  child frames, including same-origin `about:blank`, executing the fixture script.
+  Those frames cleared and reseeded the top page's storage after initial persistence.
+- Restricted fixture initialization to `window === window.top`, retained the
+  combined persistence readiness assertion, and removed diagnostic logging.
+- Cancellation and undo still deep-compare all six fields: result, players, scores,
+  courtOverrides, saved-plans and is-confirmed. No fields or assertions were removed.
+
+### Final Verification
+
+- First stabilized run, `timeout --signal=TERM --kill-after=10s 210s npm run test:e2e`:
+  PASS, exit 0; all 40 games and all eight workflows passed.
+- Final user-requested rerun, `timeout --signal=TERM --kill-after=5s 180s npm run test:e2e`:
+  PASS, exit 0; all 40 games across 2-5 courts and all eight session workflows at
+  1280x900 and 390x900 passed again. No process timeout or internal 180s watchdog
+  expiration occurred in either stabilized run.
+- Desktop and mobile workflows completed Setup return, Start, Here now, Leaving,
+  Add/Remove court, cancellation, confirmed updates and one-step undo. Strict
+  snapshots, current lineup/score preservation, future capacity/availability,
+  clipping/overlap checks and uncaught-app-error assertions all passed.
+- All 16 Setup/Live screenshots exist at `/tmp/badminton-e2e/{setup,live}-{1280,390}-{2,3,4,5}.png`.
+  Visually inspected the five-court Live screenshots at both widths as well.
+  `failure.png` is retained from a failed diagnostic run, not the passing run.
+- `timeout --signal=TERM --kill-after=5s 180s npm run test:unit`: PASS, exit 0;
+  28 files, 358/358 tests, 42.81s. No per-test or process timeout.
+- `timeout --signal=TERM --kill-after=5s 60s npm run build`: PASS, exit 0;
+  Vite 3.65s. Existing >500 kB chunk warning remains (521.18 kB minified).
+- `git diff --check`: PASS, exit 0.
+
+Final command outputs were captured with `bash -o pipefail` and `tee` at
+`/tmp/task6-followup-e2e-development.log`, `/tmp/task6-followup-e2e-final.log`,
+`/tmp/task6-followup-unit.log` and `/tmp/task6-followup-build.log`. The E2E logs
+contain the two passing stabilized runs; earlier failed attempts above were
+observed directly, not captured in these logs.
+
+### Self-review
+
+- Reviewed the runner diff against persistence initialization and write order.
+  Top-frame-only seeding prevents later child-frame resets; combined polling
+  requires normalized players and both defaults in the same storage read before
+  the baseline is captured. Seeded result, scores and confirmation stay included.
+- No production changes or weakened assertions; existing action, navigation,
+  screenshot and overall time bounds remain intact. No blocking findings.
+- This is an author self-review, not an independent review. No subagents were
+  spawned, as requested. Task 6 desktop/mobile acceptance and verification are complete.
