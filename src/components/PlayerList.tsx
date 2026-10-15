@@ -7,6 +7,7 @@ type PlayerField = 'name' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leave
 type PlayerFieldValue = string | number | null;
 
 interface PlayerListProps {
+  visible?: boolean;
   players: Player[];
   playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   winLoss: WinLossMap;
@@ -52,6 +53,7 @@ function SkillDot({ name, winLoss }: { name: string; winLoss: WinLossMap }) {
 }
 
 export default function PlayerList({
+  visible = true,
   players,
   playerHistory,
   winLoss,
@@ -81,6 +83,7 @@ export default function PlayerList({
   const [selectedBank, setSelectedBank] = useState<Set<string>>(() => new Set());
   const [bankNameInput, setBankNameInput] = useState('');
   const [bankGenderInput, setBankGenderInput] = useState<'M' | 'F'>('M');
+  if (!visible) return null;
   const currentNames = new Set(players.map(p => p.name.toLowerCase()));
   const bankUnsorted = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
   const bankPlayers = sortPlayerIndicesForDisplay(bankUnsorted).map(index => bankUnsorted[index]!);

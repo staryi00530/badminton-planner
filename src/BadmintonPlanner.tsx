@@ -851,8 +851,8 @@ function BadmintonPlanner() {
         {(selectedTab === 'live' || selectedTab === 'setup') && (
         <>
         {selectedTab === 'live' && liveBoard}
-        {selectedTab === 'setup' && <>
         <SessionSettingsPanel
+          visible={selectedTab === 'setup'}
           sessionStart={sessionStart}
           totalMinutes={totalMinutes}
           gameMinutes={gameMinutes}
@@ -867,6 +867,7 @@ function BadmintonPlanner() {
         />
 
         <PlayerList
+          visible={selectedTab === 'setup'}
           players={players}
           playerHistory={playerHistory}
           winLoss={winLoss}
@@ -893,7 +894,7 @@ function BadmintonPlanner() {
           removePlayer={removePlayer}
         />
 
-        {players.length >= 4 && (
+        {selectedTab === 'setup' && players.length >= 4 && (
           <div className="action-buttons" style={{ marginBottom: result ? 8 : 24 }}>
             <button onClick={() => patchState({ showImport: true })} style={{ background: 'transparent', color: C.textDim, border: `1px dashed ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontFamily: FONT }}>Import</button>
             <button className="generate-btn" onClick={generate} disabled={isGenerating} style={{ flex: 1, background: C.accentDim, color: '#fff', border: 'none', borderRadius: 8, padding: '14px', fontSize: 14, fontWeight: 700, fontFamily: FONT, letterSpacing: '1px', textTransform: 'uppercase', opacity: isGenerating ? 0.6 : 1, boxShadow: C.shadow }}>
@@ -915,8 +916,6 @@ function BadmintonPlanner() {
             )}
           </div>
         )}
-
-        </>}
 
         {result && (
           <div className="action-buttons" style={{ marginBottom: 24, flexWrap: 'wrap' }}>

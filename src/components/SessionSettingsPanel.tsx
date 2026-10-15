@@ -3,6 +3,7 @@ import { C, FONT } from '../constants';
 import type { ExtraCourt, Player, PreferredPair, StaggerMode } from '../types';
 
 interface SessionSettingsPanelProps {
+  visible?: boolean;
   sessionStart: string;
   totalMinutes: number;
   gameMinutes: number;
@@ -17,6 +18,7 @@ interface SessionSettingsPanelProps {
 }
 
 export default function SessionSettingsPanel({
+  visible = true,
   sessionStart,
   totalMinutes,
   gameMinutes,
@@ -41,6 +43,7 @@ export default function SessionSettingsPanel({
   };
   const [pairFirst, setPairFirst] = useState('');
   const [pairSecond, setPairSecond] = useState('');
+  if (!visible) return null;
   return (
     <details open={!scheduleActive} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
       <summary style={{ fontSize: 14, color: C.text, fontWeight: 700, cursor: 'pointer' }}>Session settings</summary>

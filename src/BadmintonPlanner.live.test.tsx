@@ -217,6 +217,41 @@ describe('BadmintonPlanner live game flow', () => {
     expect(screen.getByRole('button', { name: 'Remove preferred pairing P1 and P2' })).toBeVisible();
   });
 
+  it('preserves unsaved setup selections and bank drafts across a visit to Live', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('bp-player-history', JSON.stringify([{ name: 'Bank guest', gender: 'M', level: 2 }]));
+    render(<BadmintonPlanner />);
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
+    await user.click(screen.getByText('Session settings'));
+    await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'P1');
+    await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'P2');
+    await user.click(screen.getByText('Players (12)'));
+    await user.click(screen.getByTitle('Select Bank guest'));
+    const bankDraft = screen.getByPlaceholderText("Add to bank (not today's roster)");
+    await user.type(bankDraft, 'Draft guest');
+    await user.click(within(bankDraft.parentElement!).getByRole('button', { name: '♀' }));
+
+    await user.click(screen.getByRole('button', { name: 'Live session' }));
+    expect(screen.getByRole('button', { name: 'Live session' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('region', { name: 'Live session board' })).toBeVisible();
+    expect(screen.queryByPlaceholderText("Add to bank (not today's roster)")).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Deselect Bank guest')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Preferred pairing first player')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
+    await user.click(screen.getByText('Session settings'));
+    await user.click(screen.getByText('Players (12)'));
+    expect.soft(screen.getByLabelText('Preferred pairing first player')).toHaveValue('P1');
+    expect.soft(screen.getByLabelText('Preferred pairing second player')).toHaveValue('P2');
+    expect.soft(screen.getByPlaceholderText("Add to bank (not today's roster)")).toHaveValue('Draft guest');
+    expect.soft(screen.queryByTitle('Deselect Bank guest')).toBeInTheDocument();
+    expect.soft(screen.queryByRole('button', { name: 'Add Selected (1)' })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('bp-preferred-pairs')!)).toEqual([]);
+    await user.click(screen.getByRole('button', { name: '+ Bank' }));
+    expect(JSON.parse(localStorage.getItem('bp-player-history')!)).toContainEqual(expect.objectContaining({ name: 'Draft guest', gender: 'F' }));
+  });
+
   it.each(['Past games', 'Saved plans', 'How it works'])('does not expose setup controls on %s', async name => {
     const user = userEvent.setup();
     localStorage.setItem('bp-debug-live-queue', 'true');
