@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import type { ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Court, Player, SlotResult } from '../algorithm/types';
 import LiveSessionBoard from './LiveSessionBoard';
+import { useLiveQueue } from '../hooks/useLiveQueue';
+import type { PlannerResult, RuntimePatch } from '../types';
+import type { GameRef } from '../utils/liveQueue';
 
 const players: Player[] = Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 10 }));
 const court = (number: number, names: number[]): Court => ({
@@ -32,6 +35,17 @@ function props(overrides: Partial<ComponentProps<typeof LiveSessionBoard>> = {})
 
 function lane(n: number) { return screen.getByRole('region', { name: `Court ${n}` }); }
 function guidance() { return within(screen.getByRole('region', { name: 'What happens now?' })); }
+
+function InteractiveBoard({ result, completedGames }: { result: PlannerResult; completedGames: GameRef[] }) {
+  const [state, setState] = useState({ result, completedGames, liveGames: [] as GameRef[], fromSlot: 1 });
+  const queue = useLiveQueue({
+    ...state, players, suspendedPlayerNames: [], totalSlots: result.schedule.length,
+    canPlayerJoin: true, getCourtsPerSlot: () => result.schedule.map(() => 2),
+    regenerate: () => null,
+    patchState: (patch: RuntimePatch) => setState(previous => ({ ...previous, ...patch, result: patch.result ?? previous.result })),
+  });
+  return <LiveSessionBoard {...props({ ...state, liveCapacity: 2, onToggleLive: queue.toggleLiveGame })} />;
+}
 
 describe('LiveSessionBoard', () => {
   it('keeps all five physical lanes stable when a promoted game has another schedule court index', () => {
@@ -66,7 +80,7 @@ describe('LiveSessionBoard', () => {
     expect(guidance().getByText(/Court 1 is ready.*Send these four players to Court 1/)).toBeInTheDocument();
     await userEvent.click(within(lane(1)).getByRole('button', { name: 'Start game' }));
     expect(input.onToggleLive).toHaveBeenCalledTimes(1);
-    expect(input.onToggleLive).toHaveBeenCalledWith(1, 0);
+    expect(input.onToggleLive).toHaveBeenCalledWith(1, 0, 0);
   });
 
   it('keeps a ready game on its available physical court after an earlier court finishes', () => {
@@ -77,6 +91,29 @@ describe('LiveSessionBoard', () => {
     expect(within(lane(1)).getByText('Done')).toBeInTheDocument();
     expect(lane(2)).toHaveTextContent('P5');
     expect(within(lane(2)).getByRole('button', { name: 'Start game' })).toBeEnabled();
+  });
+
+  it.each([
+    {
+      name: 'the remaining scheduled Court 2 game',
+      schedule: [slot(1, schedule[0]!.courts.slice(0, 2))],
+      completedGames: [{ slot: 1, court: 0 }],
+    },
+    {
+      name: 'a pending scheduled Court 1 game reassigned to Court 2',
+      schedule: [slot(1, [court(1, [1, 2, 3, 4])]), slot(2, [court(1, [5, 6, 7, 8])])],
+      completedGames: [],
+    },
+  ])('keeps $name on the advertised court after Start and rerender', async fixture => {
+    render(<InteractiveBoard result={{ schedule: fixture.schedule, gamesPlayed: [] }} completedGames={fixture.completedGames} />);
+    const advertisedLane = lane(2);
+    for (const name of ['P5', 'P6', 'P7', 'P8']) expect(advertisedLane).toHaveTextContent(name);
+    await userEvent.click(within(advertisedLane).getByRole('button', { name: 'Start game' }));
+    expect(lane(2)).toBe(advertisedLane);
+    expect(within(lane(2)).getByRole('button', { name: 'Finish game' })).toBeEnabled();
+    for (const name of ['P5', 'P6', 'P7', 'P8']) expect(lane(2)).toHaveTextContent(name);
+    expect(within(lane(1)).queryByRole('button', { name: 'Finish game' })).not.toBeInTheDocument();
+    expect(lane(1)).not.toHaveTextContent('P5');
   });
 
   it('names every blocked player and their physical live court even beyond fromSlot', () => {

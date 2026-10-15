@@ -2,14 +2,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import SessionStatusPanel from './SessionStatusPanel';
+import SessionStatusPanel, { SessionSummary } from './SessionStatusPanel';
+import type { Player, SlotResult } from '../algorithm/types';
+import type { StaggerMode } from '../types';
 
 // fromSlot=3 -> nextSlotIdx = 2
-const PLAYERS = [
-  { name: 'Here', gender: 'M', availFrom: 0, leavesAt: null },        // currently playing, no plans to leave
-  { name: 'Leaving', gender: 'M', availFrom: 0, leavesAt: 5 },        // scheduled to leave later (5 >= nextSlotIdx)
-  { name: 'Departed', gender: 'F', availFrom: 0, leavesAt: 1 },       // already left (1 < nextSlotIdx)
-  { name: 'NotYet', gender: 'F', availFrom: 5, leavesAt: null },      // hasn't arrived yet (5 > nextSlotIdx, custom mode)
+const PLAYERS: Player[] = [
+  { name: 'Here', gender: 'M', availFrom: 0, availTo: 11, leavesAt: null },
+  { name: 'Leaving', gender: 'M', availFrom: 0, availTo: 11, leavesAt: 5 },
+  { name: 'Departed', gender: 'F', availFrom: 0, availTo: 11, leavesAt: 1 },
+  { name: 'NotYet', gender: 'F', availFrom: 5, availTo: 11, leavesAt: null },
 ];
 
 function renderPanel(overrides = {}) {
@@ -21,8 +23,14 @@ function renderPanel(overrides = {}) {
 }
 
 function rowFor(name: string) {
-  return screen.getByText(name).closest('div');
+  return screen.getByText(name).closest('div')!;
 }
+
+const groupPlayers: Player[] = [
+  { name: 'Early', gender: 'M', group: 'early', availFrom: 0, availTo: 9 },
+  { name: 'Late', gender: 'F', group: 'late', availFrom: 0, availTo: 9 },
+];
+const customPlayers: Player[] = [{ name: 'Window', gender: 'F', availFrom: 2, availTo: 4 }];
 
 describe('SessionStatusPanel', () => {
   it('shows the round header derived from fromSlot/totalSlots', () => {
@@ -109,5 +117,32 @@ describe('SessionStatusPanel', () => {
     expect(rowFor('Leaving')).toHaveTextContent('Leaving after slot 6');
     expect(rowFor('Departed')).toHaveTextContent('Left');
     expect(rowFor('NotYet')).toHaveTextContent('Arrives slot 6');
+  });
+
+  it.each<{
+    mode: StaggerMode; fromSlot: number; players: Player[]; available: number; labels: Record<string, string>;
+  }>([
+    { mode: 'group', fromSlot: 1, players: groupPlayers, available: 1, labels: { Early: 'Available', Late: 'Arrives slot 4' } },
+    { mode: 'group', fromSlot: 4, players: groupPlayers, available: 2, labels: { Early: 'Available', Late: 'Available' } },
+    { mode: 'group', fromSlot: 7, players: groupPlayers, available: 2, labels: { Early: 'Available', Late: 'Available' } },
+    { mode: 'group', fromSlot: 8, players: groupPlayers, available: 1, labels: { Early: 'Left', Late: 'Available' } },
+    { mode: 'custom', fromSlot: 2, players: customPlayers, available: 0, labels: { Window: 'Arrives slot 3' } },
+    { mode: 'custom', fromSlot: 3, players: customPlayers, available: 1, labels: { Window: 'Available' } },
+    { mode: 'custom', fromSlot: 5, players: customPlayers, available: 1, labels: { Window: 'Available' } },
+    { mode: 'custom', fromSlot: 6, players: customPlayers, available: 0, labels: { Window: 'Left' } },
+    { mode: 'custom', fromSlot: 3, players: [{ ...customPlayers[0]!, leavesAt: 2 }], available: 1, labels: { Window: 'Leaving after slot 3' } },
+    { mode: 'custom', fromSlot: 4, players: [{ ...customPlayers[0]!, leavesAt: 2 }], available: 0, labels: { Window: 'Left' } },
+  ])('matches resolved $mode windows at slot $fromSlot in labels, counts and summary', fixture => {
+    const result = { schedule: Array.from({ length: 10 }, (_, i): SlotResult => ({ slot: i + 1, courts: [], sitting: [], playerState: [], repeatedCourts: [] })), gamesPlayed: [] };
+    renderPanel({ players: fixture.players, fromSlot: fixture.fromSlot, totalSlots: 10, staggerMode: fixture.mode });
+    render(<SessionSummary players={fixture.players} result={result} fromSlot={fixture.fromSlot} staggerMode={fixture.mode} liveGames={[]} completedGames={[]} />);
+    for (const [name, label] of Object.entries(fixture.labels)) expect(within(rowFor(name)).getByText(label)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(`Available: ${fixture.available} · Unavailable: ${fixture.players.length - fixture.available}`);
+    expect(screen.getByRole('region', { name: 'Session summary' })).toHaveTextContent(`Waiting players${fixture.available}`);
+  });
+
+  it('does not add a custom-only Here now action for a late group player', () => {
+    renderPanel({ players: groupPlayers, fromSlot: 1, totalSlots: 10, staggerMode: 'group' });
+    expect(within(rowFor('Late')).queryByRole('button', { name: 'Here now' })).not.toBeInTheDocument();
   });
 });

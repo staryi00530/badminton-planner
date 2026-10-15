@@ -26,7 +26,7 @@ export interface ScheduleGridProps {
   updateScore: (slot: number, court: number, a: string, b: string, teamA: string[], teamB: string[]) => void;
   liveGames?: GameRef[];
   completedGames?: GameRef[];
-  onToggleLive?: (slot: number, court: number) => void;
+  onToggleLive?: (slot: number, court: number, displayCourt?: number) => void;
   onAdjustCourts?: (slot: number, delta: number) => void;
   blockedPlayerNames?: Set<string>;
   fromSlot: number;

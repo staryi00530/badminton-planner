@@ -22,7 +22,7 @@ interface SlotCardProps {
   updateScore: (slot: number, court: number, a: string, b: string, teamA: string[], teamB: string[]) => void;
   liveGames?: GameRef[];
   completedGames?: GameRef[];
-  onToggleLive?: (slot: number, court: number) => void;
+  onToggleLive?: (slot: number, court: number, displayCourt?: number) => void;
   onAdjustCourts?: (slot: number, delta: number) => void;
   blockedPlayerNames?: Set<string>;
   canShowReady: boolean;
@@ -194,7 +194,7 @@ export default function SlotCard({
               {isReady && <span style={{ color: C.green }} title="Everyone on this court is free to start">✓ Ready</span>}
               <div style={{ flex: 1 }} />
               {onToggleLive && (
-                <button onClick={() => onToggleLive(slot.slot, ci)} disabled={isWaiting || isQueued} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting || isQueued ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting || isQueued ? 0.75 : 1 }}>
+                <button onClick={() => !isLive && displayCourt != null ? onToggleLive(slot.slot, ci, displayCourt) : onToggleLive(slot.slot, ci)} disabled={isWaiting || isQueued} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting || isQueued ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting || isQueued ? 0.75 : 1 }}>
                   {actionLabel}
                 </button>
               )}

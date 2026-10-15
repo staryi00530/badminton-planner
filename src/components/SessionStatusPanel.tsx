@@ -62,11 +62,8 @@ export default function SessionStatusPanel({
   const suspendedSet = new Set(suspendedPlayerNames);
   const sessionComplete = fromSlot > totalSlots && liveGames.length === 0;
   const nextSlotIdx = fromSlot - 1;
-  const offCount = players.filter(player => {
-    const departed = player.leavesAt != null && player.leavesAt < nextSlotIdx;
-    const notArrived = staggerMode === 'custom' && player.availFrom != null && player.availFrom > nextSlotIdx;
-    return departed || notArrived;
-  }).length;
+  const resolvedPlayers = applyAvailability(players, { staggerMode, totalSlots });
+  const offCount = resolvedPlayers.filter(player => !(player.availFrom <= nextSlotIdx && player.availTo >= nextSlotIdx)).length;
   const onCount = players.length - offCount;
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
@@ -84,10 +81,15 @@ export default function SessionStatusPanel({
           const leavingScheduled = p.leavesAt != null && !departed;
           const isHere = !departed && !notArrived;
           const isSuspended = suspendedSet.has(p.name);
+          const availability = resolvedPlayers[idx]!;
+          const isAvailable = availability.availFrom <= nextSlotIdx && availability.availTo >= nextSlotIdx;
+          const availabilityLabel = availability.availTo < nextSlotIdx ? 'Left'
+            : availability.availFrom > nextSlotIdx ? `Arrives slot ${availability.availFrom + 1}`
+              : leavingScheduled ? `Leaving after slot ${availability.availTo + 1}` : 'Available';
           return (
-            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 4, background: isSuspended ? 'rgba(245,158,11,0.10)' : (departed || notArrived) ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${isSuspended ? C.amber + '88' : (departed || notArrived) ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: (departed || notArrived) ? 0.6 : 1 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: p.gender === 'F' ? C.pink : (isHere ? C.text : C.textMuted) }}>{p.name}</span>
-              <span style={{ fontSize: 10, color: C.textMuted }}>{departed ? 'Left' : notArrived ? `Arrives slot ${(p.availFrom ?? 0) + 1}` : leavingScheduled ? `Leaving after slot ${(p.leavesAt ?? 0) + 1}` : 'Available'}</span>
+            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 4, background: isSuspended ? 'rgba(245,158,11,0.10)' : !isAvailable ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${isSuspended ? C.amber + '88' : !isAvailable ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: !isAvailable ? 0.6 : 1 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: p.gender === 'F' ? C.pink : (isAvailable ? C.text : C.textMuted) }}>{p.name}</span>
+              <span style={{ fontSize: 10, color: C.textMuted }}>{availabilityLabel}</span>
               {isHere && !leavingScheduled && togglePlayerSuspended && (
                 <button onClick={() => togglePlayerSuspended(idx)} title={isSuspended ? 'Undo skip-next for this player' : 'Skip this player for the next generated game only'} style={{ background: isSuspended ? C.amber : 'none', border: `1px solid ${isSuspended ? C.amber : C.border}`, color: isSuspended ? C.bg : C.textMuted, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>
                   {isSuspended ? 'Skipping next' : 'Skip next'}
