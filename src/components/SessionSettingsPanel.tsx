@@ -42,9 +42,9 @@ export default function SessionSettingsPanel({
   const [pairFirst, setPairFirst] = useState('');
   const [pairSecond, setPairSecond] = useState('');
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 20, boxShadow: C.shadow }}>
-      <h3 style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, margin: '0 0 14px' }}>Session</h3>
-      <div className="settings-row" style={{ marginBottom: 0 }}>
+    <details open={!scheduleActive} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
+      <summary style={{ fontSize: 14, color: C.text, fontWeight: 700, cursor: 'pointer' }}>Session settings</summary>
+      <div className="settings-row" style={{ marginTop: 14, marginBottom: 0 }}>
         <div style={{ flex: '0 0 auto' }}>
           <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Start time</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
@@ -132,6 +132,6 @@ export default function SessionSettingsPanel({
           {preferredPairs.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>{preferredPairs.map(pair => <span key={pair.join('|')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(125,211,252,0.08)', border: `1px solid ${C.border}`, borderRadius: 4, padding: '3px 6px', color: C.textDim, fontSize: 11 }}>{pair[0]} + {pair[1]}<button onClick={() => removePreferredPair(pair)} aria-label={`Remove preferred pairing ${pair[0]} and ${pair[1]}`} style={{ background: 'none', border: 'none', color: C.textMuted, padding: 0, cursor: 'pointer' }}>×</button></span>)}</div>}
         </div>
       </div>
-    </div>
+    </details>
   );
 }

@@ -16,6 +16,7 @@ interface PlayerListProps {
   genderInput: 'M' | 'F';
   levelInput?: 1 | 2 | 3;
   allDefaultsLoaded: boolean;
+  scheduleActive?: boolean;
   showPrivateFields?: boolean;
   setNameInput: (value: string) => void;
   setGenderInput: (value: 'M' | 'F') => void;
@@ -60,6 +61,7 @@ export default function PlayerList({
   genderInput,
   levelInput = 2,
   allDefaultsLoaded,
+  scheduleActive = false,
   showPrivateFields = true,
   setNameInput,
   setGenderInput,
@@ -104,7 +106,8 @@ export default function PlayerList({
     setBankNameInput('');
   };
   return (
-    <>
+    <details open={!scheduleActive} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
+      <summary style={{ fontSize: 14, color: C.text, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>Players ({players.length})</summary>
       {players.length === 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '24px 20px', marginBottom: 20, boxShadow: C.shadow }}>
           <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>How it works</p>
@@ -126,19 +129,13 @@ export default function PlayerList({
         </div>
       )}
 
-      {players.length > 0 && (
-        <p style={{ fontSize: 12, color: C.textDim, marginBottom: 8 }}>
-          {players.length} player{players.length === 1 ? '' : 's'}
-        </p>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
         <input
           value={nameInput}
           onChange={e => setNameInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && addPlayer()}
           placeholder="Player name"
-          style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', color: C.text, fontSize: 14, fontFamily: FONT, outline: 'none' }}
+          style={{ flex: '1 1 140px', minWidth: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 14px', color: C.text, fontSize: 14, fontFamily: FONT, outline: 'none' }}
         />
         <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: `1px solid ${C.border}`, flexShrink: 0 }}>
           {(['M', 'F'] as const).map(g => (
@@ -387,6 +384,6 @@ export default function PlayerList({
       {players.length > 0 && players.length < 4 && (
         <p style={{ color: C.amber, fontSize: 12, marginBottom: 20, textAlign: 'center' }}>Need at least 4 players</p>
       )}
-    </>
+    </details>
   );
 }

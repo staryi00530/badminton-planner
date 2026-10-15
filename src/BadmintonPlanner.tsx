@@ -794,6 +794,7 @@ function BadmintonPlanner() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+            {selectedTab === 'setup' && <>
             {debugQueueEnabled && <button onClick={exportDebugLogs} title="Download live queue debug logs" aria-label="Export debug logs" style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}><LucideIcon name="download" size={13} /> Debug</button>}
             {!isSharedSession && <button onClick={() => {
               if (privateLevelsVisible) {
@@ -806,6 +807,7 @@ function BadmintonPlanner() {
             }} title={privateLevelsVisible ? 'Exit admin view' : 'Open admin view with the admin PIN'} style={{ background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}>
               {privateLevelsVisible ? 'Exit admin view' : 'Admin view'}
             </button>}
+            </>}
             {isFirebaseConfigured() && <span title={dbSynced === 'synced' ? 'Win-loss synced to cloud' : dbSynced === 'syncing' ? 'Syncing…' : dbSynced === 'error' ? 'Sync failed' : 'Cloud sync ready'} style={{ fontSize: 13, color: dbSynced === 'synced' ? C.green : dbSynced === 'error' ? '#ef4444' : C.textMuted }}>{dbSynced === 'synced' ? '☁ Synced' : dbSynced === 'syncing' ? '⟳' : dbSynced === 'error' ? '☁ ✗' : '☁'}</span>}
             {window.ADMIN_PIN && (
               <button onClick={toggleAdminLock} title={isAdmin ? 'Click to lock score entry' : 'Click to unlock score entry'} style={{ background: isAdmin ? C.accentDim : C.card, color: isAdmin ? '#fff' : C.textMuted, border: `1px solid ${isAdmin ? 'transparent' : C.border}`, borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, fontFamily: FONT }}>
@@ -849,6 +851,7 @@ function BadmintonPlanner() {
         {(selectedTab === 'live' || selectedTab === 'setup') && (
         <>
         {selectedTab === 'live' && liveBoard}
+        {selectedTab === 'setup' && <>
         <SessionSettingsPanel
           sessionStart={sessionStart}
           totalMinutes={totalMinutes}
@@ -873,6 +876,7 @@ function BadmintonPlanner() {
           genderInput={genderInput}
           levelInput={levelInput}
           allDefaultsLoaded={allDefaultsLoaded}
+          scheduleActive={Boolean(result)}
           showPrivateFields={!isSharedSession && privateLevelsVisible}
           setNameInput={value => setField('nameInput', value)}
           setGenderInput={value => setField('genderInput', value)}
@@ -912,6 +916,8 @@ function BadmintonPlanner() {
           </div>
         )}
 
+        </>}
+
         {result && (
           <div className="action-buttons" style={{ marginBottom: 24, flexWrap: 'wrap' }}>
             <button onClick={copySchedule} title="Copy full schedule (with sit list & game counts)" style={{ display: 'flex', alignItems: 'center', gap: 6, background: copied ? C.green : C.card, color: copied ? C.bg : C.text, border: `1px solid ${copied ? C.green : C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT, transition: 'all 0.2s' }}><LucideIcon name={copied ? 'check' : 'copy'} size={15} /> Copy</button>
@@ -919,7 +925,7 @@ function BadmintonPlanner() {
             <button onClick={saveAsImage} title="Save schedule as an image" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="download" size={15} /> Image</button>
             <button onClick={() => { const loaded = savedPlans.find(p => p.id === loadedPlanId); patchState({ saveTag: loaded ? loaded.tag : '', showSavePlan: true }); }} title="Save plan with tag" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="bookmark" size={15} /> Save</button>
             <button onClick={() => shareLink()} title="Share schedule via link" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="link" size={15} /> Share</button>
-            <button onClick={clearSchedule} title="Clear schedule" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="trash" size={15} /> Clear</button>
+            {selectedTab === 'setup' && <button onClick={clearSchedule} title="Clear schedule" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="trash" size={15} /> Clear</button>}
           </div>
         )}
 
@@ -927,6 +933,7 @@ function BadmintonPlanner() {
           <ConfirmOverwriteModal onConfirm={executeOverwrite} onCancel={cancelOverwrite} />
         )}
 
+        {selectedTab === 'setup' && <>
         {hasAppliedScores && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '8px 14px' }}><span style={{ fontSize: 12, color: C.amber }}>⚡ Scores recorded — re-roll to use updated skill ratings in the next schedule</span></div>}
 
         {result && (
@@ -946,6 +953,7 @@ function BadmintonPlanner() {
         )}
 
         {saved && <p style={{ fontSize: 12, color: C.green, textAlign: 'center', marginTop: -16, marginBottom: 16 }}>Schedule saved — will persist on refresh</p>}
+        </>}
 
         {result && (
           <SessionStatusPanel

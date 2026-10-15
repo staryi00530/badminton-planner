@@ -47,8 +47,31 @@ function renderPlayerList(overrides = {}) {
 }
 
 describe('PlayerList — gender-grouped alphabetical display', () => {
+  it('keeps an active roster compact while preserving bank and original-index actions', async () => {
+    const user = userEvent.setup();
+    const handlers = renderPlayerList({
+      scheduleActive: true,
+      showPrivateFields: false,
+      playerHistory: [{ name: 'Bank player', gender: 'M', level: 2 }],
+    });
+    const summary = screen.getByText('Players (4)');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByPlaceholderText('Player name')).not.toBeVisible();
+    await user.click(summary);
+    expect(screen.getByPlaceholderText('Player name')).toBeVisible();
+    expect(screen.queryByTitle('Private level used for balancing')).not.toBeInTheDocument();
+    await user.click(screen.getByTitle('Select Bank player'));
+    await user.click(summary);
+    await user.click(summary);
+    await user.click(screen.getByRole('button', { name: 'Add Selected (1)' }));
+    expect(handlers.addSelectedFromBank).toHaveBeenCalledWith([{ name: 'Bank player', gender: 'M', level: 2 }]);
+    await user.click(within(screen.getByText('Zoe').closest('div')!).getByRole('button', { name: '×' }));
+    expect(handlers.removePlayer).toHaveBeenCalledWith(0);
+  });
+
   it('renders players grouped M then F, alphabetical within each group', () => {
     renderPlayerList();
+    expect(screen.getByText('Players (4)').closest('details')).toHaveAttribute('open');
     const names = screen.getAllByText(/^(Zoe|Bob|Alice|Tom)$/).map(el => el.textContent);
     expect(names).toEqual(['Bob', 'Tom', 'Alice', 'Zoe']);
   });

@@ -137,9 +137,9 @@ describe('BadmintonPlanner live game flow', () => {
       expect(screen.getByRole('button', { name: 'Live session' })).toHaveAttribute('aria-current', 'page');
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
     });
-    const board = screen.getByRole('region', { name: 'Live session board' });
-    const setup = screen.getByRole('button', { name: 'Re-roll' });
-    expect(board.compareDocumentPosition(setup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Live session board' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
   });
 
   it('re-rolls from Setup into Live session with all initial courts live', async () => {
@@ -170,11 +170,64 @@ describe('BadmintonPlanner live game flow', () => {
   it('returns to Setup when the active schedule is cleared', async () => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
     await user.click(screen.getByRole('button', { name: 'Clear' }));
 
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: /Generate \(3 slots\)/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Live session' })).toBeDisabled();
+  });
+
+  it('keeps setup and admin controls off Live and one navigation action away', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('bp-debug-live-queue', 'true');
+    render(<BadmintonPlanner />);
+
+    expect(screen.queryByText('Session settings')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Preferred pairing first player')).not.toBeInTheDocument();
+    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view', 'Export debug logs']) {
+      expect(screen.queryByRole('button', { name, exact: true })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText('Re-generate from slot')).not.toBeInTheDocument();
+    expect(screen.getAllByTitle('Player is done for today').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
+    expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
+    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view', 'Export debug logs']) {
+      expect(screen.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+    expect(screen.getByText('Re-generate from slot')).toBeVisible();
+    await user.click(screen.getByText('Session settings'));
+    expect(screen.getByLabelText('Preferred pairing first player')).toBeVisible();
+    await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'P1');
+    await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'P2');
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
+    await user.click(screen.getByText('Players (12)'));
+    expect(screen.getByPlaceholderText('Player name')).toBeVisible();
+    expect(screen.queryByTitle('Private level used for balancing')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Admin view', exact: true }));
+    expect(screen.getByTitle('Private level used for balancing')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Live session' }));
+    expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Exit admin view' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
+    await user.click(screen.getByText('Session settings'));
+    expect(screen.getByRole('button', { name: 'Remove preferred pairing P1 and P2' })).toBeVisible();
+  });
+
+  it.each(['Past games', 'Saved plans', 'How it works'])('does not expose setup controls on %s', async name => {
+    const user = userEvent.setup();
+    localStorage.setItem('bp-debug-live-queue', 'true');
+    render(<BadmintonPlanner />);
+    await user.click(screen.getByRole('button', { name, exact: true }));
+    expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Admin view', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export debug logs' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
+    expect(screen.getByRole('button', { name: 'Re-roll' })).toBeVisible();
   });
 
   it('promotes the first queued game with a substitution when its player is still live', async () => {
