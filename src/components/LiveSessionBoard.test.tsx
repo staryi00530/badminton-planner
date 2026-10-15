@@ -49,6 +49,29 @@ function InteractiveBoard({ result, completedGames }: { result: PlannerResult; c
 }
 
 describe('LiveSessionBoard', () => {
+  it.each([2, 3, 4, 5])('retains all %i live lanes, names and Finish actions when upcoming capacity decreases', courts => {
+    const initial = props({
+      liveCapacity: courts, changeSlot: 2, changeCapacity: courts,
+      result: { schedule: schedule.slice(0, 2).map(s => ({ ...s, courts: schedule[0]!.courts.slice(0, courts) })), gamesPlayed: [] },
+      liveGames: Array.from({ length: courts }, (_, court) => ({ slot: 1, court, displayCourt: court })),
+      onAdjustCourts: vi.fn(),
+    });
+    const { rerender } = render(<LiveSessionBoard {...initial} />);
+    const lanes = Array.from({ length: courts }, (_, i) => lane(i + 1));
+    rerender(<LiveSessionBoard {...initial} changeCapacity={courts - 1} result={{
+      ...initial.result,
+      schedule: [initial.result.schedule[0]!, { ...initial.result.schedule[1]!, courts: initial.result.schedule[1]!.courts.slice(0, courts - 1) }],
+    }} />);
+    for (let i = 0; i < courts; i++) {
+      expect(lane(i + 1)).toBe(lanes[i]);
+      expect(within(lane(i + 1)).getByRole('button', { name: 'Finish game', exact: true })).toBeEnabled();
+      for (const player of players.slice(i * 4, i * 4 + 4)) expect(lane(i + 1)).toHaveTextContent(player.name);
+    }
+    expect(screen.getByRole('region', { name: 'Session summary' })).toHaveTextContent(new RegExp(`Active courts\\s*${courts}`));
+    if (courts === 2) expect(screen.getByRole('button', { name: 'Remove court', exact: true })).toBeDisabled();
+    else expect(screen.getByRole('button', { name: 'Remove court', exact: true })).toBeEnabled();
+  });
+
   it('offers bounded court changes from the first mutable slot and delegates the command', async () => {
     const input = props({ liveCapacity: 4, changeSlot: 2, changeCapacity: 4, onAdjustCourts: vi.fn() });
     const { rerender } = render(<LiveSessionBoard {...input} />);

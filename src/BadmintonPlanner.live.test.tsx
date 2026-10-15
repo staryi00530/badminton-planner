@@ -257,6 +257,37 @@ describe('BadmintonPlanner live game flow', () => {
       for (let i = 0; i < count; i++) await startNextVisibleGame(user);
     }
 
+    it('keeps arrival and court changes when a departure is undone after a Setup round trip', async () => {
+      const user = userEvent.setup();
+      seed(2, Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: i === 23 ? 4 : 0, availTo: 5 })));
+      render(<BadmintonPlanner />);
+      await start(user, 2);
+      const current = [lane(1).textContent, lane(2).textContent];
+      const firstSlot = stored('bp-result').schedule[0];
+      await user.click(screen.getByRole('button', { name: 'Add court', exact: true }));
+      await user.click(availability('P24').getByRole('button', { name: 'Here now' }));
+      const beforeDeparture = stored('bp-result');
+      const arrivedPlayers = stored('bp-players');
+      expect(arrivedPlayers.find((p: Player) => p.name === 'P24').availFrom).toBe(1);
+      await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
+      expect(stored('bp-result').schedule.slice(1).every((s: { courts: { teamA: Player[]; teamB: Player[] }[] }) =>
+        s.courts.every(c => [...c.teamA, ...c.teamB].every(p => p.name !== 'P1')))).toBe(true);
+      await user.click(screen.getByRole('button', { name: 'Setup', exact: true }));
+      expect(screen.getByRole('button', { name: 'Setup', exact: true })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('button', { name: 'Re-roll', exact: true })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Undo last action' }));
+      expect(screen.getByRole('button', { name: 'Undo last action' })).toBeDisabled();
+      expect(stored('bp-result')).toEqual(beforeDeparture);
+      expect(stored('bp-players')).toEqual(arrivedPlayers);
+      expect(stored('bp-courtOverrides')).toEqual({ 2: 3 });
+      await user.click(screen.getByRole('button', { name: 'Live session', exact: true }));
+      expect([lane(1).textContent, lane(2).textContent]).toEqual(current);
+      expect(stored('bp-result').schedule[0]).toEqual(firstSlot);
+      expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(3);
+      expect(availability('P1').getByRole('button', { name: 'Leaving' })).toBeEnabled();
+      expect(availability('P24').queryByRole('button', { name: 'Here now' })).not.toBeInTheDocument();
+    });
+
     it.each(['Here now', 'Leaving', 'Add court', 'Remove court', 'Setup Apply'])(
       'undo restores schedule, availability, scores, notice and confirmation archive after %s', async command => {
         const user = userEvent.setup();
