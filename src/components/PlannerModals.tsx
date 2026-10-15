@@ -34,6 +34,55 @@ export function PinPromptModal({ pinInput, pinError, setPinInput, submitPin, clo
   );
 }
 
+export interface QueuePromotionPrompt {
+  completedCourt: number;
+  firstGame: { slot: number; court: number; players: string[] };
+  blockedPlayers: string[];
+  lookaheadGame: { slot: number; court: number; players: string[] } | null;
+  replacements: Array<{ replacee: string; replacer: string }>;
+}
+
+export function QueuePromotionModal({ prompt, onUseLookahead, onSubstitute, onCancel }: {
+  prompt: QueuePromotionPrompt;
+  onUseLookahead: () => void;
+  onSubstitute: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <ModalShell maxWidth={440}>
+      <p role="heading" aria-level={2} style={{ fontWeight: 700, marginBottom: 4 }}>Court {prompt.completedCourt} is ready</p>
+      <p style={{ fontSize: 13, color: C.textDim, margin: '0 0 12px' }}>
+        The next queued game cannot start as-is because {prompt.blockedPlayers.map((name, index) => (
+          <span key={name}>{index > 0 && ', '}<strong>{name}</strong></span>
+        ))} {prompt.blockedPlayers.length === 1 ? 'is' : 'are'} still playing.
+      </p>
+      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 10px', marginBottom: 12 }}>
+        <div style={{ fontSize: 10, color: C.textMuted, textTransform: 'uppercase', marginBottom: 4 }}>First queued game</div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{prompt.firstGame.players.join(' · ')}</div>
+        {prompt.replacements.length > 0 && (
+          <div style={{ fontSize: 12, color: C.amber, marginTop: 6 }}>
+            Suggested: {prompt.replacements.map(({ replacee, replacer }, index) => (
+              <span key={`${replacee}-${replacer}`}>{index > 0 && ', '}<strong>{replacer}</strong> for <strong>{replacee}</strong></span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {prompt.lookaheadGame && (
+          <button onClick={onUseLookahead} aria-label="Use next playable game" style={{ background: C.accentDim, color: '#fff', border: 'none', borderRadius: 6, padding: '10px', fontWeight: 700, fontFamily: FONT }}>
+            Use next playable game
+            <span style={{ display: 'block', fontSize: 11, fontWeight: 400, opacity: 0.85, marginTop: 2 }}>{prompt.lookaheadGame.players.join(' · ')}</span>
+          </button>
+        )}
+        <button onClick={onSubstitute} style={{ background: prompt.lookaheadGame ? C.card : C.accentDim, color: prompt.lookaheadGame ? C.text : '#fff', border: `1px solid ${prompt.lookaheadGame ? C.border : 'transparent'}`, borderRadius: 6, padding: '10px', fontWeight: 700, fontFamily: FONT }}>
+          Substitute unavailable players
+        </button>
+        <button onClick={onCancel} style={{ background: 'transparent', color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px', fontFamily: FONT }}>Cancel</button>
+      </div>
+    </ModalShell>
+  );
+}
+
 export function ConfirmOverwriteModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return (
     <ModalShell maxWidth={360}>

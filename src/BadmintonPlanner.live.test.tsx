@@ -79,6 +79,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
 
     await waitFor(() => {
       const currentSection = sectionFor('Current game');
@@ -92,6 +93,41 @@ describe('BadmintonPlanner live game flow', () => {
       expect(currentSection).toHaveTextContent('P10');
       expect(currentSection).toHaveTextContent('P3');
       expect(current.getAllByText('● LIVE')).toHaveLength(2);
+    });
+  });
+
+  it('offers the next playable game as a one-step alternative without cascading further', async () => {
+    const user = userEvent.setup();
+    const players = Array.from({ length: 12 }, (_, i) => makePlayer(`P${i + 1}`));
+    const result = {
+      schedule: [
+        makeSlot(1, [['P1', 'P2', 'P3', 'P4'], ['P5', 'P6', 'P7', 'P8']], ['P9', 'P10', 'P11', 'P12']),
+        makeSlot(2, [['P5', 'P9', 'P10', 'P11'], ['P1', 'P2', 'P3', 'P4']], ['P6', 'P7', 'P8', 'P12']),
+      ],
+      gamesPlayed: players.map(() => 1),
+    };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(result));
+    localStorage.setItem('bp-totalMinutes', JSON.stringify(30));
+    localStorage.setItem('bp-numCourts', JSON.stringify(2));
+
+    render(<BadmintonPlanner />);
+
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+
+    expect(screen.getByRole('heading', { name: 'Court 1 is ready' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use next playable game' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Use next playable game' }));
+
+    await waitFor(() => {
+      const current = sectionFor('Current game');
+      expect(within(current).getAllByText('● LIVE')).toHaveLength(2);
+      expect(current).toHaveTextContent('SLOT 1');
+      expect(current).toHaveTextContent('SLOT 2');
+      expect(current).toHaveTextContent('P1');
+      expect(current).toHaveTextContent('P4');
     });
   });
 
@@ -116,6 +152,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
     await waitFor(() => {
       const current = sectionFor('Current game');
       expect(within(current).getAllByText('● LIVE')).toHaveLength(3);
@@ -167,6 +204,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[1]);
+    await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
 
     await waitFor(() => {
       const currentSection = sectionFor('Current game');

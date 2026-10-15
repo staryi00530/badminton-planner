@@ -29,6 +29,7 @@ import {
   ImportModal,
   LucideIcon,
   PinPromptModal,
+  QueuePromotionModal,
   SavePlanModal,
   ShareLinkModal,
 } from './components/PlannerModals';
@@ -352,6 +353,9 @@ function BadmintonPlanner() {
     applyLiveGamesUpdate,
     blockedPlayerNames,
     queueAdjustment,
+    queuePromotionPrompt,
+    resolveQueuePromotion,
+    cancelQueuePromotion,
     setPlayerJoining,
     setPlayerLeaving,
     toggleLiveGame,
@@ -739,6 +743,7 @@ function BadmintonPlanner() {
         {showSavePlan && <SavePlanModal needsPin={Boolean(window.ADMIN_PIN && !isAdmin)} pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} saveTag={saveTag} setSaveTag={value => patchState({ saveTag: value })} savePlan={savePlan} canUpdate={loadedPlanId != null && savedPlans.some(p => p.id === loadedPlanId)} savedPlans={savedPlans} isSharedSession={isSharedSession} close={() => patchState({ showSavePlan: false, pinInput: '', pinError: false })} />}
         {showShareModal && <ShareLinkModal copiedShareUrl={copiedShareUrl} sharedUrl={sharedUrl} shareIsUpdate={shareIsUpdate} hasExisting={isFirebaseConfigured() ? !!shareId : !!(shareId && shareToken)} copyShareUrl={copyShareUrl} newShareLink={() => shareLink(true)} close={() => patchState({ showShareModal: false })} />}
         {showImport && <ImportModal importText={importText} importError={importError} setImportText={value => patchState({ importText: value, importError: '' })} importSchedule={importSchedule} close={() => patchState({ showImport: false, importText: '', importError: '' })} />}
+        {queuePromotionPrompt && <QueuePromotionModal prompt={queuePromotionPrompt.prompt} onUseLookahead={() => resolveQueuePromotion('lookahead')} onSubstitute={() => resolveQueuePromotion('substitute')} onCancel={cancelQueuePromotion} />}
 
         <div style={{ marginBottom: 28, borderBottom: `1px solid ${C.border}`, paddingBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div>

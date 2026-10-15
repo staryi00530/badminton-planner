@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reconcileLiveQueue } from './liveQueueTransition';
+import { getQueuePromotionDecision, reconcileLiveQueue } from './liveQueueTransition';
 
 function scheduleFor(games: Array<[number, number, string[]]>) {
   const bySlot = new Map<number, Array<string[]>>();
@@ -18,6 +18,65 @@ function scheduleFor(games: Array<[number, number, string[]]>) {
 }
 
 describe('reconcileLiveQueue', () => {
+  it('offers the following playable game when the first queued game is blocked', () => {
+    const decision = getQueuePromotionDecision({
+      schedule: scheduleFor([
+        [1, 0, ['A', 'B', 'C', 'D']],
+        [2, 0, ['E', 'F', 'G', 'H']],
+        [2, 1, ['I', 'J', 'K', 'L']],
+      ]),
+      liveGames: [{ slot: 1, court: 1, players: ['E', 'A', 'B', 'C'] }],
+      completedGames: [{ slot: 1, court: 0 }],
+      changedSlot: 1,
+      suspendedPlayerNames: [],
+    });
+
+    expect(decision.first).toEqual({ slot: 2, court: 0 });
+    expect(decision.firstBlockedPlayers).toEqual(['E']);
+    expect(decision.lookahead).toEqual({ slot: 2, court: 1 });
+    expect(decision.mode).toBe('choose');
+  });
+
+  it('does not cascade past a second blocked queued game', () => {
+    const decision = getQueuePromotionDecision({
+      schedule: scheduleFor([
+        [1, 0, ['A', 'B', 'C', 'D']],
+        [2, 0, ['E', 'F', 'G', 'H']],
+        [2, 1, ['I', 'J', 'K', 'L']],
+        [3, 0, ['M', 'N', 'O', 'P']],
+      ]),
+      liveGames: [
+        { slot: 1, court: 1, players: ['E', 'I', 'A', 'B'] },
+      ],
+      completedGames: [{ slot: 1, court: 0 }],
+      changedSlot: 1,
+      suspendedPlayerNames: [],
+    });
+
+    expect(decision.first).toEqual({ slot: 2, court: 0 });
+    expect(decision.firstBlockedPlayers).toEqual(['E']);
+    expect(decision.lookahead).toBeNull();
+    expect(decision.mode).toBe('substitute-first');
+  });
+
+  it('promotes the first queued game directly when it is playable', () => {
+    const decision = getQueuePromotionDecision({
+      schedule: scheduleFor([
+        [1, 0, ['A', 'B', 'C', 'D']],
+        [2, 0, ['E', 'F', 'G', 'H']],
+        [2, 1, ['I', 'J', 'K', 'L']],
+      ]),
+      liveGames: [{ slot: 1, court: 1, players: ['A', 'B', 'C', 'D'] }],
+      completedGames: [{ slot: 1, court: 0 }],
+      changedSlot: 1,
+      suspendedPlayerNames: [],
+    });
+
+    expect(decision.mode).toBe('promote-first');
+    expect(decision.firstBlockedPlayers).toEqual([]);
+    expect(decision.lookahead).toBeNull();
+  });
+
   it('preserves active court identity when the edited roster changes', () => {
     const result = reconcileLiveQueue({
       schedule: scheduleFor([[1, 0, ['A', 'B', 'C', 'D']], [2, 0, ['E', 'F', 'G', 'H']]]),

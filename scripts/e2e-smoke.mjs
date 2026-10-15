@@ -124,6 +124,11 @@ try {
       const done = current().getByRole('button', { name: '✓ Done', exact: true }).first();
       if (await done.count()) {
         await done.click();
+        await page.waitForTimeout(50);
+        const useNextPlayable = page.getByRole('button', { name: 'Use next playable game', exact: true });
+        const substituteUnavailable = page.getByRole('button', { name: 'Substitute unavailable players', exact: true });
+        if (await useNextPlayable.count()) await useNextPlayable.click();
+        else if (await substituteUnavailable.count()) await substituteUnavailable.click();
         await page.waitForTimeout(120);
         completed++;
       } else {
