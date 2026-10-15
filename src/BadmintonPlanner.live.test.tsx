@@ -6,6 +6,7 @@ import BadmintonPlanner from './BadmintonPlanner';
 import { fetchShare, isFirebaseConfigured } from './firebase';
 import type { SharePayload } from './types';
 import { generateSchedule } from './algorithm/scheduler';
+import * as scheduler from './algorithm/scheduler';
 import type { Player } from './algorithm/types';
 
 vi.mock('./firebase', () => ({
@@ -173,6 +174,57 @@ describe('BadmintonPlanner live game flow', () => {
       await user.click(screen.getByRole('button', { name: 'Past games (1)' }));
       expect(screen.getByText(/Game 1.*Slot 1.*Court 1/)).toBeInTheDocument();
       expect(screen.getByText('21–17')).toBeInTheDocument();
+    });
+
+    describe.each(['Setup Apply', 'Add court', 'Remove court'] as const)('confirmed %s auto-archive', command => {
+      it.each(['success', 'cancel', 'failure'] as const)('archives only a successful confirmation: %s', async outcome => {
+        const user = userEvent.setup();
+        const original = seed();
+        const existing = [{ id: 7, tag: 'Existing plan', result: original, savedAt: new Date().toISOString() }];
+        localStorage.setItem('bp-saved-plans', JSON.stringify(existing));
+        localStorage.setItem('bp-is-confirmed', 'true');
+        render(<BadmintonPlanner />);
+        await start(user, 2);
+        const liveBefore = [lane(1).textContent, lane(2).textContent];
+        const request = async () => {
+          if (command === 'Setup Apply') {
+            await user.click(screen.getByRole('button', { name: 'Setup' }));
+            await user.click(screen.getByRole('button', { name: '3C' }));
+            await user.click(screen.getByRole('button', { name: 'Apply' }));
+          } else await user.click(screen.getByRole('button', { name: command }));
+        };
+        await request();
+        expect(stored('bp-saved-plans')).toEqual(existing);
+        if (outcome === 'cancel') {
+          await user.click(screen.getByRole('button', { name: 'Cancel' }));
+        } else {
+          // Simulate the scheduler's null failure contract, not the archive callback.
+          if (outcome === 'failure') vi.spyOn(scheduler, 'generateSchedule').mockReturnValueOnce(null);
+          await user.click(screen.getByRole('button', { name: 'Update upcoming games' }));
+        }
+        if (outcome !== 'success') {
+          expect(stored('bp-saved-plans')).toEqual(existing);
+          expect(stored('bp-result')).toEqual(original);
+          expect(stored('bp-is-confirmed')).toBe(true);
+          if (outcome === 'failure') expect(screen.getByRole('status', { name: 'Session change' })).toHaveTextContent('Unable to update');
+          // A retry archives once, not once for the failed/cancelled attempt too.
+          await request();
+          await user.click(screen.getByRole('button', { name: 'Update upcoming games' }));
+        }
+        const saved = stored('bp-saved-plans');
+        expect(saved).toHaveLength(2);
+        expect(saved[0]).toMatchObject({ tag: '', result: original });
+        expect(saved.slice(1)).toEqual(existing);
+        expect(stored('bp-is-confirmed')).toBe(false);
+        expect(stored('bp-result').schedule[0]).toEqual(original.schedule[0]);
+        expect(stored('bp-courtOverrides')).toEqual({ 2: command === 'Remove court' ? 1 : 3 });
+        expect(lane(1).textContent).toBe(liveBefore[0]);
+        expect(lane(2).textContent).toBe(liveBefore[1]);
+        expect(screen.getByRole('button', { name: 'Saved plans (2)' })).toBeInTheDocument();
+        // Subsequent unconfirmed updates must not archive again.
+        await request();
+        expect(stored('bp-saved-plans')).toEqual(saved);
+      });
     });
 
     it('cancels a confirmed change without mutation and confirms only future games', async () => {

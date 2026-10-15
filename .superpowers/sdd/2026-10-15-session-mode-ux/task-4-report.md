@@ -1,6 +1,6 @@
 # Task 4 Complete Report
 
-Status: complete. Foundation: `638a52b`; the integration is committed with this report.
+Status: complete, including the auto-archive review correction below. Foundation: `638a52b`; initial integration: `34b2041`.
 
 ## Delivered
 
@@ -42,3 +42,14 @@ Logs: `/tmp/task4-final-tests.log`, `/tmp/task4-regression-{red,green}.log`, `/t
 
 - Existing TypeScript debt and bundle-size warning are outside this task; production build and focused checks pass.
 - Broad smoke and full unit suites were intentionally not rerun, following the bounded-verification request. Undo and broader E2E remain Tasks 5 and 6, not incomplete Task 4 work.
+
+## Auto-Archive Review Correction
+
+- Addressed the P2 finding in `task-4-review.md`: confirmed Setup Apply and Add/Remove court once again archive the previous confirmed result. The hook notifies the planner shell only after successful future regeneration; the shell retains ownership of Saved Plans and prepends one entry using the existing archive format.
+- Cancellation and regeneration failure do not archive or mutate the existing saved list. Retrying successfully creates exactly one archive; subsequent unconfirmed changes do not create another. Availability-only commands retain their prior behavior.
+- Added nine shell regressions: success, cancellation and scheduler failure for each of Setup Apply, Add court and Remove court. Tests assert saved contents/count, preserved existing plans, unchanged current lineups/earlier slot, confirmation state, capacity, successful retries and no duplicate archive on later unconfirmed updates. Only the scheduler's null failure contract is mocked in failure cases.
+- RED: `timeout 40s npm run test:unit -- src/BadmintonPlanner.live.test.tsx -t auto-archive --reporter=dot` failed all nine cases at the missing-archive assertion. GREEN: the same command passed all nine after the fix.
+- Final focused verification: `timeout 60s npm run test:unit -- src/BadmintonPlanner.live.test.tsx src/hooks/useLiveQueue.test.ts src/utils/liveQueueTransition.test.ts --reporter=dot` passed **80/80 tests across three files** in 35.33 seconds.
+- `timeout 30s npm run build` passed in 4.38 seconds with the existing >500 kB warning (518.89 kB bundle). `git diff --check` passed. No E2E, network-idle waits, broad suite or typecheck rerun in this correction.
+- Self-review: checked success-only callback ordering, old-result capture, preservation of existing saved plans, cancellation/failure/retry paths and opt-in command scope. No outstanding finding. The shared future-only transition, queue/fairness/admin behavior and unrelated work are unchanged; no agents spawned.
+- Logs: `/tmp/task4-archive-red.log`, `/tmp/task4-archive-green.log`, `/tmp/task4-archive-focused.log`, `/tmp/task4-archive-build.log`. Existing TypeScript debt and bundle warning remain the only previously documented verification concerns.

@@ -29,6 +29,7 @@ interface LiveQueueOptions {
   getCourtsPerSlot: (overrides?: Record<number, number>) => number[];
   regenerate: (args: RegenerateArgs) => RegeneratedPlan | null;
   patchState: (patch: RuntimePatch) => void;
+  onConfirmedScheduleChange?: (previousResult: PlannerResult) => void;
 }
 
 function assignDisplayCourts(games: GameRef[], capacity: number): GameRef[] {
@@ -122,6 +123,7 @@ export function useLiveQueue({
   getCourtsPerSlot,
   regenerate,
   patchState,
+  onConfirmedScheduleChange,
 }: LiveQueueOptions) {
   const changeSlot = getFutureChangeBoundary(liveGames, completedGames);
   const liveCapacity = getCourtsPerSlot()[Math.min(totalSlots - 1, changeSlot - 1)] ?? 1;
@@ -132,6 +134,7 @@ export function useLiveQueue({
     overridePlayers?: Player[];
     courtOverrides: Record<number, number>;
     description: string;
+    archiveOnConfirm?: boolean;
   } | null>(null);
   const [queueAdjustment, setQueueAdjustment] = useState<QueueAdjustmentNotice | null>(null);
   const [queuePromotionPrompt, setQueuePromotionPrompt] = useState<{
@@ -522,9 +525,10 @@ export function useLiveQueue({
       return;
     }
     patchState(patch);
+    if (isConfirmed && change.archiveOnConfirm) onConfirmedScheduleChange?.(result);
     setQueueAdjustment(null);
     setSessionChangeNotice(`${change.description} from slot ${boundarySlot}. ${change.targetCapacity} court${change.targetCapacity === 1 ? '' : 's'} planned; ${liveGames.length} currently active. Current and completed games are unchanged.`);
-  }, [completedGames, liveGames, patchState, regenerate, result, scores, totalSlots]);
+  }, [completedGames, isConfirmed, liveGames, onConfirmedScheduleChange, patchState, regenerate, result, scores, totalSlots]);
 
   const requestSessionChange = useCallback((change: NonNullable<typeof pendingSessionChange>) => {
     if (change.boundarySlot > totalSlots) {
@@ -553,6 +557,7 @@ export function useLiveQueue({
     requestSessionChange({
       boundarySlot, targetCapacity: getCourtsPerSlot(overrides)[boundarySlot - 1] ?? liveCapacity,
       courtOverrides: overrides, description: 'Upcoming games updated',
+      archiveOnConfirm: true,
     });
   }, [changeSlot, courtOverrides, getCourtsPerSlot, liveCapacity, requestSessionChange, result]);
 
@@ -565,6 +570,7 @@ export function useLiveQueue({
     requestSessionChange({
       boundarySlot, targetCapacity, courtOverrides: { ...courtOverrides, [boundarySlot]: targetCapacity },
       description: delta > 0 ? 'Court added' : 'Court removed',
+      archiveOnConfirm: true,
     });
   }, [changeSlot, courtOverrides, getCourtsPerSlot, liveCapacity, requestSessionChange, result]);
 

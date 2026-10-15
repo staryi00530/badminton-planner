@@ -364,6 +364,9 @@ function BadmintonPlanner() {
     regenerate: ({ targetFromSlot, overridePlayers, blockedForFirstSlot, overrideWinLoss, overrideScores, baseResult, forcedFirstSlot, courtOverrides: overrides }) => doRegen(targetFromSlot, overridePlayers ?? null, blockedForFirstSlot ?? new Set(), overrideWinLoss ?? null, overrideScores ?? null, baseResult, forcedFirstSlot ?? null, overrides),
     patchState,
     canPlayerJoin: staggerMode === 'custom',
+    onConfirmedScheduleChange: previousResult => patchState({
+      savedPlans: [{ id: Date.now(), tag: '', result: previousResult, savedAt: new Date().toISOString() }, ...savedPlans],
+    }),
   });
 
   const runImport = useCallback(() => {
