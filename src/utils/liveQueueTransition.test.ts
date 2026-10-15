@@ -50,6 +50,65 @@ describe('reconcileLiveQueue', () => {
     expect(result.promotedGames).toEqual([{ slot: 2, court: 1 }]);
   });
 
+  it('keeps all three courts live and skips only a queued game whose players are still active', () => {
+    const result = reconcileLiveQueue({
+      schedule: scheduleFor([
+        [1, 0, ['A', 'B', 'C', 'D']],
+        [1, 1, ['E', 'F', 'G', 'H']],
+        [1, 2, ['I', 'J', 'K', 'L']],
+        [2, 0, ['E', 'M', 'N', 'O']],
+        [2, 1, ['P', 'Q', 'R', 'S']],
+      ]),
+      liveGames: [{ slot: 1, court: 1 }, { slot: 1, court: 2 }],
+      completedGames: [{ slot: 1, court: 0 }],
+      capacity: 3,
+      changedSlot: 1,
+      suspendedPlayerNames: [],
+    });
+
+    expect(result.liveGames).toEqual([
+      { slot: 1, court: 1 },
+      { slot: 1, court: 2 },
+      { slot: 2, court: 1 },
+    ]);
+    expect(result.promotedGames).toEqual([{ slot: 2, court: 1 }]);
+  });
+
+  it('promotes the first queued game when it is playable, even if a later group is different', () => {
+    const result = reconcileLiveQueue({
+      schedule: scheduleFor([
+        [1, 0, ['A', 'B', 'C', 'D']],
+        [1, 1, ['E', 'F', 'G', 'H']],
+        [1, 2, ['I', 'J', 'K', 'L']],
+        [2, 0, ['M', 'N', 'O', 'P']],
+        [2, 1, ['Q', 'R', 'S', 'T']],
+      ]),
+      liveGames: [{ slot: 1, court: 1 }, { slot: 1, court: 2 }],
+      completedGames: [{ slot: 1, court: 0 }],
+      capacity: 3,
+      changedSlot: 1,
+      suspendedPlayerNames: [],
+    });
+
+    expect(result.promotedGames).toEqual([{ slot: 2, court: 0 }]);
+    expect(result.liveGames).toHaveLength(3);
+  });
+
+  it('uses a substituted player snapshot when checking queue conflicts', () => {
+    const result = reconcileLiveQueue({
+      schedule: scheduleFor([
+        [1, 0, ['A', 'B', 'C', 'D']],
+        [2, 0, ['A', 'M', 'N', 'O']],
+      ]),
+      liveGames: [{ slot: 1, court: 0, players: ['X', 'B', 'C', 'D'] }],
+      completedGames: [],
+      capacity: 2,
+      changedSlot: 1,
+      suspendedPlayerNames: [],
+    });
+    expect(result.promotedGames).toEqual([{ slot: 2, court: 0 }]);
+  });
+
   it('excludes completed and suspended games from promotion', () => {
     const result = reconcileLiveQueue({
       schedule: scheduleFor([

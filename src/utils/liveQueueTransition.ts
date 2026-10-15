@@ -23,6 +23,7 @@ function gameKey(game: GameRef) {
 }
 
 function courtPlayers(schedule: ScheduleLike, game: GameRef) {
+  if (game.players?.length === 4) return [...game.players];
   const court = schedule.find(slot => slot.slot === game.slot)?.courts[game.court];
   return court ? [...court.teamA, ...court.teamB].map(player => player.name) : [];
 }

@@ -81,6 +81,7 @@ try {
   let maxLive = 0;
   for (const { courtCount, playerCount } of [{ courtCount: 2, playerCount: 13 }, { courtCount: 3, playerCount: 13 }, { courtCount: 4, playerCount: 16 }, { courtCount: 5, playerCount: 20 }]) {
     await setup(courtCount, playerCount);
+    assert.equal(await current().getByText('● LIVE').count(), courtCount, `new schedules should start all ${courtCount} courts`);
     for (let step = 0; step < 10; step++) {
       const liveCount = () => current().getByText('● LIVE').count();
       for (let pass = 0; pass < courtCount + 1 && await liveCount() < courtCount; pass++) {

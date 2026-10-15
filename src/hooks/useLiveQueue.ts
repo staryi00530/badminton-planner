@@ -65,6 +65,52 @@ function assignDisplayCourts(games: GameRef[], capacity: number): GameRef[] {
   return assigned;
 }
 
+function courtPlayersForLog(schedule: PlannerResult, game: GameRef) {
+  const court = schedule.schedule.find(slot => slot.slot === game.slot)?.courts[game.court];
+  return court ? [...court.teamA, ...court.teamB].map(player => player.name) : [];
+}
+
+function substituteQueuedGame(
+  schedule: PlannerResult,
+  game: GameRef,
+  players: Player[],
+  activeNames: Set<string>,
+  suspendedNames: Set<string>,
+) {
+  const slot = schedule.schedule.find(item => item.slot === game.slot);
+  const court = slot?.courts[game.court];
+  if (!slot || !court) return null;
+  const originalPlayers = game.players?.length === 4
+    ? [...game.players]
+    : [...court.teamA, ...court.teamB].map(player => player.name);
+  const playerInfo = new Map(players.map(player => [player.name, player]));
+  const slotPool = [
+    ...slot.sitting.map(player => player.name),
+    ...slot.courts.flatMap(item => [...item.teamA, ...item.teamB].map(player => player.name)),
+  ];
+  const used = new Set(originalPlayers);
+  const replacements: Array<{ replacee: string; replacer: string }> = [];
+  const nextPlayers = originalPlayers.map(name => {
+    if (!activeNames.has(name)) return name;
+    const gender = playerInfo.get(name)?.gender ?? [...court.teamA, ...court.teamB].find(player => player.name === name)?.gender;
+    const candidates = [...new Set(slotPool)].filter(candidate => {
+      if (used.has(candidate) || activeNames.has(candidate) || suspendedNames.has(candidate)) return false;
+      return true;
+    });
+    const replacer = candidates.find(candidate => playerInfo.get(candidate)?.gender === gender) ?? candidates[0];
+    if (!replacer) return name;
+    used.add(replacer);
+    replacements.push({ replacee: name, replacer });
+    return replacer;
+  });
+  return {
+    game: { ...game, players: nextPlayers },
+    conflictingPlayers: originalPlayers.filter(name => activeNames.has(name)),
+    unavailablePlayers: originalPlayers.filter(name => activeNames.has(name) && !replacements.some(item => item.replacee === name)),
+    replacements,
+  };
+}
+
 export interface QueueAdjustmentNotice {
   queuedGame: { slot: number; court: number; players: string[] };
   promotedGame: { slot: number; court: number; displayCourt: number; players: string[] };
@@ -112,7 +158,8 @@ export function useLiveQueue({
     for (const game of games) {
       const slot = scheduleResult.schedule.find(item => item.slot === game.slot);
       const court = slot?.courts[game.court];
-      if (court) [...court.teamA, ...court.teamB].forEach(player => names.add(player.name));
+      if (game.players?.length === 4) game.players.forEach(name => names.add(name));
+      else if (court) [...court.teamA, ...court.teamB].forEach(player => names.add(player.name));
     }
     return names;
   }, [result]);
@@ -130,7 +177,8 @@ export function useLiveQueue({
       if (game.court !== forcedCourts.length) return null;
       const court = slot.courts[game.court];
       if (!court) return null;
-      const indexes = [...court.teamA, ...court.teamB].map(player => players.findIndex(item => item.name === player.name));
+      const names = game.players?.length === 4 ? game.players : [...court.teamA, ...court.teamB].map(player => player.name);
+      const indexes = names.map(name => players.findIndex(item => item.name === name));
       if (indexes.length !== 4 || indexes.some(index => index < 0)) return null;
       forcedCourts.push(indexes);
     }
@@ -169,9 +217,31 @@ export function useLiveQueue({
           && !hasGame(nextCompletedGames, game.slot, game.court)
           && !hasGame(nextLiveGames, game.slot, game.court)) ?? null
       : null;
+    if (shouldPromote && nextResult) {
+      const blockedNames = livePlayerNamesFor(nextLiveGames, nextResult);
+      liveQueueDebug('queue:scan', {
+        changedSlot,
+        capacity: targetLiveCount,
+        currentLive: describeGames(nextLiveGames, nextResult),
+        completed: describeGames(nextCompletedGames, nextResult),
+        candidates: nextResult.schedule
+          .flatMap(slot => slot.courts.map((_, court) => ({ slot: slot.slot, court })))
+          .filter(game => game.slot > changedSlot && !hasGame(nextCompletedGames, game.slot, game.court) && !hasGame(nextLiveGames, game.slot, game.court))
+          .slice(0, 8)
+          .map(game => {
+            const players = courtPlayersForLog(nextResult!, game);
+            return { ...game, players, blockedByLive: players.filter(name => blockedNames.has(name)) };
+          }),
+      });
+    }
+    const queuedSubstitution = queuedPreviewGame && nextResult
+      ? substituteQueuedGame(nextResult, queuedPreviewGame, options.overridePlayers ?? players, livePlayerNamesFor(nextLiveGames, nextResult), new Set(nextSuspendedPlayerNames))
+      : null;
     // Keep the queued court identity stable while regeneration finds a playable
     // replacement for anyone who is still active on another court.
-    const reservedQueuedGame = queuedPreviewGame;
+    const reservedQueuedGame = queuedSubstitution && queuedSubstitution.unavailablePlayers.length === 0
+      ? queuedSubstitution.game
+      : null;
     const reservedGroupRepeats = reservedQueuedGame && nextResult
       ? (() => {
         const slot = nextResult.schedule.find(item => item.slot === reservedQueuedGame.slot);
@@ -186,17 +256,13 @@ export function useLiveQueue({
       })()
       : false;
     if (reservedGroupRepeats && reservedQueuedGame) {
-      liveQueueDebug('queue:reservation-rejected-repeat', {
+      liveQueueDebug('queue:reservation-repeat-allowed', {
         queuedGame: describeGames([reservedQueuedGame], scheduleResult)[0],
         liveGames: describeGames(nextLiveGames, scheduleResult),
         completedGames: describeGames(nextCompletedGames, scheduleResult),
       });
     }
-    const unavailableQueuedPlayers = queuedPreviewGame && nextResult
-      ? [...(nextResult.schedule.find(slot => slot.slot === queuedPreviewGame.slot)?.courts[queuedPreviewGame.court]?.teamA ?? []), ...(nextResult.schedule.find(slot => slot.slot === queuedPreviewGame.slot)?.courts[queuedPreviewGame.court]?.teamB ?? [])]
-        .map(player => player.name)
-        .filter(name => livePlayerNamesFor(nextLiveGames, nextResult).has(name))
-      : [];
+    const unavailableQueuedPlayers = queuedSubstitution?.conflictingPlayers ?? [];
     const patch: RuntimePatch = {
       liveGames: nextLiveGames,
       completedGames: nextCompletedGames,
@@ -208,7 +274,7 @@ export function useLiveQueue({
 
     const regenerateFrom = (regenFromSlot: number) => {
       if (regenFromSlot > totalSlots || !nextResult) return false;
-      const gamesToPreserve = reservedQueuedGame && !reservedGroupRepeats && unavailableQueuedPlayers.length === 0 && reservedQueuedGame.slot === regenFromSlot && !hasGame(nextLiveGames, reservedQueuedGame.slot, reservedQueuedGame.court)
+      const gamesToPreserve = reservedQueuedGame && queuedSubstitution?.unavailablePlayers.length === 0 && reservedQueuedGame.slot === regenFromSlot && !hasGame(nextLiveGames, reservedQueuedGame.slot, reservedQueuedGame.court)
         ? [...nextLiveGames, ...nextCompletedGames, reservedQueuedGame]
         : [...nextLiveGames, ...nextCompletedGames];
       const forcedLiveCourts = forcedLiveCourtsForSlot(regenFromSlot, gamesToPreserve, nextResult);
@@ -265,7 +331,16 @@ export function useLiveQueue({
     };
 
     const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
-    if (regenerateFrom(initialRegenSlot) || initialRegenSlot > totalSlots) {
+    const shouldRegenerate = Boolean(
+      nextResult && (
+        options.overrideResult ||
+        newCompletedGames.length > completedGames.length ||
+        Object.keys(extraPatch).length > 0 ||
+        options.overridePlayers ||
+        options.suspendedPlayerNames
+      ),
+    );
+    if (shouldRegenerate && (regenerateFrom(initialRegenSlot) || initialRegenSlot > totalSlots)) {
       while (nextLiveGames.length < targetLiveCount) {
         const transition = reconcileLiveQueue({
           schedule: nextResult?.schedule ?? [],
@@ -281,19 +356,17 @@ export function useLiveQueue({
         nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
         if (nextLiveGames.length === beforeCount) break;
         liveQueueDebug('queue:promote', {
-          queuedGame: reservedQueuedGame ? describeGames([reservedQueuedGame], scheduleResult)[0] : null,
+          queuedGame: queuedPreviewGame ? describeGames([queuedPreviewGame], scheduleResult)[0] : null,
           promotedGame: describeGames([queuedGame], nextResult)[0],
           unavailableQueuedPlayers,
           beforeLiveGames: describeGames(nextLiveGames.slice(0, beforeCount), nextResult),
           afterLiveGames: describeGames(nextLiveGames, nextResult),
           completedGames: describeGames(nextCompletedGames, nextResult),
         });
-        if (reservedQueuedGame && unavailableQueuedPlayers.length > 0) {
-          const queuedDescription = describeGames([reservedQueuedGame], scheduleResult)[0]!;
+        if (queuedSubstitution && queuedSubstitution.replacements.length > 0) {
+          const queuedDescription = describeGames([queuedPreviewGame!], scheduleResult)[0]!;
           const promotedDescription = describeGames([queuedGame], nextResult)[0]!;
-          const queuedNames = new Set(queuedDescription.players);
-          const promotedNames = new Set(promotedDescription.players);
-          const replacers = promotedDescription.players.filter(name => !queuedNames.has(name));
+          const replacers = queuedSubstitution.replacements.map(item => item.replacer);
           const promotedWithLane = assignDisplayCourts([...nextLiveGames, queuedGame], targetLiveCount)
             .find(game => game.slot === queuedGame.slot && game.court === queuedGame.court);
           const displayCourt = promotedWithLane?.displayCourt ?? queuedGame.court;

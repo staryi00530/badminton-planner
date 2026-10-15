@@ -803,7 +803,7 @@ function BadmintonPlanner() {
           <ArchiveTab savedPlans={savedPlans} loadPlan={loadPlan} deletePlan={deletePlan} />
         )}
 
-        {activeTab === 'past' && <PastGamesTab result={result} completedGames={completedGames} scores={scores} />}
+        {activeTab === 'past' && <PastGamesTab result={result} completedGames={completedGames} liveGames={liveGames} scores={scores} players={players} winLoss={winLoss} />}
 
         {activeTab === 'about' && <AboutTab />}
 

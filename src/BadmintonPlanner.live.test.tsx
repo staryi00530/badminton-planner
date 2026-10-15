@@ -72,7 +72,7 @@ describe('BadmintonPlanner live game flow', () => {
     localStorage.setItem('bp-numCourts', JSON.stringify(2));
   });
 
-  it('auto-marks the next same-court game live when a live game is done', async () => {
+  it('promotes the first queued game with a substitution when its player is still live', async () => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
 
@@ -90,6 +90,7 @@ describe('BadmintonPlanner live game flow', () => {
       expect(currentSection).toHaveTextContent('P1');
       expect(currentSection).toHaveTextContent('P9');
       expect(currentSection).toHaveTextContent('P10');
+      expect(currentSection).toHaveTextContent('P3');
       expect(current.getAllByText('● LIVE')).toHaveLength(2);
     });
   });
@@ -142,8 +143,8 @@ describe('BadmintonPlanner live game flow', () => {
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
     });
-    expect(within(sectionFor('Next game')).getAllByRole('button', { name: 'Queued' }).length).toBeGreaterThan(0);
-    expect(within(sectionFor('Next game')).getAllByRole('button', { name: 'Queued' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(within(sectionFor('Next game')).getAllByRole('button', { name: 'Waiting' }).length).toBeGreaterThan(0);
+    expect(within(sectionFor('Next game')).getAllByRole('button', { name: 'Waiting' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
   });
 
   it('fills a freed court from the next playable queued game even when the same court index disappears', async () => {

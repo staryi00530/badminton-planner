@@ -62,7 +62,18 @@ export function useScheduleActions({
         lastValue = value;
         patchState({ genSlot: value.schedule.length });
       }
-      if (done) patchState({ result: lastValue, scheduleDirty: false, isGenerating: false });
+      if (done) {
+        const firstSlot = lastValue?.schedule.find(slot => slot.slot === 1);
+        const initialCapacity = getCourtsPerSlot()[0] ?? firstSlot?.courts.length ?? 0;
+        const initialLiveGames = firstSlot
+          ? firstSlot.courts.slice(0, initialCapacity).map((_, court) => ({
+            slot: firstSlot.slot,
+            court,
+            players: [...firstSlot.courts[court]!.teamA, ...firstSlot.courts[court]!.teamB].map(player => player.name),
+          }))
+          : [];
+        patchState({ result: lastValue, liveGames: initialLiveGames, scheduleDirty: false, isGenerating: false });
+      }
       else requestAnimationFrame(step);
     }
     requestAnimationFrame(step);

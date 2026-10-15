@@ -1,14 +1,19 @@
 import { C, FONT } from '../constants';
-import type { PlannerResult, ScoresMap } from '../types';
+import type { PlannerResult, ScoresMap, WinLossMap } from '../types';
+import type { Player } from '../algorithm/types';
 import type { GameRef } from '../utils/liveQueue';
+import PlayerStatsPanel from './PlayerStatsPanel';
 
 interface PastGamesTabProps {
   result: PlannerResult | null;
   completedGames: GameRef[];
+  liveGames: GameRef[];
   scores: ScoresMap;
+  players: Player[];
+  winLoss: WinLossMap;
 }
 
-export default function PastGamesTab({ result, completedGames, scores }: PastGamesTabProps) {
+export default function PastGamesTab({ result, completedGames, liveGames, scores, players, winLoss }: PastGamesTabProps) {
   const games = completedGames.map((ref, index) => {
     const court = result?.schedule.find(slot => slot.slot === ref.slot)?.courts[ref.court];
     const players = ref.players ?? (court ? [...court.teamA, ...court.teamB].map(player => player.name) : []);
@@ -34,6 +39,7 @@ export default function PastGamesTab({ result, completedGames, scores }: PastGam
           ))}
         </div>
       )}
+      <PlayerStatsPanel players={players} result={result} completedGames={completedGames} liveGames={liveGames} winLoss={winLoss} />
     </div>
   );
 }
