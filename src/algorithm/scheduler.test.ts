@@ -79,6 +79,25 @@ describe('Equal games', () => {
   });
 });
 
+describe('Preferred pairings', () => {
+  it('favors a preferred pair as teammates when the court can accommodate it', () => {
+    const players = makePlayers(4, 0, 1);
+    const result = generateSchedule(players, 1, [1], 0, null, null, { preferredPairs: [[0, 1]] }, seededRng(7));
+    expect(result).not.toBeNull();
+    const court = result!.schedule[0]!.courts[0]!;
+    const teams = [court.teamA.map(player => player.name), court.teamB.map(player => player.name)];
+    expect(teams.some(team => team.includes('P1') && team.includes('P2'))).toBe(true);
+  });
+
+  it('co-locates a preferred pair on a multi-court slot when the roster permits it', () => {
+    const players = makePlayers(8, 0, 1);
+    const result = generateSchedule(players, 1, [2], 0, null, null, { preferredPairs: [[0, 4]] }, seededRng(3));
+    expect(result).not.toBeNull();
+    const courts = result!.schedule[0]!.courts;
+    expect(courts.some(court => [...court.teamA, ...court.teamB].some(a => a.name === 'P1') && [...court.teamA, ...court.teamB].some(b => b.name === 'P5'))).toBe(true);
+  });
+});
+
 describe('Level balancing', () => {
   it('avoids putting level-1 and level-3 players on the same team when possible', () => {
     const players = makePlayers(4).map((player, index) => ({

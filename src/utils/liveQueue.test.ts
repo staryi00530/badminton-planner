@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contiguousGamesForSlot, firstIncompleteSlot, keepGamesBeforeSlot, isSlotCompleted, normalizeGameRefs } from './liveQueue';
+import { contiguousGamesForSlot, firstIncompleteSlot, initialLiveGamesForSchedule, keepGamesBeforeSlot, isSlotCompleted, normalizeGameRefs } from './liveQueue';
 
 const schedule = [
   { slot: 1, courts: [{}, {}] },
@@ -38,5 +38,24 @@ describe('live queue helpers', () => {
     expect(contiguousGamesForSlot([{ slot: 2, court: 0 }, { slot: 2, court: 1 }], 2))
       .toEqual([{ slot: 2, court: 0 }, { slot: 2, court: 1 }]);
     expect(contiguousGamesForSlot([{ slot: 2, court: 1 }], 2)).toBeNull();
+  });
+
+  it('starts every configured court in the first generated slot with player snapshots', () => {
+    const result = {
+      schedule: [{
+        slot: 1,
+        courts: [
+          { teamA: [{ name: 'A' }, { name: 'B' }], teamB: [{ name: 'C' }, { name: 'D' }] },
+          { teamA: [{ name: 'E' }, { name: 'F' }], teamB: [{ name: 'G' }, { name: 'H' }] },
+          { teamA: [{ name: 'I' }, { name: 'J' }], teamB: [{ name: 'K' }, { name: 'L' }] },
+        ],
+      }],
+    };
+
+    expect(initialLiveGamesForSchedule(result, 3)).toEqual([
+      { slot: 1, court: 0, players: ['A', 'B', 'C', 'D'] },
+      { slot: 1, court: 1, players: ['E', 'F', 'G', 'H'] },
+      { slot: 1, court: 2, players: ['I', 'J', 'K', 'L'] },
+    ]);
   });
 });

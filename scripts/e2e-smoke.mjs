@@ -81,6 +81,7 @@ try {
   let maxLive = 0;
   for (const { courtCount, playerCount } of [{ courtCount: 2, playerCount: 13 }, { courtCount: 3, playerCount: 13 }, { courtCount: 4, playerCount: 16 }, { courtCount: 5, playerCount: 20 }]) {
     await setup(courtCount, playerCount);
+    assert.equal(await current().getByText('● LIVE').count(), courtCount, `new schedules should start all ${courtCount} courts`);
     for (let step = 0; step < 10; step++) {
       const liveCount = () => current().getByText('● LIVE').count();
       for (let pass = 0; pass < courtCount + 1 && await liveCount() < courtCount; pass++) {
@@ -123,6 +124,11 @@ try {
       const done = current().getByRole('button', { name: '✓ Done', exact: true }).first();
       if (await done.count()) {
         await done.click();
+        await page.waitForTimeout(50);
+        const useNextPlayable = page.getByRole('button', { name: 'Use next playable game', exact: true });
+        const substituteUnavailable = page.getByRole('button', { name: 'Substitute unavailable players', exact: true });
+        if (await useNextPlayable.count()) await useNextPlayable.click();
+        else if (await substituteUnavailable.count()) await substituteUnavailable.click();
         await page.waitForTimeout(120);
         completed++;
       } else {

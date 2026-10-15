@@ -7,6 +7,12 @@ describe('PastGamesTab', () => {
   it('shows the recorded lineup snapshot instead of a regenerated schedule lineup', () => {
     const { container } = render(
       <PastGamesTab
+        players={[
+          { name: 'Played A', gender: 'M', availFrom: 0, availTo: 9 },
+          { name: 'Played B', gender: 'M', availFrom: 0, availTo: 9 },
+          { name: 'Played C', gender: 'M', availFrom: 0, availTo: 9 },
+          { name: 'Played D', gender: 'M', availFrom: 0, availTo: 9 },
+        ]}
         result={{
           schedule: [{
             slot: 1,
@@ -22,7 +28,9 @@ describe('PastGamesTab', () => {
           gamesPlayed: [],
         }}
         completedGames={[{ slot: 1, court: 0, players: ['Played A', 'Played B', 'Played C', 'Played D'] }]}
+        liveGames={[]}
         scores={{ 's1c0': { a: '21', b: '18', applied: true, teamA: ['Played A', 'Played B'], teamB: ['Played C', 'Played D'] } }}
+        winLoss={{}}
       />
     );
 
