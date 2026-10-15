@@ -11,6 +11,7 @@ export interface ExtraCourt {
 }
 
 export type StaggerMode = 'none' | 'group' | 'custom';
+export type PreferredPair = [string, string];
 
 export interface PlannerResult {
   schedule: SlotResult[];
@@ -97,7 +98,7 @@ export interface PlannerState {
   savedPlans: SavedPlan[];
   showSavePlan: boolean;
   saveTag: string;
-  activeTab: 'schedule' | 'past' | 'archive' | 'about';
+  activeTab: 'live' | 'setup' | 'past' | 'archive' | 'about';
   editingSlot: number | null;
   editLayout: EditLayout | null;
   pendingShare: SharePayload | null;
@@ -110,6 +111,7 @@ export interface PlannerState {
   shareToken: string | null;
   isSharedSession: boolean;
   preferMixedTeams: boolean;
+  preferredPairs: PreferredPair[];
   isConfirmed: boolean;
   pendingOverwrite: 'generate' | 'clear' | 'import' | 'regenerateRemaining' | null;
   shareNotice: 'expired' | null;
@@ -119,7 +121,16 @@ export interface PlannerState {
   suspendedPlayerNames: string[];
 }
 
+/** State fields that may be changed by a runtime queue transition. */
+export type RuntimePatch = Pick<Partial<PlannerState>,
+  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' |
+  'suspendedPlayerNames' | 'fromSlot' | 'scheduleDirty' | 'copied' | 'isConfirmed' |
+  'loadedPlanId' | 'editingSlot' | 'editLayout' | 'isGenerating' | 'genSlot' |
+  'pendingOverwrite' | 'fromSlotCourts' | 'activeTab'
+>;
+
 export interface PlannerPersistedState {
+  activeTab: PlannerState['activeTab'];
   players: Player[];
   playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   totalMinutes: number;
@@ -134,6 +145,7 @@ export interface PlannerPersistedState {
   savedPlans: SavedPlan[];
   isConfirmed: boolean;
   preferMixedTeams: boolean;
+  preferredPairs: PreferredPair[];
   loadedPlanId: number | null;
 }
 

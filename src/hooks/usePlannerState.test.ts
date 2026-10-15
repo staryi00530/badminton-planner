@@ -18,6 +18,34 @@ describe('usePlannerState — defaults & loading', () => {
     expect(result.current.state.isConfirmed).toBe(false);
     expect(result.current.state.liveGames).toEqual([]);
     expect(result.current.state.completedGames).toEqual([]);
+    expect(result.current.state.activeTab).toBe('setup');
+  });
+
+  it('defaults an existing schedule to Live session', () => {
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.activeTab).toBe('live');
+  });
+
+  it.each(['live', 'setup', 'past', 'archive', 'about'] as const)('retains the selected %s view on refresh with a schedule', activeTab => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ result: { schedule: [], gamesPlayed: [] }, activeTab }));
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.activeTab).toBe(activeTab);
+  });
+
+  it.each(['schedule', 'unknown', null])('falls back to Live session for an invalid persisted view (%s)', activeTab => {
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    localStorage.setItem('bp-active-tab', JSON.stringify(activeTab));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.activeTab).toBe('live');
+  });
+
+  it('falls back to Setup when a persisted Live session has no result', () => {
+    localStorage.setItem('bp-active-tab', JSON.stringify('live'));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.activeTab).toBe('setup');
   });
 
   it('loads persisted values from localStorage on init', () => {
@@ -96,6 +124,13 @@ describe('usePlannerState — persistence to localStorage', () => {
 });
 
 describe('usePlannerState — cross-tab safety while viewing a shared schedule', () => {
+  it('does not overwrite the local selected view while viewing a shared schedule', () => {
+    const { result } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ activeTab: 'about' }));
+    act(() => result.current.patchState({ isSharedSession: true, activeTab: 'past' }));
+    expect(JSON.parse(localStorage.getItem('bp-active-tab')!)).toBe('about');
+  });
+
   // isSharedSession=true means this tab is showing someone else's share link, not the
   // device's own schedule — players/result/scores/isConfirmed must not leak into this
   // device's local persistence and silently overwrite it. See CLAUDE.md "Sharing".

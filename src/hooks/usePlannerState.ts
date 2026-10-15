@@ -16,8 +16,10 @@ const STORAGE_KEYS = {
   winLoss: 'bp-winloss',
   savedPlans: 'bp-saved-plans',
   preferMixedTeams: 'bp-prefer-mixed-teams',
+  preferredPairs: 'bp-preferred-pairs',
   isConfirmed: 'bp-is-confirmed',
   loadedPlanId: 'bp-loaded-plan-id',
+  activeTab: 'bp-active-tab',
 } as const;
 
 function loadState<T>(key: string, fallback: T): T {
@@ -53,6 +55,10 @@ function createInitialState(): PlannerState {
 
   const storedPlayers = loadState<PlannerState['players']>(STORAGE_KEYS.players, []);
   const storedHistory = loadState<PlannerState['playerHistory']>(STORAGE_KEYS.playerHistory, []);
+  const result = loadState<PlannerState['result']>(STORAGE_KEYS.result, null);
+  const storedTab = loadState<unknown>(STORAGE_KEYS.activeTab, null);
+  const activeTab = (['live', 'setup', 'past', 'archive', 'about'] as const).find(tab => tab === storedTab)
+    ?? (result ? 'live' : 'setup');
   return {
     // Older rosters and the original defaults did not store a level. Normalize those
     // records so the private setting survives reloads and future persistence writes.
@@ -67,7 +73,7 @@ function createInitialState(): PlannerState {
     extraCourt: loadState(STORAGE_KEYS.extraCourt, { enabled: false, startMin: 60, durationMin: 90 }),
     staggerMode: loadState(STORAGE_KEYS.staggerMode, 'none'),
     sessionStart: loadState(STORAGE_KEYS.sessionStart, ''),
-    result: loadState(STORAGE_KEYS.result, null),
+    result,
     scheduleDirty: false,
     scores: loadState(STORAGE_KEYS.scores, {}),
     winLoss: loadState(STORAGE_KEYS.winLoss, {}),
@@ -87,7 +93,7 @@ function createInitialState(): PlannerState {
     savedPlans: loadState(STORAGE_KEYS.savedPlans, []),
     showSavePlan: false,
     saveTag: '',
-    activeTab: 'schedule',
+    activeTab: activeTab === 'live' && !result ? 'setup' : activeTab,
     editingSlot: null,
     editLayout: null,
     pendingShare: null,
@@ -100,6 +106,7 @@ function createInitialState(): PlannerState {
     shareToken: loadSession('bp-share-token', null),
     isSharedSession: loadSession('bp-is-shared-session', false),
     preferMixedTeams: loadState(STORAGE_KEYS.preferMixedTeams, false),
+    preferredPairs: loadState(STORAGE_KEYS.preferredPairs, []),
     isConfirmed: loadState(STORAGE_KEYS.isConfirmed, false),
     pendingOverwrite: null,
     shareNotice: null,
@@ -130,6 +137,7 @@ export function usePlannerState() {
 
   useEffect(() => {
     const persisted: PlannerPersistedState = {
+      activeTab: state.activeTab,
       players: state.players,
       playerHistory: state.playerHistory,
       totalMinutes: state.totalMinutes,
@@ -143,6 +151,7 @@ export function usePlannerState() {
       winLoss: state.winLoss,
       savedPlans: state.savedPlans,
       preferMixedTeams: state.preferMixedTeams,
+      preferredPairs: state.preferredPairs,
       isConfirmed: state.isConfirmed,
       loadedPlanId: state.loadedPlanId,
     };
@@ -151,7 +160,7 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
       if (state.isSharedSession && liveSessionExempt.has(key)) continue;
@@ -173,9 +182,11 @@ export function usePlannerState() {
     state.winLoss,
     state.savedPlans,
     state.preferMixedTeams,
+    state.preferredPairs,
     state.isConfirmed,
     state.loadedPlanId,
     state.isSharedSession,
+    state.activeTab,
   ]);
 
   useEffect(() => {
