@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BadmintonPlanner from './BadmintonPlanner';
+import { fetchShare, isFirebaseConfigured } from './firebase';
+import type { SharePayload } from './types';
 
 vi.mock('./firebase', () => ({
-  isFirebaseConfigured: () => false,
+  isFirebaseConfigured: vi.fn(() => false),
   createShare: vi.fn(),
   updateShare: vi.fn(),
   fetchShare: vi.fn(),
+  loadWinLoss: vi.fn(async () => ({})),
+  saveWinLoss: vi.fn(async () => {}),
 }));
 
 function makePlayer(name: string) {
@@ -48,6 +52,8 @@ async function startNextVisibleGame(user: ReturnType<typeof userEvent.setup>) {
 
 describe('BadmintonPlanner live game flow', () => {
   beforeEach(() => {
+    vi.mocked(isFirebaseConfigured).mockReturnValue(false);
+    window.history.replaceState(null, '', '/');
     localStorage.clear();
     sessionStorage.clear();
     window.FIREBASE_CONFIG = null;
@@ -70,6 +76,52 @@ describe('BadmintonPlanner live game flow', () => {
     localStorage.setItem('bp-totalMinutes', JSON.stringify(45));
     localStorage.setItem('bp-gameMinutes', JSON.stringify(15));
     localStorage.setItem('bp-numCourts', JSON.stringify(2));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe.each(['firebase', 'api', 'hash'] as const)('opening a %s share', source => {
+    it.each(['about', 'archive'] as const)('selects Live session without replacing the personal %s selection', async activeTab => {
+      const payload: SharePayload = {
+        v: 1,
+        p: [['Shared A', 'M'], ['Shared B', 'M'], ['Shared C', 'F'], ['Shared D', 'F']],
+        cfg: { g: 15, c: 1 },
+        slots: [{ s: 1, c: [[[0, 1], [2, 3]]], sit: [] }],
+      };
+      localStorage.setItem('bp-active-tab', JSON.stringify(activeTab));
+      localStorage.setItem('bp-players', JSON.stringify(Array.from({ length: 12 }, (_, i) => ({ ...makePlayer(`P${i + 1}`), level: 2 }))));
+      const personalResult = localStorage.getItem('bp-result');
+      const personalPlayers = localStorage.getItem('bp-players');
+      if (source === 'firebase') {
+        vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+        vi.mocked(fetchShare).mockResolvedValue({ status: 'ok', data: payload });
+        window.history.replaceState(null, '', '/?share=explicit-session');
+      } else if (source === 'api') {
+        window.SHARE_API_BASE = 'https://share.example.test';
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: payload }), { status: 200 }));
+        window.history.replaceState(null, '', '/?share=explicit-session');
+      } else {
+        window.history.replaceState(null, '', `/#share=${btoa(JSON.stringify(payload))}`);
+      }
+
+      const { unmount } = render(<BadmintonPlanner />);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Live session' })).toHaveAttribute('aria-current', 'page');
+        expect(sectionFor('Current game')).toHaveTextContent('Shared A');
+        expect(sectionFor('Current game')).toHaveTextContent('Shared D');
+      });
+      expect(JSON.parse(localStorage.getItem('bp-active-tab')!)).toBe(activeTab);
+      expect(localStorage.getItem('bp-result')).toBe(personalResult);
+      expect(localStorage.getItem('bp-players')).toBe(personalPlayers);
+
+      unmount();
+      sessionStorage.clear();
+      window.history.replaceState(null, '', '/');
+      render(<BadmintonPlanner />);
+      expect(screen.getByRole('button', { name: activeTab === 'about' ? 'How it works' : /^Saved plans/ })).toHaveAttribute('aria-current', 'page');
+    });
   });
 
   it('generates a schedule into Live session with all initial courts live', async () => {

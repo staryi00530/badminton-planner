@@ -726,6 +726,8 @@ function BadmintonPlanner() {
       gameMinutes: typeof decoded.gameMinutes === 'number' ? decoded.gameMinutes : gameMinutes,
       numCourts: decoded.numCourts,
       result: decoded.result as PlannerResult,
+      activeTab: 'live',
+      isSharedSession: true,
       scores: decoded.scores,
       isConfirmed: decoded.isConfirmed,
       loadedPlanId: typeof newLoadedPlanId === 'number' ? newLoadedPlanId : null,
