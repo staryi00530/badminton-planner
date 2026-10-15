@@ -76,6 +76,7 @@ export interface PlannerState {
   gameMinutes: number;
   numCourts: number;
   extraCourt: ExtraCourt;
+  courtOverrides: Record<number, number>;
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;
@@ -126,7 +127,7 @@ export type RuntimePatch = Pick<Partial<PlannerState>,
   'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' |
   'suspendedPlayerNames' | 'fromSlot' | 'scheduleDirty' | 'copied' | 'isConfirmed' |
   'loadedPlanId' | 'editingSlot' | 'editLayout' | 'isGenerating' | 'genSlot' |
-  'pendingOverwrite' | 'fromSlotCourts' | 'activeTab'
+  'pendingOverwrite' | 'fromSlotCourts' | 'activeTab' | 'courtOverrides'
 >;
 
 export interface PlannerPersistedState {
@@ -137,6 +138,7 @@ export interface PlannerPersistedState {
   gameMinutes: number;
   numCourts: number;
   extraCourt: ExtraCourt;
+  courtOverrides: Record<number, number>;
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;

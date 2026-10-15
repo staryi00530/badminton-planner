@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getQueuePromotionDecision, reconcileLiveQueue } from './liveQueueTransition';
+import { getFutureChangeBoundary, getQueuePromotionDecision, reconcileFutureSessionChange, reconcileLiveQueue } from './liveQueueTransition';
+import { extractState, generateSchedule } from '../algorithm/scheduler';
+import { computeCourtsPerSlot } from './courtsPerSlot';
+import type { Player } from '../algorithm/types';
+import type { PlannerResult } from '../types';
 
 function scheduleFor(games: Array<[number, number, string[]]>) {
   const bySlot = new Map<number, Array<string[]>>();
@@ -198,5 +202,76 @@ describe('reconcileLiveQueue', () => {
 
     expect(result.liveGames).toEqual([{ slot: 1, court: 0 }]);
     expect(result.completedGames).toEqual([]);
+  });
+});
+
+describe('future-only session transitions', () => {
+  const players: Player[] = Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 4 }));
+  const baseResult = () => generateSchedule(players, 5, [3, 3, 3, 3, 3], 0, null, null, {}, () => 0.5)!;
+  function change(overrides: Partial<Parameters<typeof reconcileFutureSessionChange>[0]> = {}) {
+    const result = baseResult();
+    return reconcileFutureSessionChange({
+      result, totalSlots: 5, boundarySlot: 2, targetCapacity: 3, courtOverrides: {},
+      liveGames: [{ slot: 1, court: 2, displayCourt: 4, players: ['P9', 'P10', 'P11', 'P12'] }],
+      completedGames: [{ slot: 1, court: 0, players: ['P1', 'P2', 'P3', 'P4'] }],
+      scores: { s1c0: { a: '21', b: '15', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] } },
+      regenerate: ({ targetFromSlot, overridePlayers, baseResult, courtOverrides }) => {
+        const roster = overridePlayers ?? players;
+        const courts = computeCourtsPerSlot({ totalSlots: 5, gameMinutes: 15, numCourts: 3, extraCourt: { enabled: false, startMin: 0, durationMin: 0 }, courtOverrides });
+        const snapshot = extractState(baseResult.schedule.slice(0, targetFromSlot - 1), roster);
+        return { newResult: generateSchedule(roster, 5, courts, targetFromSlot - 1, snapshot, null, {}, () => 0.5)!, nextScores: {} };
+      },
+      ...overrides,
+    });
+  }
+
+  it('finds a safe upcoming boundary across asynchronous and sparse live/completed slots', () => {
+    expect(getFutureChangeBoundary([{ slot: 1, court: 2 }, { slot: 3, court: 0 }], [{ slot: 2, court: 1 }])).toBe(4);
+    expect(getFutureChangeBoundary([], [])).toBe(1);
+  });
+
+  it('removes an early departure only from future games, preserving snapshots and scores', () => {
+    const before = baseResult();
+    const patch = change({ result: before, overridePlayers: players.map(p => p.name === 'P9' ? { ...p, availTo: 0, leavesAt: 0 } : p) })!;
+    expect(patch.result!.schedule[0]).toBe(before.schedule[0]);
+    expect(patch.result!.schedule.slice(1).flatMap(s => s.courts.flatMap(c => [...c.teamA, ...c.teamB])).some(p => p.name === 'P9')).toBe(false);
+    expect(patch.liveGames).toEqual([{ slot: 1, court: 2, displayCourt: 4, players: ['P9', 'P10', 'P11', 'P12'] }]);
+    expect(patch.completedGames).toEqual([{ slot: 1, court: 0, players: ['P1', 'P2', 'P3', 'P4'] }]);
+    expect(patch.scores?.s1c0).toEqual({ a: '21', b: '15', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] });
+  });
+
+  it('includes a late arrival from the boundary without rewriting the initial slot', () => {
+    const roster = players.slice(0, 12).map((p, i) => i === 11 ? { ...p, availFrom: 3 } : p);
+    const before = generateSchedule(roster, 5, [3, 3, 3, 3, 3], 0, null, null, {}, () => 0.5)!;
+    const patch = change({ result: before, overridePlayers: roster.map(p => p.name === 'P12' ? { ...p, availFrom: 1 } : p) })!;
+    expect(patch.result!.schedule[0]).toBe(before.schedule[0]);
+    expect(patch.result!.schedule[1]!.courts).toHaveLength(3);
+    expect(patch.result!.schedule[1]!.courts.flatMap(c => [...c.teamA, ...c.teamB]).map(p => p.name)).toContain('P12');
+  });
+
+  it.each([1, 2, 3, 4, 5])('changes future capacity to %i without trimming or relabeling current games', capacity => {
+    const before = baseResult();
+    const liveGames = [0, 1, 2].map(court => ({ slot: 1, court, displayCourt: court }));
+    const patch = change({ result: before, liveGames, completedGames: [], targetCapacity: capacity, courtOverrides: { 2: capacity } })!;
+    expect(patch.liveGames).toBe(liveGames);
+    expect(patch.result!.schedule[0]).toBe(before.schedule[0]);
+    expect(patch.result!.schedule.slice(1).map(s => s.courts.length)).toEqual([capacity, capacity, capacity, capacity]);
+    expect(patch.fromSlot).toBe(2);
+    expect(patch.fromSlotCourts).toBe(capacity);
+    expect(patch.courtOverrides).toEqual({ 2: capacity });
+  });
+
+  it('protects a pulled-up live game and later completed game even when the requested boundary is earlier', () => {
+    const before = baseResult();
+    const patch = change({ result: before, liveGames: [{ slot: 2, court: 2, displayCourt: 0 }], completedGames: [{ slot: 3, court: 1 }] })!;
+    expect(patch.fromSlot).toBe(4);
+    expect(patch.result!.schedule.slice(0, 3)).toEqual(before.schedule.slice(0, 3));
+    expect(patch.completedGames).toEqual([{ slot: 3, court: 1 }]);
+    expect(patch.liveGames).toEqual([{ slot: 2, court: 2, displayCourt: 0 }]);
+  });
+
+  it('does not mutate anything when regeneration fails or no mutable slot remains', () => {
+    expect(change({ regenerate: () => null })).toBeNull();
+    expect(change({ liveGames: [{ slot: 5, court: 0 }] })).toBeNull();
   });
 });

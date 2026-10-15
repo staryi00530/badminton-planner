@@ -19,6 +19,7 @@ describe('usePlannerState — defaults & loading', () => {
     expect(result.current.state.liveGames).toEqual([]);
     expect(result.current.state.completedGames).toEqual([]);
     expect(result.current.state.activeTab).toBe('setup');
+    expect(result.current.state.courtOverrides).toEqual({});
   });
 
   it('defaults an existing schedule to Live session', () => {
@@ -85,6 +86,22 @@ describe('usePlannerState — dispatch', () => {
 });
 
 describe('usePlannerState — persistence to localStorage', () => {
+  it('restores slot-keyed court overrides on reload without changing base settings', () => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ courtOverrides: { 2: 5, 4: 1 } }));
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.courtOverrides).toEqual({ 2: 5, 4: 1 });
+    expect(reloaded.result.current.state.numCourts).toBe(1);
+  });
+
+  it('does not leak shared-session court overrides into the personal session', () => {
+    const { result } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ courtOverrides: { 2: 3 } }));
+    act(() => result.current.patchState({ isSharedSession: true, courtOverrides: { 1: 5 } }));
+    expect(JSON.parse(localStorage.getItem('bp-courtOverrides')!)).toEqual({ 2: 3 });
+  });
+
   it('persists settings changes back to localStorage', () => {
     const { result } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ numCourts: 4 }));

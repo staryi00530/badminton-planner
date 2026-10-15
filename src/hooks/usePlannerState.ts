@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   gameMinutes: 'bp-gameMinutes',
   numCourts: 'bp-numCourts',
   extraCourt: 'bp-extraCourt',
+  courtOverrides: 'bp-courtOverrides',
   staggerMode: 'bp-staggerMode',
   sessionStart: 'bp-sessionStart',
   result: 'bp-result',
@@ -71,6 +72,7 @@ function createInitialState(): PlannerState {
     gameMinutes: loadState(STORAGE_KEYS.gameMinutes, DEFAULT_GAME_MINUTES),
     numCourts: loadState(STORAGE_KEYS.numCourts, 1),
     extraCourt: loadState(STORAGE_KEYS.extraCourt, { enabled: false, startMin: 60, durationMin: 90 }),
+    courtOverrides: loadState(STORAGE_KEYS.courtOverrides, {}),
     staggerMode: loadState(STORAGE_KEYS.staggerMode, 'none'),
     sessionStart: loadState(STORAGE_KEYS.sessionStart, ''),
     result,
@@ -144,6 +146,7 @@ export function usePlannerState() {
       gameMinutes: state.gameMinutes,
       numCourts: state.numCourts,
       extraCourt: state.extraCourt,
+      courtOverrides: state.courtOverrides,
       staggerMode: state.staggerMode,
       sessionStart: state.sessionStart,
       result: state.result,
@@ -160,7 +163,7 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
       if (state.isSharedSession && liveSessionExempt.has(key)) continue;
@@ -175,6 +178,7 @@ export function usePlannerState() {
     state.gameMinutes,
     state.numCourts,
     state.extraCourt,
+    state.courtOverrides,
     state.staggerMode,
     state.sessionStart,
     state.result,
