@@ -89,6 +89,81 @@ describe('BadmintonPlanner live game flow', () => {
     const stored = (key: string) => JSON.parse(localStorage.getItem(key)!);
     const undo = () => screen.getByRole('button', { name: 'Undo last action' });
 
+    it.each(['new', 'update'])('invalidates undo after Start then manual Save (%s)', async mode => {
+      const user = userEvent.setup();
+      if (mode === 'update') {
+        localStorage.setItem('bp-saved-plans', JSON.stringify([{ id: 7, tag: 'Existing', result: stored('bp-result'), savedAt: new Date().toISOString() }]));
+        localStorage.setItem('bp-loaded-plan-id', '7');
+      }
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      expect(undo()).toBeEnabled();
+      await user.click(screen.getByRole('button', { name: 'Setup' }));
+      await user.click(screen.getByTitle('Save plan with tag'));
+      const tag = screen.getByPlaceholderText(/e.g. Wed/);
+      await user.clear(tag);
+      await user.type(tag, 'Keep this plan');
+      await user.click(within(tag.parentElement!).getByRole('button', { name: mode === 'update' ? 'Update' : 'Save', exact: true }));
+      const saved = stored('bp-saved-plans');
+      const loadedId = stored('bp-loaded-plan-id');
+      expect(saved).toHaveLength(1);
+      expect(saved[0].tag).toBe('Keep this plan');
+      expect(undo()).toBeDisabled();
+      await user.click(undo());
+      expect(stored('bp-saved-plans')).toEqual(saved);
+      expect(stored('bp-loaded-plan-id')).toBe(loadedId);
+    });
+
+    it('invalidates undo after Start then Delete without resurrecting the loaded plan', async () => {
+      const user = userEvent.setup();
+      localStorage.setItem('bp-saved-plans', JSON.stringify([{ id: 7, tag: 'Delete me', result: stored('bp-result'), savedAt: new Date().toISOString() }]));
+      localStorage.setItem('bp-loaded-plan-id', '7');
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      expect(undo()).toBeEnabled();
+      await user.click(screen.getByRole('button', { name: 'Saved plans (1)' }));
+      const archive = screen.getByText('Delete me').parentElement!;
+      await user.click(within(archive).getAllByRole('button')[1]!);
+      expect(stored('bp-saved-plans')).toEqual([]);
+      expect(undo()).toBeDisabled();
+      await user.click(undo());
+      expect(stored('bp-saved-plans')).toEqual([]);
+      expect(stored('bp-loaded-plan-id')).toBeNull();
+    });
+
+    it('invalidates undo after Start then a setup roster addition', async () => {
+      const user = userEvent.setup();
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      expect(undo()).toBeEnabled();
+      await user.click(screen.getByRole('button', { name: 'Setup' }));
+      await user.click(screen.getByText('Players (12)'));
+      await user.type(screen.getByPlaceholderText('Player name'), 'Keep guest');
+      await user.click(screen.getByRole('button', { name: 'ADD', exact: true }));
+      expect(stored('bp-players')).toHaveLength(13);
+      expect(undo()).toBeDisabled();
+      await user.click(undo());
+      expect(stored('bp-players')).toHaveLength(13);
+      expect(stored('bp-players')[12].name).toBe('Keep guest');
+      await user.click(screen.getByRole('button', { name: 'Live session' }));
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
+    });
+
+    it('retains the last Start undo when a blocked finish decision is opened and canceled', async () => {
+      const user = userEvent.setup();
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      await startNextVisibleGame(user);
+      await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]!);
+      expect(screen.getByRole('heading', { name: 'Court 1 is ready' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await user.click(undo());
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
+      expect(screen.queryByRole('heading', { name: 'Court 1 is ready' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Past games' })).toBeInTheDocument();
+      expect(undo()).toBeDisabled();
+    });
+
     it('offers one-step undo during session and across navigation without needing admin', async () => {
       const user = userEvent.setup();
       window.ADMIN_PIN = '1234';

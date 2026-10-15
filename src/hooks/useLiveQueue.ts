@@ -457,7 +457,6 @@ export function useLiveQueue({
         );
         const completedGame = liveGames.find(game => gameMatches(game, slotNum, court));
         const completedCourt = (completedGame?.displayCourt ?? court) + 1;
-        recordUndo();
         setQueuePromotionPrompt({
           prompt: {
             completedCourt,
@@ -476,7 +475,7 @@ export function useLiveQueue({
       }
     }
     applyLiveGamesUpdate(nextLiveGames, slotNum, nextCompletedGames, {}, isLive ? { targetLiveCount } : {});
-  }, [applyLiveGamesUpdate, completedGames, describeGames, liveCapacity, liveGames, livePlayerNamesFor, players, result, snapshotGame, suspendedPlayerNames, patchState, recordUndo]);
+  }, [applyLiveGamesUpdate, completedGames, describeGames, liveCapacity, liveGames, livePlayerNamesFor, players, result, snapshotGame, suspendedPlayerNames, patchState]);
 
   const resolveQueuePromotion = useCallback((choice: 'lookahead' | 'substitute') => {
     if (!queuePromotionPrompt) return;

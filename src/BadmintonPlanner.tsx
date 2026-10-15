@@ -182,7 +182,7 @@ function BadmintonPlanner() {
 
   useEffect(() => {
     const fresh = pruneExpiredPlans(savedPlans, Date.now());
-    if (fresh.length !== savedPlans.length) patchState({ savedPlans: fresh });
+    if (fresh.length !== savedPlans.length) patchState({ savedPlans: fresh, undoSnapshot: null });
   }, [savedPlans]);
 
   useEffect(() => {
@@ -642,6 +642,7 @@ function BadmintonPlanner() {
         showSavePlan: false,
         saveTag: '',
         loadedPlanId: targetId,
+        undoSnapshot: null,
       });
     } else {
       const newId = Date.now();
@@ -650,6 +651,7 @@ function BadmintonPlanner() {
         showSavePlan: false,
         saveTag: '',
         loadedPlanId: newId,
+        undoSnapshot: null,
       });
     }
 
@@ -667,6 +669,7 @@ function BadmintonPlanner() {
   const deletePlan = useCallback((id: number) => {
     patchState({
       savedPlans: savedPlans.filter(plan => plan.id !== id),
+      undoSnapshot: null,
       ...(id === loadedPlanId ? { loadedPlanId: null } : {}),
     });
   }, [loadedPlanId, savedPlans]);

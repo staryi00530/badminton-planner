@@ -75,3 +75,17 @@ All commands were bounded to 30 seconds; no browser/E2E or network-idle waits.
   restoring only the brief's minimum fields would leave partial effects.
 - Stop further scope/verification expansion at the user's wrap-up request;
   report the bounded full-suite timeout and browser/typecheck gaps explicitly.
+
+## Review Fix Round (2026-10-15)
+
+- Fixed both findings from `task-5-review.md` on parent `c1bf93d`.
+- Manual Save/new-copy/update, Delete and expired-plan pruning now clear stale undo in the same patch as the archive write.
+- Setup roster additions, bank additions, removal and field edits clear stale undo; roster resets already clear it through `result: null`.
+- Automatic session archives remain in the covered action's snapshot and reverse with Undo.
+- Opening/canceling a blocked queue decision keeps prior undo; acceptance captures the reducer-current pre-commit state, including the prompt.
+- RED: five UI cases failed as expected: Save-new, Save-update, Delete, roster addition and canceled blocked Finish.
+- GREEN: `timeout 30s npm run test:unit -- src/BadmintonPlanner.live.test.tsx -t 'atomic undo|undo restores schedule'`: 16 passed, 46 skipped (11.29s).
+- GREEN: `timeout 30s npm run test:unit -- src/utils/undoSnapshot.test.ts src/hooks/usePlannerState.test.ts src/hooks/useLiveQueue.test.ts src/hooks/usePlayerRoster.test.ts src/components/LiveSessionBoard.test.tsx`: 85 passed (2.79s).
+- `timeout 30s npm run build`: passed (3.74s); existing >500 kB bundle warning remains. `git diff --check`: passed.
+- Self-review: checked both Save branches, deletion/load metadata, roster writers, reducer patch ordering, accepted/canceled prompts and automatic archive reversal; no outstanding findings in this fix scope.
+- No agents, broad suite, E2E or standalone typecheck. Preserved unrelated docs/plans/logs. This fix round and report ship together in the follow-up commit.

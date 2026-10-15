@@ -31,6 +31,7 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     patchState({
       players: [...players, { name, gender: genderInput, level: levelInput, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }],
       nameInput: '',
+      undoSnapshot: null,
       ...(scheduleActive ? { scheduleDirty: true } : {}),
     });
   }, [genderInput, levelInput, nameInput, players, scheduleActive, totalSlots]);
@@ -41,6 +42,7 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     if (toAdd.length === 0) return;
     patchState({
       players: [...players, ...toAdd.map(e => ({ name: e.name, gender: e.gender, level: e.level ?? 2, skill: 2, availFrom: 0, availTo: totalSlots - 1, group: 'full', leavesAt: null }))],
+      undoSnapshot: null,
       ...(scheduleActive ? { scheduleDirty: true } : {}),
     });
   }, [players, scheduleActive, totalSlots]);
@@ -56,12 +58,13 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
   }, [playerHistory]);
 
   const removePlayer = useCallback((idx) => {
-    patchState({ players: players.filter((_, i) => i !== idx), ...(scheduleActive ? { scheduleDirty: true } : { result: null }) });
+    patchState({ players: players.filter((_, i) => i !== idx), undoSnapshot: null, ...(scheduleActive ? { scheduleDirty: true } : { result: null }) });
   }, [players, scheduleActive]);
 
   const updatePlayer = useCallback((idx, field, value) => {
     patchState({
       players: players.map((p, i) => i === idx ? { ...p, [field]: value } : p),
+      undoSnapshot: null,
       ...(scheduleActive ? { scheduleDirty: true } : { result: null }),
     });
   }, [players, scheduleActive]);

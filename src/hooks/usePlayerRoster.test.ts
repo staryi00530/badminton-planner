@@ -122,13 +122,13 @@ describe('usePlayerRoster — removePlayer / updatePlayer', () => {
     const players = [{ name: 'A', gender: 'M', availFrom: 0, availTo: 11 }, { name: 'B', gender: 'M', availFrom: 0, availTo: 11 }];
     const { result, patchState } = setup({ players });
     act(() => result.current.removePlayer(0));
-    expect(patchState).toHaveBeenCalledWith({ players: [players[1]], result: null });
+    expect(patchState).toHaveBeenCalledWith({ players: [players[1]], result: null, undoSnapshot: null });
   });
 
   it('updatePlayer updates the given field on the given index and invalidates the schedule', () => {
     const players = [{ name: 'A', gender: 'M', availFrom: 0, availTo: 11 }];
     const { result, patchState } = setup({ players });
     act(() => result.current.updatePlayer(0, 'name', 'A2'));
-    expect(patchState).toHaveBeenCalledWith({ players: [{ ...players[0], name: 'A2' }], result: null });
+    expect(patchState).toHaveBeenCalledWith({ players: [{ ...players[0], name: 'A2' }], result: null, undoSnapshot: null });
   });
 });
