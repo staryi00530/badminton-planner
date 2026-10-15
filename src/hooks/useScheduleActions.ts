@@ -3,6 +3,7 @@ import type { ForcedFirstSlot, GeneratorYield, Player } from '../algorithm/types
 import { extractState, generateSchedule, generateScheduleGen } from '../algorithm/scheduler';
 import type { ScheduleOptions } from '../algorithm/scheduler';
 import type { PlannerResult, PlannerState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
+import { initialLiveGamesForSchedule } from '../utils/liveQueue';
 
 interface RegeneratedPlan {
   newResult: PlannerResult;
@@ -63,14 +64,8 @@ export function useScheduleActions({
         patchState({ genSlot: value.schedule.length });
       }
       if (done) {
-        const firstSlot = lastValue?.schedule.find(slot => slot.slot === 1);
-        const initialCapacity = getCourtsPerSlot()[0] ?? firstSlot?.courts.length ?? 0;
-        const initialLiveGames = firstSlot
-          ? firstSlot.courts.slice(0, initialCapacity).map((_, court) => ({
-            slot: firstSlot.slot,
-            court,
-            players: [...firstSlot.courts[court]!.teamA, ...firstSlot.courts[court]!.teamB].map(player => player.name),
-          }))
+        const initialLiveGames = lastValue
+          ? initialLiveGamesForSchedule(lastValue, getCourtsPerSlot()[0] ?? 0)
           : [];
         patchState({ result: lastValue, liveGames: initialLiveGames, scheduleDirty: false, isGenerating: false });
       }

@@ -32,6 +32,19 @@ export function addUniqueGame(games: GameRef[], game: GameRef) {
   return hasGame(games, game.slot, game.court) ? games : [...games, game];
 }
 
+export function initialLiveGamesForSchedule(
+  result: { schedule: Array<{ slot: number; courts: Array<{ teamA: Array<{ name: string }>; teamB: Array<{ name: string }> }> }> },
+  capacity: number,
+): GameRef[] {
+  const firstSlot = result.schedule.find(slot => slot.slot === 1);
+  if (!firstSlot) return [];
+  return firstSlot.courts.slice(0, Math.max(0, Math.floor(capacity))).map((court, index) => ({
+    slot: firstSlot.slot,
+    court: index,
+    players: [...court.teamA, ...court.teamB].map(player => player.name),
+  }));
+}
+
 export function normalizeGameRefs(
   games: GameRef[],
   schedule: Array<{ slot: number; courts: unknown[] }> | null,
