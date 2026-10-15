@@ -40,6 +40,7 @@ export const COURT_BG = ['rgba(125,211,252,0.07)', 'rgba(167,139,250,0.07)', 'rg
 export const FONT = "'Inter', system-ui, sans-serif";
 
 export const ICONS: Record<string, string[]> = {
+  undo: ['M3 7v6h6', 'M3 13a9 9 0 1 1 3 7'],
   shuffle: ['M16 3h5v5', 'M4 20 21 3', 'M21 16v5h-5', 'M15 15l6 6', 'M4 4l5 5'],
   copy: ['M9 9h13v13H9z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
   download: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'],

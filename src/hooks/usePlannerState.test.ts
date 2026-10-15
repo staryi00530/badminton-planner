@@ -69,6 +69,36 @@ describe('usePlannerState — defaults & loading', () => {
 });
 
 describe('usePlannerState — dispatch', () => {
+  it('captures reducer-current state, restores once atomically, and leaves drafts/navigation alone', () => {
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.undoSnapshot).toBeNull();
+    act(() => {
+      result.current.patchState({ fromSlot: 3, courtOverrides: { 3: 2 }, suspendedPlayerNames: ['Alice'] });
+      result.current.recordUndo();
+      result.current.patchState({ fromSlot: 4, courtOverrides: { 4: 5 }, suspendedPlayerNames: [], pinInput: '1234', nameInput: 'Draft', activeTab: 'past' });
+    });
+    act(() => result.current.restoreUndo());
+    expect(result.current.state).toMatchObject({ fromSlot: 3, courtOverrides: { 3: 2 }, suspendedPlayerNames: ['Alice'], pinInput: '1234', nameInput: 'Draft', activeTab: 'past', undoSnapshot: null });
+    const restored = result.current.state;
+    act(() => result.current.restoreUndo());
+    expect(result.current.state).toBe(restored);
+  });
+
+  it('replaces the single snapshot and never persists it across reload or schedule replacement', () => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => { result.current.recordUndo(); result.current.patchState({ fromSlot: 2 }); });
+    act(() => { result.current.recordUndo(); result.current.patchState({ fromSlot: 3 }); });
+    act(() => result.current.restoreUndo());
+    expect(result.current.state.fromSlot).toBe(2);
+    act(() => result.current.recordUndo());
+    act(() => result.current.patchState({ result: null }));
+    expect(result.current.state.undoSnapshot).toBeNull();
+    act(() => result.current.recordUndo());
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.undoSnapshot).toBeNull();
+  });
+
   it('patchState merges partial updates into state', () => {
     const { result } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ numCourts: 2, saved: true }));

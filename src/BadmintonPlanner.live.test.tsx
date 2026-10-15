@@ -85,6 +85,85 @@ describe('BadmintonPlanner live game flow', () => {
     vi.restoreAllMocks();
   });
 
+  describe('atomic undo', () => {
+    const stored = (key: string) => JSON.parse(localStorage.getItem(key)!);
+    const undo = () => screen.getByRole('button', { name: 'Undo last action' });
+
+    it('offers one-step undo during session and across navigation without needing admin', async () => {
+      const user = userEvent.setup();
+      window.ADMIN_PIN = '1234';
+      render(<BadmintonPlanner />);
+      expect(undo()).toBeDisabled();
+      await startNextVisibleGame(user);
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
+      await user.click(screen.getByRole('button', { name: 'Past games' }));
+      await user.click(undo());
+      expect(undo()).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Past games' })).toHaveAttribute('aria-current', 'page');
+      await user.click(screen.getByRole('button', { name: 'Live session' }));
+      expect(screen.queryByText('● LIVE')).not.toBeInTheDocument();
+    });
+
+    it.each(['Substitute unavailable players', 'Use next playable game'])('undoes %s and restores the pending decision without creating another undo', async choice => {
+      const user = userEvent.setup();
+      if (choice === 'Use next playable game') {
+        const plan = stored('bp-result');
+        plan.schedule[1] = makeSlot(2, [['P5', 'P9', 'P10', 'P11'], ['P1', 'P2', 'P3', 'P4']], ['P6', 'P7', 'P8', 'P12']);
+        localStorage.setItem('bp-result', JSON.stringify(plan));
+      }
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      await startNextVisibleGame(user);
+      const before = stored('bp-result');
+      await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]!);
+      await user.click(screen.getByRole('button', { name: choice }));
+      expect(screen.queryByRole('heading', { name: 'Court 1 is ready' })).not.toBeInTheDocument();
+      await user.click(undo());
+      expect(stored('bp-result')).toEqual(before);
+      expect(screen.getByRole('heading', { name: 'Court 1 is ready' })).toBeInTheDocument();
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
+      expect(undo()).toBeDisabled();
+    });
+
+    it.each(['This game only', 'Apply & regenerate after'])('restores roster, scores and live snapshots after %s', async command => {
+      const user = userEvent.setup();
+      const score = { a: '21', b: '19', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] };
+      localStorage.setItem('bp-scores', JSON.stringify({ s1c0: score }));
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      await startNextVisibleGame(user);
+      const before = stored('bp-result');
+      await user.click(within(sectionFor('Current game')).getAllByTitle('Edit who plays in this slot')[0]!);
+      await user.selectOptions(screen.getAllByRole('combobox')[0]!, 'P9');
+      await user.click(screen.getAllByRole('button', { name: command })[0]!);
+      expect(stored('bp-result')).not.toEqual(before);
+      await user.click(undo());
+      expect(stored('bp-result')).toEqual(before);
+      expect(stored('bp-scores')).toEqual({ s1c0: score });
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]!);
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
+      expect(sectionFor('Current game')).toHaveTextContent('P1');
+      expect(undo()).toBeDisabled();
+    });
+
+    it('undoes a scored finish together with win/loss and automatic promotion', async () => {
+      const user = userEvent.setup();
+      localStorage.setItem('bp-scores', JSON.stringify({ s1c0: { a: '21', b: '', applied: false, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] } }));
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      const before = stored('bp-result');
+      const scores = stored('bp-scores');
+      fireEvent.change(within(sectionFor('Current game')).getAllByRole('spinbutton')[1]!, { target: { value: '19' } });
+      expect(stored('bp-winloss').P1.wins).toBe(1);
+      await user.click(undo());
+      expect(stored('bp-result')).toEqual(before);
+      expect(stored('bp-scores')).toEqual(scores);
+      expect(stored('bp-winloss')).toEqual({});
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(1);
+      expect(undo()).toBeDisabled();
+    });
+  });
+
   describe('mid-session changes', () => {
     function seed(courts = 2, roster?: Player[]) {
       const players: Player[] = roster ?? Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 5 }));
@@ -102,6 +181,37 @@ describe('BadmintonPlanner live game flow', () => {
     async function start(user: ReturnType<typeof userEvent.setup>, count: number) {
       for (let i = 0; i < count; i++) await startNextVisibleGame(user);
     }
+
+    it.each(['Here now', 'Leaving', 'Add court', 'Remove court', 'Setup Apply'])(
+      'undo restores schedule, availability, scores, notice and confirmation archive after %s', async command => {
+        const user = userEvent.setup();
+        seed(2, Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: i === 23 ? 4 : 0, availTo: 5 })));
+        localStorage.setItem('bp-is-confirmed', 'true');
+        localStorage.setItem('bp-scores', JSON.stringify({ s1c0: { a: '21', b: '18', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] } }));
+        render(<BadmintonPlanner />);
+        await start(user, 2);
+        const keys = ['bp-result', 'bp-players', 'bp-courtOverrides', 'bp-scores', 'bp-saved-plans', 'bp-is-confirmed'];
+        const before = keys.map(stored);
+        const lanes = [lane(1).textContent, lane(2).textContent];
+        if (command === 'Setup Apply') {
+          await user.click(screen.getByRole('button', { name: 'Setup' }));
+          await user.click(screen.getByRole('button', { name: '3C' }));
+          await user.click(screen.getByRole('button', { name: 'Apply' }));
+        } else if (command === 'Here now' || command === 'Leaving') {
+          await user.click(availability(command === 'Here now' ? 'P24' : 'P1').getByRole('button', { name: command }));
+        } else await user.click(screen.getByRole('button', { name: command }));
+        await user.click(screen.getByRole('button', { name: 'Update upcoming games' }));
+        expect(stored('bp-result')).not.toEqual(before[0]);
+        await user.click(screen.getByRole('button', { name: 'Undo last action' }));
+        expect(keys.map(stored)).toEqual(before);
+        expect(screen.queryByRole('status', { name: 'Session change' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Undo last action' })).toBeDisabled();
+        // Undo restores the pending confirmation as well as the session data.
+        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+        await user.click(screen.getByRole('button', { name: 'Live session' }));
+        expect([lane(1).textContent, lane(2).textContent]).toEqual(lanes);
+      },
+    );
 
     it.each([2, 3, 4, 5])('changes %i courts future-only from Live and Setup, retaining scores and next-game capacity', async courts => {
       const user = userEvent.setup();

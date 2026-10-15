@@ -82,7 +82,7 @@ function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, e
 }
 
 function BadmintonPlanner() {
-  const { state, setField, patchState } = usePlannerState();
+  const { state, setField, patchState, recordUndo, restoreUndo } = usePlannerState();
   const scheduleRef = useRef<HTMLDivElement | null>(null);
   const [debugQueueEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage?.getItem('bp-debug-live-queue') === 'true');
   const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
@@ -298,6 +298,7 @@ function BadmintonPlanner() {
     unconfirmSchedule,
     doRegen,
   } = useScheduleActions({
+    recordUndo,
     players,
     result,
     totalSlots,
@@ -350,6 +351,11 @@ function BadmintonPlanner() {
     toggleLiveGame,
     togglePlayerSuspended,
   } = useLiveQueue({
+    recordUndo,
+    sessionChangeNotice: state.sessionChangeNotice,
+    pendingSessionChange: state.pendingSessionChange,
+    queueAdjustment: state.queueAdjustment,
+    queuePromotionPrompt: state.queuePromotionPrompt,
     result,
     players,
     liveGames,
@@ -536,6 +542,7 @@ function BadmintonPlanner() {
     const valid = !isNaN(aNum) && !isNaN(bNum) && isValidBadmintonScore(aNum, bNum);
     const isLive = liveGames.some(lg => lg.slot === slot && lg.court === courtIdx);
     if (!isAdmin || !valid || !isLive) {
+      if (isAdmin) recordUndo();
       updateScoreBase(slot, courtIdx, aVal, bVal, teamA, teamB);
       return;
     }
@@ -569,7 +576,7 @@ function BadmintonPlanner() {
       completedRef,
     ];
     applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount: liveGames.length });
-  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, result, scores, updateScoreBase, winLoss]);
+  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, result, scores, updateScoreBase, winLoss, recordUndo]);
 
   const buildCopyText = useCallback(
     (mode: 'full' | 'games') => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
@@ -857,6 +864,12 @@ function BadmintonPlanner() {
             </button>
           ))}
         </nav>
+
+        {result && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+          <button onClick={restoreUndo} disabled={!state.undoSnapshot || isGenerating} title="Undo last action" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: state.undoSnapshot ? C.text : C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, fontFamily: FONT, opacity: state.undoSnapshot ? 1 : 0.5 }}>
+            <LucideIcon name="undo" size={16} /> Undo last action
+          </button>
+        </div>}
 
         {activeTab === 'archive' && (
           <ArchiveTab savedPlans={savedPlans} loadPlan={loadPlan} deletePlan={deletePlan} />

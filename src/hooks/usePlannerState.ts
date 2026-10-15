@@ -1,6 +1,7 @@
-import { useEffect, useReducer } from 'react';
+import { useCallback, useEffect, useReducer } from 'react';
 import { DEFAULT_GAME_MINUTES, DEFAULT_TOTAL_MINUTES } from '../constants';
 import type { PlannerPersistedState, PlannerState } from '../types';
+import { captureUndoSnapshot, EMPTY_QUEUE_STATE } from '../utils/undoSnapshot';
 
 const STORAGE_KEYS = {
   players: 'bp-players',
@@ -61,6 +62,8 @@ function createInitialState(): PlannerState {
   const activeTab = (['live', 'setup', 'past', 'archive', 'about'] as const).find(tab => tab === storedTab)
     ?? (result ? 'live' : 'setup');
   return {
+    ...EMPTY_QUEUE_STATE,
+    undoSnapshot: null,
     // Older rosters and the original defaults did not store a level. Normalize those
     // records so the private setting survives reloads and future persistence writes.
     players: storedPlayers.map(player => ({ ...player, level: player.level ?? 2 })),
@@ -120,15 +123,21 @@ function createInitialState(): PlannerState {
 }
 
 type PlannerAction =
+  | { type: 'recordUndo' }
+  | { type: 'restoreUndo' }
   | { type: 'set'; key: keyof PlannerState; value: PlannerState[keyof PlannerState] }
   | { type: 'patch'; value: Partial<PlannerState> };
 
 function plannerReducer(state: PlannerState, action: PlannerAction): PlannerState {
   switch (action.type) {
+    case 'recordUndo':
+      return { ...state, undoSnapshot: captureUndoSnapshot(state) };
+    case 'restoreUndo':
+      return state.undoSnapshot ? { ...state, ...state.undoSnapshot, undoSnapshot: null } : state;
     case 'set':
       return { ...state, [action.key]: action.value };
     case 'patch':
-      return { ...state, ...action.value };
+      return { ...state, ...action.value, ...(action.value.result === null ? { ...EMPTY_QUEUE_STATE, undoSnapshot: null } : {}) };
     default:
       return state;
   }
@@ -205,7 +214,9 @@ export function usePlannerState() {
 
   const setField = <K extends keyof PlannerState>(key: K, value: PlannerState[K]) =>
     dispatch({ type: 'set', key, value });
-  const patchState = (value: Partial<PlannerState>) => dispatch({ type: 'patch', value });
+  const patchState = useCallback((value: Partial<PlannerState>) => dispatch({ type: 'patch', value }), []);
+  const recordUndo = useCallback(() => dispatch({ type: 'recordUndo' }), []);
+  const restoreUndo = useCallback(() => dispatch({ type: 'restoreUndo' }), []);
 
-  return { state, setField, patchState };
+  return { state, setField, patchState, recordUndo, restoreUndo };
 }

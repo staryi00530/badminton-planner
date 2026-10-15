@@ -37,11 +37,12 @@ function lane(n: number) { return screen.getByRole('region', { name: `Court ${n}
 function guidance() { return within(screen.getByRole('region', { name: 'What happens now?' })); }
 
 function InteractiveBoard({ result, completedGames }: { result: PlannerResult; completedGames: GameRef[] }) {
-  const [state, setState] = useState({ result, completedGames, liveGames: [] as GameRef[], fromSlot: 1 });
+  const [state, setState] = useState({ result, completedGames, liveGames: [] as GameRef[], fromSlot: 1, sessionChangeNotice: null, pendingSessionChange: null, queueAdjustment: null, queuePromotionPrompt: null });
   const queue = useLiveQueue({
     ...state, players, suspendedPlayerNames: [], scores: {}, courtOverrides: {}, isConfirmed: false, totalSlots: result.schedule.length,
     canPlayerJoin: true, getCourtsPerSlot: () => result.schedule.map(() => 2),
     regenerate: () => null,
+    recordUndo: () => {},
     patchState: (patch: RuntimePatch) => setState(previous => ({ ...previous, ...patch, result: patch.result ?? previous.result })),
   });
   return <LiveSessionBoard {...props({ ...state, liveCapacity: 2, onToggleLive: queue.toggleLiveGame })} />;

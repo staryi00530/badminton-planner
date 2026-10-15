@@ -27,10 +27,10 @@ function session(courts = 3, players = roster, regenerationFails = false) {
     const actions = useScheduleActions({
       ...state, totalSlots: 6, computeSkill: () => 0.5,
       getPlayersWithAvailability: () => resolvePlayers(state.players), applyAvailability: resolvePlayers,
-      getCourtsPerSlot, getScheduleOptions: () => ({}), patchState, keepGamesBeforeSlot,
+      getCourtsPerSlot, getScheduleOptions: () => ({}), patchState, keepGamesBeforeSlot, recordUndo: planner.recordUndo,
     });
     const queue = useLiveQueue({
-      ...state, totalSlots: 6, canPlayerJoin: true, getCourtsPerSlot, patchState,
+      ...state, totalSlots: 6, canPlayerJoin: true, getCourtsPerSlot, patchState, recordUndo: planner.recordUndo,
       regenerate: args => regenerationFails ? null : actions.doRegen(args.targetFromSlot, args.overridePlayers ?? null, args.blockedForFirstSlot, args.overrideWinLoss, args.overrideScores, args.baseResult, args.forcedFirstSlot, args.courtOverrides),
     });
     return { ...planner, ...queue, actions };
@@ -42,6 +42,57 @@ function session(courts = 3, players = roster, regenerationFails = false) {
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 describe('useLiveQueue future session changes with the real scheduler', () => {
+  it.each(['finish', 'start', 'leaving', 'joining', 'back', 'suspend', 'add court', 'remove court', 'regenerate', 'setup regenerate'])(
+    'undo restores the exact runtime before %s', action => {
+      const { result } = session(2);
+      act(() => result.current.patchState({
+        scores: { s3c0: { a: '21', b: '18', applied: true, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] } },
+        winLoss: { P1: { wins: 1, losses: 0 } }, sessionChangeNotice: 'Previous notice',
+        ...(action === 'start' ? { liveGames: [] } : {}),
+      }));
+      const before = structuredClone(result.current.state);
+      act(() => {
+        const q = result.current;
+        if (action === 'finish' || action === 'start') q.toggleLiveGame(1, 0);
+        if (action === 'leaving') q.setPlayerLeaving(0);
+        if (action === 'joining') q.setPlayerJoining(0);
+        if (action === 'back') q.setPlayerBack(0);
+        if (action === 'suspend') q.togglePlayerSuspended(0);
+        if (action === 'add court') q.adjustCourtsAtSlot(2, 1);
+        if (action === 'remove court') q.adjustCourtsAtSlot(2, -1);
+        if (action === 'regenerate') q.regenerateUpcoming(2, 3);
+        if (action === 'setup regenerate') q.actions.runRegenerateFromSlotWithCourts(2, 3);
+      });
+      expect(result.current.state.undoSnapshot).toBeTruthy();
+      expect(result.current.state).not.toEqual(before);
+      act(() => result.current.restoreUndo());
+      expect(result.current.state).toEqual({ ...before, undoSnapshot: null });
+    },
+  );
+
+  it('restores a compound future availability/capacity change with pending confirmation and score/live snapshots', () => {
+    const { result } = session(2);
+    act(() => result.current.patchState({ isConfirmed: true }));
+    act(() => result.current.setPlayerLeaving(0));
+    act(() => result.current.patchState({
+      pendingSessionChange: { ...result.current.pendingSessionChange!, targetCapacity: 3, courtOverrides: { 2: 3 }, archiveOnConfirm: true },
+    }));
+    const before = structuredClone(result.current.state);
+    act(() => result.current.confirmSessionChange());
+    expect(result.current.state.players[0]!.leavesAt).toBe(0);
+    expect(result.current.state.courtOverrides).toEqual({ 2: 3 });
+    act(() => result.current.restoreUndo());
+    expect(result.current.state).toEqual({ ...before, undoSnapshot: null });
+  });
+
+  it('does not replace the previous undo on a failed regeneration or invalid capacity', () => {
+    const { result } = session(3, roster, true);
+    act(() => result.current.recordUndo());
+    const snapshot = result.current.state.undoSnapshot;
+    act(() => result.current.adjustCourtsAtSlot(2, 1));
+    act(() => result.current.actions.runRegenerateFromSlotWithCourts(2, 9));
+    expect(result.current.state.undoSnapshot).toBe(snapshot);
+  });
   it('applies a late arrival to the first mutable slot without changing live games', () => {
     const players = roster.slice(0, 12).map((p, i) => i === 11 ? { ...p, availFrom: 4 } : p);
     const { result } = session(3, players);
@@ -116,10 +167,10 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     act(() => result.current.patchState({ isConfirmed: true }));
     const before = result.current.state;
     act(() => result.current.adjustCourtsAtSlot(2, 1));
-    expect(result.current.state).toBe(before);
+    expect(result.current.state).toEqual({ ...before, pendingSessionChange: result.current.pendingSessionChange });
     expect(result.current.pendingSessionChange).toMatchObject({ boundarySlot: 2, targetCapacity: 3 });
     act(() => result.current.cancelSessionChange());
-    expect(result.current.state).toBe(before);
+    expect(result.current.state).toEqual(before);
     act(() => result.current.adjustCourtsAtSlot(2, 1));
     act(() => result.current.confirmSessionChange());
     expect(result.current.state.isConfirmed).toBe(false);
@@ -130,10 +181,10 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     const { result } = session(3, roster, true);
     const before = result.current.state;
     act(() => result.current.setPlayerLeaving(0));
-    expect(result.current.state).toBe(before);
+    expect(result.current.state).toEqual({ ...before, sessionChangeNotice: result.current.sessionChangeNotice });
     expect(result.current.sessionChangeNotice).toMatch(/unable to update/i);
     act(() => result.current.adjustCourtsAtSlot(2, 1));
-    expect(result.current.state).toBe(before);
+    expect(result.current.state).toEqual({ ...before, sessionChangeNotice: result.current.sessionChangeNotice });
     expect(result.current.sessionChangeNotice).toMatch(/no session changes were applied/i);
   });
 
@@ -142,7 +193,7 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     act(() => result.current.patchState({ liveGames: [{ slot: 6, court: 0 }] }));
     const before = result.current.state;
     act(() => result.current.setPlayerLeaving(0));
-    expect(result.current.state).toBe(before);
+    expect(result.current.state).toEqual({ ...before, sessionChangeNotice: result.current.sessionChangeNotice });
     expect(result.current.sessionChangeNotice).toMatch(/no upcoming slot/i);
   });
 

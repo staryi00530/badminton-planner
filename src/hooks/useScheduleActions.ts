@@ -12,6 +12,7 @@ interface RegeneratedPlan {
 }
 
 interface ScheduleActionOptions {
+  recordUndo: () => void;
   players: Player[];
   result: PlannerResult | null;
   totalSlots: number;
@@ -34,6 +35,7 @@ interface ScheduleActionOptions {
 }
 
 export function useScheduleActions({
+  recordUndo,
   players,
   result,
   totalSlots,
@@ -93,8 +95,11 @@ export function useScheduleActions({
         return newResult ? { newResult, nextScores: {} } : null;
       },
     });
-    if (patch) patchState(patch);
-  }, [completedGames, computeSkill, courtOverrides, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, patchState, players.length, result, scores, totalSlots]);
+    if (patch) {
+      recordUndo();
+      patchState(patch);
+    }
+  }, [completedGames, computeSkill, courtOverrides, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, patchState, players.length, result, scores, totalSlots, recordUndo]);
 
   const runRegenerateRemaining = useCallback(() => runRegenerateFromSlotWithCourts(fromSlot, fromSlotCourts), [fromSlot, fromSlotCourts, runRegenerateFromSlotWithCourts]);
 
