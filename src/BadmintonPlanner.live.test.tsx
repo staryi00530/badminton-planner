@@ -42,12 +42,12 @@ function sectionFor(title: string) {
 }
 
 async function startNextVisibleGame(user: ReturnType<typeof userEvent.setup>) {
-  const currentStarts = within(sectionFor('Current game')).queryAllByText('Start');
+  const currentStarts = within(sectionFor('Current game')).queryAllByText('Start game');
   if (currentStarts.length > 0) {
     await user.click(currentStarts[0]);
     return;
   }
-  await user.click(within(sectionFor('Next game')).getAllByText('Start')[0]);
+  await user.click(within(sectionFor('Next game')).getAllByText('Start game')[0]);
 }
 
 describe('BadmintonPlanner live game flow', () => {
@@ -137,6 +137,9 @@ describe('BadmintonPlanner live game flow', () => {
       expect(screen.getByRole('button', { name: 'Live session' })).toHaveAttribute('aria-current', 'page');
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
     });
+    const board = screen.getByRole('region', { name: 'Live session board' });
+    const setup = screen.getByRole('button', { name: 'Re-roll' });
+    expect(board.compareDocumentPosition(setup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('re-rolls from Setup into Live session with all initial courts live', async () => {
@@ -180,7 +183,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]);
     await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
 
     await waitFor(() => {
@@ -217,7 +220,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]);
 
     expect(screen.getByRole('heading', { name: 'Court 1 is ready' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use next playable game' })).toBeInTheDocument();
@@ -253,7 +256,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[0]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]);
     await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
     await waitFor(() => {
       const current = sectionFor('Current game');
@@ -265,7 +268,7 @@ describe('BadmintonPlanner live game flow', () => {
     });
 
     // Court 1 is now the promoted game, so finish the unchanged court 2 lane.
-    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[1]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[1]);
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
       expect(within(sectionFor('Current game')).getAllByText(/SLOT 2/).length).toBeGreaterThan(0);
@@ -305,7 +308,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('✓ Done')[1]);
+    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[1]);
     await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
 
     await waitFor(() => {

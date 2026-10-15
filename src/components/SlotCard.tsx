@@ -30,6 +30,8 @@ interface SlotCardProps {
   visibleCourtIndexes?: number[];
   compactGameView?: boolean;
   displayCourt?: number;
+  sessionActions?: boolean;
+  waitingReason?: string;
 }
 
 export default function SlotCard({
@@ -56,6 +58,8 @@ export default function SlotCard({
   visibleCourtIndexes,
   compactGameView = false,
   displayCourt,
+  sessionActions = false,
+  waitingReason,
 }: SlotCardProps) {
   const stepBtnStyle = { background: 'none', border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontSize: 12, fontWeight: 700, fontFamily: FONT, width: 20, height: 20, lineHeight: 1, cursor: 'pointer' };
   const visibleCourts = (visibleCourtIndexes ?? slot.courts.map((_, ci) => ci))
@@ -124,7 +128,7 @@ export default function SlotCard({
               if (!court) return null;
               return (
               <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: 6 }}>
-                {(editLayout.courts.length > 1 || isSingleCourtView) && <div style={{ fontSize: 10, color: COURT_COLORS[ci], fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Court {ci + 1}</div>}
+                {(editLayout.courts.length > 1 || isSingleCourtView) && <div style={{ fontSize: 10, color: COURT_COLORS[ci], fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Court {(displayCourt ?? ci) + 1}</div>}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', gap: 4 }}>
                     {slotPicker({ type: 'court', ci, idx: 0 }, court[0] ?? '', genderByName, allNames)}
@@ -171,10 +175,10 @@ export default function SlotCard({
         // game elsewhere) — only meaningful when something else actually IS live, and
         // gated to canShowReady (the slot right after fromSlot) since fromSlot itself
         // is ambiguous — its courts could be live, already Done, or about to start.
-        const isWaiting = !isLive && !isCompleted && hasBlockedPlayer;
+        const isWaiting = !isLive && !isCompleted && (hasBlockedPlayer || Boolean(waitingReason));
         const isReady = canShowReady && canStartGame && !isLive && !isCompleted && blockedPlayerNames && blockedPlayerNames.size > 0 && !hasBlockedPlayer;
         const isQueued = !isLive && !isCompleted && !isWaiting && !canStartGame;
-        const actionLabel = isLive ? '✓ Done' : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : isQueued ? 'Queued' : 'Start';
+        const actionLabel = isLive ? (sessionActions ? 'Finish game' : '✓ Done') : isCompleted ? 'Restart' : isWaiting ? 'Waiting' : isQueued ? 'Queued' : (sessionActions ? 'Start game' : 'Start');
         const actionColor = isLive ? '#fff' : isWaiting ? C.amber : isCompleted ? C.green : C.accent;
         const actionBorder = isLive ? '#ef4444' : isWaiting ? C.amber : isCompleted ? C.green : C.accentDim;
         const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isQueued ? 'Queued until a court is free' : isCompleted ? 'Restart this game' : 'Start this game';
@@ -219,6 +223,8 @@ export default function SlotCard({
               })}
             </div>
           </div>
+
+          {isWaiting && waitingReason && <p style={{ margin: '8px 0 0', fontSize: 12, color: C.amber, overflowWrap: 'anywhere' }}>{waitingReason}</p>}
 
           {(() => {
             const key = `s${slot.slot}c${ci}`;

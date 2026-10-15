@@ -87,7 +87,7 @@ try {
       for (let pass = 0; pass < courtCount + 1 && await liveCount() < courtCount; pass++) {
         for (const section of [current, next]) {
           if (await liveCount() >= courtCount) break;
-          const start = section().getByRole('button', { name: 'Start', exact: true }).first();
+          const start = section().getByRole('button', { name: 'Start game', exact: true }).first();
           if (await start.count() && await start.isEnabled()) {
             await start.click();
             await page.waitForTimeout(80);
@@ -121,7 +121,7 @@ try {
         }
       }
 
-      const done = current().getByRole('button', { name: '✓ Done', exact: true }).first();
+      const done = current().getByRole('button', { name: 'Finish game', exact: true }).first();
       if (await done.count()) {
         await done.click();
         await page.waitForTimeout(50);

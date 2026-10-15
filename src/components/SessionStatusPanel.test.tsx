@@ -102,4 +102,12 @@ describe('SessionStatusPanel', () => {
     await user.click(within(row).getByTitle('Undo skip-next for this player'));
     expect(handlers.togglePlayerSuspended).toHaveBeenCalledWith(0);
   });
+
+  it('labels player availability directly', () => {
+    renderPanel();
+    expect(rowFor('Here')).toHaveTextContent('Available');
+    expect(rowFor('Leaving')).toHaveTextContent('Leaving after slot 6');
+    expect(rowFor('Departed')).toHaveTextContent('Left');
+    expect(rowFor('NotYet')).toHaveTextContent('Arrives slot 6');
+  });
 });

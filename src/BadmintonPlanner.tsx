@@ -19,7 +19,7 @@ import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyT
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
 import PastGamesTab from './components/PastGamesTab';
 import PlayerList from './components/PlayerList';
-import ScheduleGrid from './components/ScheduleGrid';
+import LiveSessionBoard from './components/LiveSessionBoard';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
 import SessionStatusPanel from './components/SessionStatusPanel';
 import AboutTab from './components/AboutTab';
@@ -739,6 +739,33 @@ function BadmintonPlanner() {
   }, [gameMinutes, numCourts, savedPlans]);
 
   const selectedTab = activeTab === 'live' && !result ? 'setup' : activeTab;
+  const liveBoard = result && <LiveSessionBoard
+    result={result}
+    players={players}
+    scores={scores}
+    editingSlot={editingSlot}
+    editLayout={editLayout}
+    isAdmin={isAdmin}
+    scheduleRef={scheduleRef}
+    minGames={minGames}
+    maxGames={maxGames}
+    slotTime={slotTime}
+    startSlotEdit={startSlotEdit}
+    applySlotEdit={applySlotEdit}
+    applySlotEditOnly={applySlotEditOnly}
+    cancelSlotEdit={() => patchState({ editingSlot: null, editLayout: null })}
+    assignToPosition={assignToPosition}
+    updateScore={updateScore}
+    liveGames={liveGames}
+    completedGames={completedGames}
+    onToggleLive={toggleLiveGame}
+    onAdjustCourts={adjustCourtsAtSlot}
+    blockedPlayerNames={blockedPlayerNames}
+    fromSlot={fromSlot}
+    liveCapacity={getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? numCourts}
+    queueAdjustment={queueAdjustment}
+    staggerMode={staggerMode}
+  />;
 
   return (
     <div style={{ background: C.bg, minHeight: '100vh', color: C.text, fontFamily: FONT, padding: '24px 16px' }}>
@@ -821,6 +848,7 @@ function BadmintonPlanner() {
 
         {(selectedTab === 'live' || selectedTab === 'setup') && (
         <>
+        {selectedTab === 'live' && liveBoard}
         <SessionSettingsPanel
           sessionStart={sessionStart}
           totalMinutes={totalMinutes}
@@ -935,34 +963,7 @@ function BadmintonPlanner() {
           />
         )}
 
-        {result && (
-          <ScheduleGrid
-            result={result}
-            players={players}
-            scores={scores}
-            editingSlot={editingSlot}
-            editLayout={editLayout}
-            isAdmin={isAdmin}
-            scheduleRef={scheduleRef}
-            minGames={minGames}
-            maxGames={maxGames}
-            slotTime={slotTime}
-            startSlotEdit={startSlotEdit}
-            applySlotEdit={applySlotEdit}
-            applySlotEditOnly={applySlotEditOnly}
-            cancelSlotEdit={() => patchState({ editingSlot: null, editLayout: null })}
-            assignToPosition={assignToPosition}
-            updateScore={updateScore}
-            liveGames={liveGames}
-            completedGames={completedGames}
-            onToggleLive={toggleLiveGame}
-            onAdjustCourts={adjustCourtsAtSlot}
-            blockedPlayerNames={blockedPlayerNames}
-            fromSlot={fromSlot}
-            liveCapacity={getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? numCourts}
-            queueAdjustment={queueAdjustment}
-          />
-        )}
+        {selectedTab === 'setup' && liveBoard}
         </>
         )}
       </div>
