@@ -48,6 +48,40 @@ export interface EditLayout {
   sitting: string[];
 }
 
+export interface QueueAdjustmentNotice {
+  queuedGame: { slot: number; court: number; players: string[] };
+  promotedGame: { slot: number; court: number; displayCourt: number; players: string[] };
+  unavailablePlayers: string[];
+  replacements: Array<{ replacee: string; replacer: string; court: number }>;
+}
+
+export interface QueueRuntimeState {
+  sessionChangeNotice: string | null;
+  pendingSessionChange: {
+    boundarySlot: number;
+    targetCapacity: number;
+    overridePlayers?: Player[];
+    courtOverrides: Record<number, number>;
+    description: string;
+    archiveOnConfirm?: boolean;
+  } | null;
+  queueAdjustment: QueueAdjustmentNotice | null;
+  queuePromotionPrompt: {
+    prompt: {
+      completedCourt: number;
+      firstGame: { slot: number; court: number; players: string[] };
+      blockedPlayers: string[];
+      lookaheadGame: { slot: number; court: number; players: string[] } | null;
+      replacements: Array<{ replacee: string; replacer: string }>;
+    };
+    nextLiveGames: GameRef[];
+    nextCompletedGames: GameRef[];
+    lookaheadGame: GameRef | null;
+    changedSlot: number;
+    targetLiveCount: number;
+  } | null;
+}
+
 export interface SharedPlayer {
   0: string;
   1: 'M' | 'F' | '?';
@@ -66,7 +100,8 @@ export interface SharePayload {
   confirmed?: boolean;
 }
 
-export interface PlannerState {
+export interface PlannerState extends QueueRuntimeState {
+  undoSnapshot: UndoSnapshot | null;
   players: Player[];
   playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   nameInput: string;
@@ -76,6 +111,7 @@ export interface PlannerState {
   gameMinutes: number;
   numCourts: number;
   extraCourt: ExtraCourt;
+  courtOverrides: Record<number, number>;
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;
@@ -98,7 +134,7 @@ export interface PlannerState {
   savedPlans: SavedPlan[];
   showSavePlan: boolean;
   saveTag: string;
-  activeTab: 'schedule' | 'past' | 'archive' | 'about';
+  activeTab: 'live' | 'setup' | 'past' | 'archive' | 'about';
   editingSlot: number | null;
   editLayout: EditLayout | null;
   pendingShare: SharePayload | null;
@@ -121,21 +157,31 @@ export interface PlannerState {
   suspendedPlayerNames: string[];
 }
 
+export type UndoSnapshot = Pick<PlannerState,
+  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' |
+  'suspendedPlayerNames' | 'fromSlot' | 'fromSlotCourts' | 'courtOverrides' |
+  'scheduleDirty' | 'copied' | 'isConfirmed' | 'loadedPlanId' | 'savedPlans' |
+  'editingSlot' | 'editLayout' | 'pendingOverwrite' | 'isGenerating' | 'genSlot'
+> & QueueRuntimeState;
+
 /** State fields that may be changed by a runtime queue transition. */
 export type RuntimePatch = Pick<Partial<PlannerState>,
   'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' |
   'suspendedPlayerNames' | 'fromSlot' | 'scheduleDirty' | 'copied' | 'isConfirmed' |
   'loadedPlanId' | 'editingSlot' | 'editLayout' | 'isGenerating' | 'genSlot' |
-  'pendingOverwrite' | 'fromSlotCourts'
+  'pendingOverwrite' | 'fromSlotCourts' | 'activeTab' | 'courtOverrides' | 'undoSnapshot' |
+  keyof QueueRuntimeState
 >;
 
 export interface PlannerPersistedState {
+  activeTab: PlannerState['activeTab'];
   players: Player[];
   playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;
   extraCourt: ExtraCourt;
+  courtOverrides: Record<number, number>;
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;

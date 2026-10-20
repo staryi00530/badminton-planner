@@ -1,6 +1,7 @@
-import { useEffect, useReducer } from 'react';
+import { useCallback, useEffect, useReducer } from 'react';
 import { DEFAULT_GAME_MINUTES, DEFAULT_TOTAL_MINUTES } from '../constants';
 import type { PlannerPersistedState, PlannerState } from '../types';
+import { captureUndoSnapshot, EMPTY_QUEUE_STATE } from '../utils/undoSnapshot';
 
 const STORAGE_KEYS = {
   players: 'bp-players',
@@ -9,6 +10,7 @@ const STORAGE_KEYS = {
   gameMinutes: 'bp-gameMinutes',
   numCourts: 'bp-numCourts',
   extraCourt: 'bp-extraCourt',
+  courtOverrides: 'bp-courtOverrides',
   staggerMode: 'bp-staggerMode',
   sessionStart: 'bp-sessionStart',
   result: 'bp-result',
@@ -19,6 +21,7 @@ const STORAGE_KEYS = {
   preferredPairs: 'bp-preferred-pairs',
   isConfirmed: 'bp-is-confirmed',
   loadedPlanId: 'bp-loaded-plan-id',
+  activeTab: 'bp-active-tab',
 } as const;
 
 function loadState<T>(key: string, fallback: T): T {
@@ -54,7 +57,13 @@ function createInitialState(): PlannerState {
 
   const storedPlayers = loadState<PlannerState['players']>(STORAGE_KEYS.players, []);
   const storedHistory = loadState<PlannerState['playerHistory']>(STORAGE_KEYS.playerHistory, []);
+  const result = loadState<PlannerState['result']>(STORAGE_KEYS.result, null);
+  const storedTab = loadState<unknown>(STORAGE_KEYS.activeTab, null);
+  const activeTab = (['live', 'setup', 'past', 'archive', 'about'] as const).find(tab => tab === storedTab)
+    ?? (result ? 'live' : 'setup');
   return {
+    ...EMPTY_QUEUE_STATE,
+    undoSnapshot: null,
     // Older rosters and the original defaults did not store a level. Normalize those
     // records so the private setting survives reloads and future persistence writes.
     players: storedPlayers.map(player => ({ ...player, level: player.level ?? 2 })),
@@ -66,9 +75,10 @@ function createInitialState(): PlannerState {
     gameMinutes: loadState(STORAGE_KEYS.gameMinutes, DEFAULT_GAME_MINUTES),
     numCourts: loadState(STORAGE_KEYS.numCourts, 1),
     extraCourt: loadState(STORAGE_KEYS.extraCourt, { enabled: false, startMin: 60, durationMin: 90 }),
+    courtOverrides: loadState(STORAGE_KEYS.courtOverrides, {}),
     staggerMode: loadState(STORAGE_KEYS.staggerMode, 'none'),
     sessionStart: loadState(STORAGE_KEYS.sessionStart, ''),
-    result: loadState(STORAGE_KEYS.result, null),
+    result,
     scheduleDirty: false,
     scores: loadState(STORAGE_KEYS.scores, {}),
     winLoss: loadState(STORAGE_KEYS.winLoss, {}),
@@ -88,7 +98,7 @@ function createInitialState(): PlannerState {
     savedPlans: loadState(STORAGE_KEYS.savedPlans, []),
     showSavePlan: false,
     saveTag: '',
-    activeTab: 'schedule',
+    activeTab: activeTab === 'live' && !result ? 'setup' : activeTab,
     editingSlot: null,
     editLayout: null,
     pendingShare: null,
@@ -113,15 +123,21 @@ function createInitialState(): PlannerState {
 }
 
 type PlannerAction =
+  | { type: 'recordUndo' }
+  | { type: 'restoreUndo' }
   | { type: 'set'; key: keyof PlannerState; value: PlannerState[keyof PlannerState] }
   | { type: 'patch'; value: Partial<PlannerState> };
 
 function plannerReducer(state: PlannerState, action: PlannerAction): PlannerState {
   switch (action.type) {
+    case 'recordUndo':
+      return { ...state, undoSnapshot: captureUndoSnapshot(state) };
+    case 'restoreUndo':
+      return state.undoSnapshot ? { ...state, ...state.undoSnapshot, undoSnapshot: null } : state;
     case 'set':
       return { ...state, [action.key]: action.value };
     case 'patch':
-      return { ...state, ...action.value };
+      return { ...state, ...action.value, ...(action.value.result === null ? { ...EMPTY_QUEUE_STATE, undoSnapshot: null } : {}) };
     default:
       return state;
   }
@@ -132,12 +148,14 @@ export function usePlannerState() {
 
   useEffect(() => {
     const persisted: PlannerPersistedState = {
+      activeTab: state.activeTab,
       players: state.players,
       playerHistory: state.playerHistory,
       totalMinutes: state.totalMinutes,
       gameMinutes: state.gameMinutes,
       numCourts: state.numCourts,
       extraCourt: state.extraCourt,
+      courtOverrides: state.courtOverrides,
       staggerMode: state.staggerMode,
       sessionStart: state.sessionStart,
       result: state.result,
@@ -154,7 +172,7 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
       if (state.isSharedSession && liveSessionExempt.has(key)) continue;
@@ -169,6 +187,7 @@ export function usePlannerState() {
     state.gameMinutes,
     state.numCourts,
     state.extraCourt,
+    state.courtOverrides,
     state.staggerMode,
     state.sessionStart,
     state.result,
@@ -180,6 +199,7 @@ export function usePlannerState() {
     state.isConfirmed,
     state.loadedPlanId,
     state.isSharedSession,
+    state.activeTab,
   ]);
 
   useEffect(() => {
@@ -194,7 +214,9 @@ export function usePlannerState() {
 
   const setField = <K extends keyof PlannerState>(key: K, value: PlannerState[K]) =>
     dispatch({ type: 'set', key, value });
-  const patchState = (value: Partial<PlannerState>) => dispatch({ type: 'patch', value });
+  const patchState = useCallback((value: Partial<PlannerState>) => dispatch({ type: 'patch', value }), []);
+  const recordUndo = useCallback(() => dispatch({ type: 'recordUndo' }), []);
+  const restoreUndo = useCallback(() => dispatch({ type: 'restoreUndo' }), []);
 
-  return { state, setField, patchState };
+  return { state, setField, patchState, recordUndo, restoreUndo };
 }

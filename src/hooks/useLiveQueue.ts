@@ -1,6 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
-import type { Player, ForcedFirstSlot } from '../algorithm/types';
-import type { PlannerResult, RuntimePatch, ScoresMap, WinLossMap } from '../types';
+import { useCallback, useMemo } from 'react';
+import type { Player } from '../algorithm/types';
+import type { PlannerResult, QueueRuntimeState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
+import { EMPTY_QUEUE_STATE } from '../utils/undoSnapshot';
+export type { QueueAdjustmentNotice } from '../types';
 import {
   addUniqueGame,
   contiguousGamesForSlot,
@@ -11,24 +13,11 @@ import {
   normalizeGameRefs,
 } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
-import { getFutureChangeBoundary, getQueuePromotionDecision, reconcileLiveQueue } from '../utils/liveQueueTransition';
+import { getFutureChangeBoundary, getQueuePromotionDecision, reconcileFutureSessionChange, reconcileLiveQueue } from '../utils/liveQueueTransition';
+import type { RegenerateArgs, RegeneratedPlan } from '../utils/liveQueueTransition';
 
-interface RegenerateArgs {
-  targetFromSlot: number;
-  overridePlayers?: Player[] | null;
-  blockedForFirstSlot?: Set<string>;
-  overrideWinLoss?: WinLossMap | null;
-  overrideScores?: ScoresMap | null;
-  baseResult: PlannerResult;
-  forcedFirstSlot?: ForcedFirstSlot | null;
-}
-
-interface RegeneratedPlan {
-  newResult: PlannerResult;
-  nextScores: ScoresMap;
-}
-
-interface LiveQueueOptions {
+interface LiveQueueOptions extends QueueRuntimeState {
+  recordUndo: () => void;
   result: PlannerResult | null;
   players: Player[];
   liveGames: GameRef[];
@@ -37,20 +26,17 @@ interface LiveQueueOptions {
   fromSlot: number;
   totalSlots: number;
   canPlayerJoin: boolean;
-  getCourtsPerSlot: () => number[];
+  scores: ScoresMap;
+  courtOverrides: Record<number, number>;
+  isConfirmed: boolean;
+  getCourtsPerSlot: (overrides?: Record<number, number>) => number[];
   regenerate: (args: RegenerateArgs) => RegeneratedPlan | null;
   patchState: (patch: RuntimePatch) => void;
-}
-
-let queueFlowSequence = 0;
-
-function nextQueueFlowId() {
-  queueFlowSequence += 1;
-  return `${Date.now()}-${queueFlowSequence}`;
+  onConfirmedScheduleChange?: (previousResult: PlannerResult) => void;
 }
 
 function assignDisplayCourts(games: GameRef[], capacity: number): GameRef[] {
-  const laneCount = Math.max(0, capacity, games.length);
+  const laneCount = Math.max(0, capacity, games.length, ...games.map(game => (game.displayCourt ?? -1) + 1));
   const used = new Set<number>();
   const assigned = games.map(game => ({ ...game }));
 
@@ -118,14 +104,12 @@ function substituteQueuedGame(
   };
 }
 
-export interface QueueAdjustmentNotice {
-  queuedGame: { slot: number; court: number; players: string[] };
-  promotedGame: { slot: number; court: number; displayCourt: number; players: string[] };
-  unavailablePlayers: string[];
-  replacements: Array<{ replacee: string; replacer: string; court: number }>;
-}
-
 export function useLiveQueue({
+  recordUndo,
+  sessionChangeNotice,
+  pendingSessionChange,
+  queueAdjustment,
+  queuePromotionPrompt,
   result,
   players,
   liveGames,
@@ -134,28 +118,20 @@ export function useLiveQueue({
   fromSlot,
   totalSlots,
   canPlayerJoin,
+  scores,
+  courtOverrides,
+  isConfirmed,
   getCourtsPerSlot,
   regenerate,
   patchState,
+  onConfirmedScheduleChange,
 }: LiveQueueOptions) {
   const changeSlot = getFutureChangeBoundary(liveGames, completedGames);
   const liveCapacity = getCourtsPerSlot()[Math.min(totalSlots - 1, changeSlot - 1)] ?? 1;
-  const [queueAdjustment, setQueueAdjustment] = useState<QueueAdjustmentNotice | null>(null);
-  const [queuePromotionPrompt, setQueuePromotionPrompt] = useState<{
-    flowId: string;
-    prompt: {
-      completedCourt: number;
-      firstGame: { slot: number; court: number; players: string[] };
-      blockedPlayers: string[];
-      lookaheadGame: { slot: number; court: number; players: string[] } | null;
-      replacements: Array<{ replacee: string; replacer: string }>;
-    };
-    nextLiveGames: GameRef[];
-    nextCompletedGames: GameRef[];
-    lookaheadGame: GameRef | null;
-    changedSlot: number;
-    targetLiveCount: number;
-  } | null>(null);
+  const setSessionChangeNotice = (sessionChangeNotice: QueueRuntimeState['sessionChangeNotice']) => patchState({ sessionChangeNotice });
+  const setPendingSessionChange = (pendingSessionChange: QueueRuntimeState['pendingSessionChange']) => patchState({ pendingSessionChange });
+  const setQueueAdjustment = (queueAdjustment: QueueRuntimeState['queueAdjustment']) => patchState({ queueAdjustment });
+  const setQueuePromotionPrompt = (queuePromotionPrompt: QueueRuntimeState['queuePromotionPrompt']) => patchState({ queuePromotionPrompt });
   const describeGames = useCallback((games: GameRef[], scheduleResult = result) => games.map(game => {
     const slot = scheduleResult?.schedule.find(item => item.slot === game.slot);
     const court = slot?.courts[game.court];
@@ -167,9 +143,13 @@ export function useLiveQueue({
   }), [result]);
 
   const snapshotGame = useCallback((slot: number, court: number): GameRef => {
+    const live = liveGames.find(game => gameMatches(game, slot, court));
     const selected = result?.schedule.find(item => item.slot === slot)?.courts[court];
-    return { slot, court, players: selected ? [...selected.teamA, ...selected.teamB].map(player => player.name) : [] };
-  }, [result]);
+    return {
+      slot, court, ...live,
+      players: live?.players?.length === 4 ? [...live.players] : selected ? [...selected.teamA, ...selected.teamB].map(player => player.name) : [],
+    };
+  }, [liveGames, result]);
 
   const firstIncomplete = useCallback((games: GameRef[], scheduleResult = result) => {
     if (!scheduleResult) return fromSlot;
@@ -209,21 +189,16 @@ export function useLiveQueue({
     return forcedCourts;
   }, [players, result]);
 
-  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: RuntimePatch = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult; regenerate?: boolean; queueChoice?: 'lookahead' | 'substitute'; queueGame?: GameRef | null; flowId?: string } = {}) => {
+  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: RuntimePatch = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult; queueChoice?: 'lookahead' | 'substitute'; queueGame?: GameRef | null } = {}) => {
+    recordUndo();
     const scheduleResult = options.overrideResult ?? result;
     const targetLiveCount = options.targetLiveCount ?? newLiveGames.length;
-    const flowId = options.flowId ?? nextQueueFlowId();
-    const priorFromSlot = scheduleResult ? firstIncomplete(completedGames, scheduleResult) : fromSlot;
+    const displayCapacity = Math.max(targetLiveCount, getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? targetLiveCount);
     liveQueueDebug('apply:start', {
-      flowId,
       changedSlot,
       targetLiveCount,
-      priorFromSlot,
-      queueChoice: options.queueChoice ?? null,
-      requestedQueueGame: options.queueGame ? describeGames([options.queueGame], scheduleResult)[0] : null,
       liveGames: describeGames(newLiveGames),
       completedGames: describeGames(newCompletedGames),
-      activePlayerNames: [...livePlayerNamesFor(newLiveGames, scheduleResult)].sort(),
       extraPatch: Object.keys(extraPatch),
     });
     const normalized = scheduleResult
@@ -237,7 +212,7 @@ export function useLiveQueue({
       })
       : { liveGames: normalizeGameRefs(newLiveGames, null, targetLiveCount), completedGames: newCompletedGames, promotedGames: [] };
     let nextCompletedGames = normalized.completedGames;
-    let nextLiveGames = assignDisplayCourts(normalized.liveGames, targetLiveCount);
+    let nextLiveGames = assignDisplayCourts(normalized.liveGames, displayCapacity);
     let nextResult = scheduleResult;
     let nextSuspendedPlayerNames = options.suspendedPlayerNames ?? suspendedPlayerNames;
     const shouldPromote = targetLiveCount > nextLiveGames.length;
@@ -251,7 +226,6 @@ export function useLiveQueue({
     if (shouldPromote && nextResult) {
       const blockedNames = livePlayerNamesFor(nextLiveGames, nextResult);
       liveQueueDebug('queue:scan', {
-        flowId,
         changedSlot,
         capacity: targetLiveCount,
         currentLive: describeGames(nextLiveGames, nextResult),
@@ -269,18 +243,6 @@ export function useLiveQueue({
     const queuedSubstitution = queuedPreviewGame && nextResult
       ? substituteQueuedGame(nextResult, queuedPreviewGame, options.overridePlayers ?? players, livePlayerNamesFor(nextLiveGames, nextResult), new Set(nextSuspendedPlayerNames))
       : null;
-    if (shouldPromote && nextResult) {
-      liveQueueDebug('queue:substitution-preview', {
-        flowId,
-        queuedGame: queuedPreviewGame ? describeGames([queuedPreviewGame], nextResult)[0] : null,
-        activePlayerNames: [...livePlayerNamesFor(nextLiveGames, nextResult)].sort(),
-        conflictingPlayers: queuedSubstitution?.conflictingPlayers ?? [],
-        unavailablePlayers: queuedSubstitution?.unavailablePlayers ?? [],
-        replacements: queuedSubstitution?.replacements ?? [],
-        substitutedGame: queuedSubstitution ? { ...describeGames([queuedSubstitution.game], nextResult)[0] } : null,
-        queueChoice: options.queueChoice ?? null,
-      });
-    }
     if (options.queueChoice === 'substitute' && queuedSubstitution && queuedSubstitution.unavailablePlayers.length === 0) {
       nextLiveGames = addUniqueGame(nextLiveGames, queuedSubstitution.game);
     }
@@ -358,12 +320,9 @@ export function useLiveQueue({
         forcedFirstSlot,
       });
       if (!regenerated) {
-        liveQueueDebug('regenerate:failed', { flowId, regenFromSlot, liveGames: describeGames(nextLiveGames, nextResult), completedGames: describeGames(nextCompletedGames, nextResult) });
+        liveQueueDebug('regenerate:failed', { regenFromSlot, liveGames: nextLiveGames, completedGames: nextCompletedGames });
         return false;
       }
-      const regeneratedSlots = regenerated.newResult.schedule
-        .filter(slot => slot.slot >= regenFromSlot && slot.slot < regenFromSlot + 3)
-        .map(slot => ({ slot: slot.slot, courts: slot.courts.map((court, index) => ({ court: index + 1, players: [...court.teamA, ...court.teamB].map(player => player.name) })) }));
       nextResult = regenerated.newResult;
       // Completion is an event, not part of the generated lineup. Keep it when
       // future slots are regenerated so a played game cannot re-enter the queue.
@@ -378,38 +337,23 @@ export function useLiveQueue({
         nextSuspendedPlayerNames = [];
         patch.suspendedPlayerNames = [];
       }
-      liveQueueDebug('regenerate:success', {
-        flowId,
-        regenFromSlot,
-        liveGames: describeGames(nextLiveGames, nextResult),
-        completedGames: describeGames(nextCompletedGames, nextResult),
-        regeneratedSlots,
-      });
+      liveQueueDebug('regenerate:success', { regenFromSlot, liveGames: nextLiveGames, completedGames: nextCompletedGames });
       return true;
     };
 
     const nextSafeRegenSlot = (startSlot: number) => {
       let slot = startSlot;
-      const skippedSlots: Array<{ slot: number; hasLive: boolean; hasCompleted: boolean; forceable: boolean }> = [];
       while (slot <= totalSlots) {
         const hasLive = nextLiveGames.some(game => game.slot === slot);
         const hasCompleted = nextCompletedGames.some(game => game.slot === slot);
-        const forceable = Boolean(forcedLiveCourtsForSlot(slot, [...nextLiveGames, ...nextCompletedGames], nextResult));
-        if ((!hasLive && !hasCompleted) || forceable) break;
-        skippedSlots.push({ slot, hasLive, hasCompleted, forceable });
+        if ((!hasLive && !hasCompleted) || forcedLiveCourtsForSlot(slot, [...nextLiveGames, ...nextCompletedGames], nextResult)) break;
         slot++;
       }
-      liveQueueDebug('queue:regen-boundary', {
-        flowId,
-        requestedStartSlot: startSlot,
-        selectedSlot: slot,
-        skippedSlots,
-      });
       return slot;
     };
 
     const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
-    const shouldRegenerate = options.regenerate ?? Boolean(
+    const shouldRegenerate = Boolean(
       nextResult && (
         options.overrideResult ||
         newCompletedGames.length > completedGames.length ||
@@ -418,18 +362,6 @@ export function useLiveQueue({
         options.suspendedPlayerNames
       ),
     );
-    liveQueueDebug('apply:regeneration-plan', {
-      flowId,
-      shouldRegenerate,
-      initialRegenSlot,
-      totalSlots,
-      hasOverrideResult: Boolean(options.overrideResult),
-      completedCountBefore: completedGames.length,
-      completedCountAfter: newCompletedGames.length,
-      extraPatchKeys: Object.keys(extraPatch),
-      hasOverridePlayers: Boolean(options.overridePlayers),
-      hasSuspensionUpdate: Boolean(options.suspendedPlayerNames),
-    });
     if (shouldRegenerate && (regenerateFrom(initialRegenSlot) || initialRegenSlot > totalSlots)) {
       while (nextLiveGames.length < targetLiveCount) {
         const transition = reconcileLiveQueue({
@@ -441,26 +373,11 @@ export function useLiveQueue({
           suspendedPlayerNames: nextSuspendedPlayerNames,
         });
         const queuedGame = transition.promotedGames[0] ?? null;
-        if (!queuedGame) {
-          liveQueueDebug('queue:promotion-stop', {
-            flowId,
-            reason: 'no-playable-candidate',
-            targetLiveCount,
-            currentLiveCount: nextLiveGames.length,
-            changedSlot,
-            activePlayerNames: [...livePlayerNamesFor(nextLiveGames, nextResult)].sort(),
-            remainingCandidates: nextResult?.schedule.flatMap(slot => slot.courts.map((_, court) => ({ slot: slot.slot, court })))
-              .filter(game => game.slot > changedSlot && !hasGame(nextCompletedGames, game.slot, game.court) && !hasGame(nextLiveGames, game.slot, game.court))
-              .slice(0, 8)
-              .map(game => ({ ...game, players: courtPlayersForLog(nextResult!, game) })),
-          });
-          break;
-        }
+        if (!queuedGame) break;
         const beforeCount = nextLiveGames.length;
         nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
         if (nextLiveGames.length === beforeCount) break;
         liveQueueDebug('queue:promote', {
-          flowId,
           queuedGame: queuedPreviewGame ? describeGames([queuedPreviewGame], scheduleResult)[0] : null,
           promotedGame: describeGames([queuedGame], nextResult)[0],
           unavailableQueuedPlayers,
@@ -472,7 +389,7 @@ export function useLiveQueue({
           const queuedDescription = describeGames([queuedPreviewGame!], scheduleResult)[0]!;
           const promotedDescription = describeGames([queuedGame], nextResult)[0]!;
           const replacers = queuedSubstitution.replacements.map(item => item.replacer);
-          const promotedWithLane = assignDisplayCourts([...nextLiveGames, queuedGame], targetLiveCount)
+          const promotedWithLane = assignDisplayCourts([...nextLiveGames, queuedGame], displayCapacity)
             .find(game => game.slot === queuedGame.slot && game.court === queuedGame.court);
           const displayCourt = promotedWithLane?.displayCourt ?? queuedGame.court;
           setQueueAdjustment({
@@ -491,36 +408,24 @@ export function useLiveQueue({
       }
     }
 
-    nextLiveGames = assignDisplayCourts(normalizeGameRefs(nextLiveGames, nextResult?.schedule ?? null, targetLiveCount), targetLiveCount);
+    nextLiveGames = assignDisplayCourts(normalizeGameRefs(nextLiveGames, nextResult?.schedule ?? null, targetLiveCount), displayCapacity);
     patch.liveGames = nextLiveGames;
     patch.completedGames = nextCompletedGames;
     patch.suspendedPlayerNames = nextSuspendedPlayerNames;
     patch.fromSlot = firstIncomplete(nextCompletedGames, nextResult);
-    const completionProgress = nextResult?.schedule.map(slot => ({
-      slot: slot.slot,
-      courtCount: slot.courts.length,
-      completedCount: slot.courts.filter((_, court) => hasGame(nextCompletedGames, slot.slot, court)).length,
-      liveCount: slot.courts.filter((_, court) => hasGame(nextLiveGames, slot.slot, court)).length,
-    })).filter(slot => slot.completedCount > 0 || slot.liveCount > 0 || slot.slot <= Math.min(totalSlots, Math.max(priorFromSlot, patch.fromSlot ?? 1) + 1)) ?? [];
-    const livePlayerOccurrences = describeGames(nextLiveGames, nextResult).flatMap(game => game.players.map(player => ({ player, slot: game.slot, court: game.court })));
-    const duplicateLivePlayers = livePlayerOccurrences.filter((entry, index, all) => all.findIndex(other => other.player === entry.player) !== index);
     liveQueueDebug('apply:final', {
-      flowId,
       changedSlot,
       liveGames: describeGames(nextLiveGames, nextResult),
       completedGames: describeGames(nextCompletedGames, nextResult),
       fromSlot: patch.fromSlot,
-      completionProgress,
-      duplicateLivePlayers,
       regenerated: Boolean(patch.result),
     });
     patchState(patch);
-  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, getCourtsPerSlot, livePlayerNamesFor, regenerate, result, suspendedPlayerNames, totalSlots]);
+  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, fromSlot, getCourtsPerSlot, livePlayerNamesFor, regenerate, result, suspendedPlayerNames, totalSlots, patchState, recordUndo]);
 
-  const toggleLiveGame = useCallback((slotNum: number, court: number) => {
-    const flowId = nextQueueFlowId();
+  const toggleLiveGame = useCallback((slotNum: number, court: number, displayCourt?: number) => {
     const isLive = hasGame(liveGames, slotNum, court);
-    const activeCapacity = Math.max(1, getCourtsPerSlot()[Math.max(0, fromSlot - 1)] ?? 1);
+    const activeCapacity = liveCapacity;
     if (!isLive && liveGames.length >= activeCapacity) {
       liveQueueDebug('toggle:blocked-capacity', {
         clicked: { slot: slotNum, court },
@@ -532,10 +437,11 @@ export function useLiveQueue({
     const withoutCompleted = completedGames.filter(game => !gameMatches(game, slotNum, court));
     const nextLiveGames = isLive
       ? liveGames.filter(game => !gameMatches(game, slotNum, court))
-      : addUniqueGame(liveGames, { slot: slotNum, court });
+      : addUniqueGame(liveGames, { slot: slotNum, court, ...(displayCourt != null ? { displayCourt } : {}) });
     const nextCompletedGames = isLive ? [...withoutCompleted, snapshotGame(slotNum, court)] : withoutCompleted;
+    // Finishing replaces at most one game; new lanes still require an explicit Start.
+    const targetLiveCount = Math.max(nextLiveGames.length, Math.min(activeCapacity, liveGames.length));
     liveQueueDebug('toggle', {
-      flowId,
       clicked: { slot: slotNum, court },
       action: isLive ? 'complete' : 'start',
       beforeLiveGames: describeGames(liveGames),
@@ -543,22 +449,13 @@ export function useLiveQueue({
       nextLiveGames: describeGames(nextLiveGames),
       nextCompletedGames: describeGames(nextCompletedGames),
     });
-    if (isLive && result) {
+    if (isLive && result && nextLiveGames.length < targetLiveCount) {
       const decision = getQueuePromotionDecision({
         schedule: result.schedule,
         liveGames: nextLiveGames,
         completedGames: nextCompletedGames,
         changedSlot: slotNum,
         suspendedPlayerNames,
-      });
-      liveQueueDebug('queue:promotion-decision', {
-        flowId,
-        completedGame: describeGames([snapshotGame(slotNum, court)], result)[0],
-        remainingLiveGames: describeGames(nextLiveGames, result),
-        firstGame: decision.first ? describeGames([decision.first], result)[0] : null,
-        firstBlockedPlayers: decision.firstBlockedPlayers,
-        lookaheadGame: decision.lookahead ? describeGames([decision.lookahead], result)[0] : null,
-        mode: decision.mode,
       });
       if (decision.first && decision.firstBlockedPlayers.length > 0) {
         const substitution = substituteQueuedGame(
@@ -571,7 +468,6 @@ export function useLiveQueue({
         const completedGame = liveGames.find(game => gameMatches(game, slotNum, court));
         const completedCourt = (completedGame?.displayCourt ?? court) + 1;
         setQueuePromotionPrompt({
-          flowId,
           prompt: {
             completedCourt,
             firstGame: describeGames([decision.first], result)[0]!,
@@ -583,65 +479,114 @@ export function useLiveQueue({
           nextCompletedGames,
           lookaheadGame: decision.lookahead ? { ...decision.lookahead, players: describeGames([decision.lookahead], result)[0]!.players } : null,
           changedSlot: slotNum,
-          targetLiveCount: liveGames.length,
-        });
-        liveQueueDebug('queue:prompt-open', {
-          flowId,
-          completedCourt,
-          firstGame: describeGames([decision.first], result)[0],
-          blockedPlayers: decision.firstBlockedPlayers,
-          lookaheadGame: decision.lookahead ? describeGames([decision.lookahead], result)[0] : null,
-          replacements: substitution?.replacements ?? [],
+          targetLiveCount,
         });
         return;
       }
     }
-    applyLiveGamesUpdate(nextLiveGames, slotNum, nextCompletedGames, {}, isLive ? { targetLiveCount: liveGames.length, flowId } : { flowId });
-  }, [applyLiveGamesUpdate, completedGames, describeGames, fromSlot, getCourtsPerSlot, liveGames, livePlayerNamesFor, players, result, snapshotGame, suspendedPlayerNames]);
+    applyLiveGamesUpdate(nextLiveGames, slotNum, nextCompletedGames, {}, isLive ? { targetLiveCount } : {});
+  }, [applyLiveGamesUpdate, completedGames, describeGames, liveCapacity, liveGames, livePlayerNamesFor, players, result, snapshotGame, suspendedPlayerNames, patchState]);
 
   const resolveQueuePromotion = useCallback((choice: 'lookahead' | 'substitute') => {
     if (!queuePromotionPrompt) return;
     const pending = queuePromotionPrompt;
-    setQueuePromotionPrompt(null);
-    liveQueueDebug('queue:prompt-choice', {
-      flowId: pending.flowId,
-      choice,
-      selectedGame: choice === 'lookahead' ? pending.lookaheadGame : null,
-      queuedFirstGame: pending.prompt.firstGame,
-      blockedPlayers: pending.prompt.blockedPlayers,
-      replacementsPreview: pending.prompt.replacements,
-      liveGamesBeforeApply: describeGames(pending.nextLiveGames),
-      completedGamesBeforeApply: describeGames(pending.nextCompletedGames),
-    });
     applyLiveGamesUpdate(pending.nextLiveGames, pending.changedSlot, pending.nextCompletedGames, {}, {
       targetLiveCount: pending.targetLiveCount,
       queueChoice: choice,
       queueGame: choice === 'lookahead' ? pending.lookaheadGame : null,
-      flowId: pending.flowId,
     });
-  }, [applyLiveGamesUpdate, describeGames, queuePromotionPrompt]);
-
-  const cancelQueuePromotion = useCallback(() => {
-    if (queuePromotionPrompt) {
-      liveQueueDebug('queue:prompt-cancel', {
-        flowId: queuePromotionPrompt.flowId,
-        queuedGame: queuePromotionPrompt.prompt.firstGame,
-        selectedAlternative: queuePromotionPrompt.prompt.lookaheadGame,
-      });
-    }
     setQueuePromotionPrompt(null);
-  }, [queuePromotionPrompt]);
+  }, [applyLiveGamesUpdate, queuePromotionPrompt, patchState]);
+
+  const cancelQueuePromotion = useCallback(() => patchState({ queuePromotionPrompt: null }), [patchState]);
+
+  const applySessionChange = useCallback((change: NonNullable<typeof pendingSessionChange>) => {
+    if (!result) return;
+    const boundarySlot = Math.max(change.boundarySlot, getFutureChangeBoundary(liveGames, completedGames));
+    if (boundarySlot > totalSlots) {
+      setSessionChangeNotice('No upcoming slot can be changed. Current and completed games are unchanged.');
+      return;
+    }
+    const patch = reconcileFutureSessionChange({
+      result, totalSlots, boundarySlot, targetCapacity: change.targetCapacity,
+      overridePlayers: change.overridePlayers, courtOverrides: change.courtOverrides,
+      liveGames, completedGames, scores, regenerate,
+    });
+    if (!patch) {
+      setSessionChangeNotice('Unable to update upcoming games. No session changes were applied.');
+      return;
+    }
+    recordUndo();
+    patchState(patch);
+    if (isConfirmed && change.archiveOnConfirm) onConfirmedScheduleChange?.(result);
+    setQueueAdjustment(null);
+    setSessionChangeNotice(`${change.description} from slot ${boundarySlot}. ${change.targetCapacity} court${change.targetCapacity === 1 ? '' : 's'} planned; ${liveGames.length} currently active. Current and completed games are unchanged.`);
+  }, [completedGames, isConfirmed, liveGames, onConfirmedScheduleChange, patchState, regenerate, result, scores, totalSlots, recordUndo]);
+
+  const requestSessionChange = useCallback((change: NonNullable<typeof pendingSessionChange>) => {
+    if (change.boundarySlot > totalSlots) {
+      setSessionChangeNotice('No upcoming slot can be changed. Current and completed games are unchanged.');
+    } else if (isConfirmed) setPendingSessionChange(change);
+    else applySessionChange(change);
+  }, [applySessionChange, isConfirmed, totalSlots, patchState]);
+
+  const confirmSessionChange = useCallback(() => {
+    if (pendingSessionChange) applySessionChange(pendingSessionChange);
+    setPendingSessionChange(null);
+  }, [applySessionChange, pendingSessionChange, patchState]);
+  const cancelSessionChange = useCallback(() => patchState({ pendingSessionChange: null }), [patchState]);
+  const resetSessionChanges = useCallback(() => patchState({ ...EMPTY_QUEUE_STATE, undoSnapshot: null }), [patchState]);
+
+  const regenerateUpcoming = useCallback((requestedSlot: number, targetCourts: number) => {
+    if (!result || !Number.isInteger(requestedSlot) || !Number.isInteger(targetCourts) || targetCourts < 0 || targetCourts > 5) return;
+    const boundarySlot = Math.max(changeSlot, requestedSlot);
+    const overrides = targetCourts > 0 ? { ...courtOverrides, [boundarySlot]: targetCourts } : courtOverrides;
+    requestSessionChange({
+      boundarySlot, targetCapacity: getCourtsPerSlot(overrides)[boundarySlot - 1] ?? liveCapacity,
+      courtOverrides: overrides, description: 'Upcoming games updated',
+      archiveOnConfirm: true,
+    });
+  }, [changeSlot, courtOverrides, getCourtsPerSlot, liveCapacity, requestSessionChange, result]);
+
+  const adjustCourtsAtSlot = useCallback((requestedSlot: number, delta: number) => {
+    if (!result || !Number.isInteger(requestedSlot)) return;
+    const boundarySlot = Math.max(changeSlot, requestedSlot);
+    const currentCapacity = getCourtsPerSlot()[boundarySlot - 1] ?? liveCapacity;
+    const targetCapacity = Math.max(1, Math.min(5, currentCapacity + delta));
+    if (targetCapacity === currentCapacity) return;
+    requestSessionChange({
+      boundarySlot, targetCapacity, courtOverrides: { ...courtOverrides, [boundarySlot]: targetCapacity },
+      description: delta > 0 ? 'Court added' : 'Court removed',
+      archiveOnConfirm: true,
+    });
+  }, [changeSlot, courtOverrides, getCourtsPerSlot, liveCapacity, requestSessionChange, result]);
 
   const setPlayerLeaving = useCallback((index: number) => {
-    const updatedPlayers = players.map((player, playerIndex) => playerIndex === index ? { ...player, leavesAt: fromSlot - 2 } : player);
-    applyLiveGamesUpdate(liveGames, fromSlot - 1, completedGames, { players: updatedPlayers }, { overridePlayers: updatedPlayers });
-  }, [applyLiveGamesUpdate, completedGames, fromSlot, liveGames, players]);
+    if (!players[index]) return;
+    requestSessionChange({
+      boundarySlot: changeSlot, targetCapacity: liveCapacity, courtOverrides,
+      overridePlayers: players.map((player, i) => i === index ? { ...player, leavesAt: changeSlot - 2 } : player),
+      description: `${players[index]!.name} leaving`,
+    });
+  }, [changeSlot, courtOverrides, liveCapacity, players, requestSessionChange]);
 
   const setPlayerJoining = useCallback((index: number) => {
     if (!canPlayerJoin || !players[index]) return;
-    const updatedPlayers = players.map((player, playerIndex) => playerIndex === index ? { ...player, availFrom: fromSlot - 1 } : player);
-    applyLiveGamesUpdate(liveGames, fromSlot - 1, completedGames, { players: updatedPlayers }, { overridePlayers: updatedPlayers });
-  }, [applyLiveGamesUpdate, canPlayerJoin, completedGames, fromSlot, liveGames, players]);
+    requestSessionChange({
+      boundarySlot: changeSlot, targetCapacity: liveCapacity, courtOverrides,
+      overridePlayers: players.map((player, i) => i === index ? { ...player, availFrom: changeSlot - 1 } : player),
+      description: `${players[index]!.name} here now`,
+    });
+  }, [canPlayerJoin, changeSlot, courtOverrides, liveCapacity, players, requestSessionChange]);
+
+  const setPlayerBack = useCallback((index: number) => {
+    if (!players[index]) return;
+    requestSessionChange({
+      boundarySlot: changeSlot, targetCapacity: liveCapacity, courtOverrides,
+      overridePlayers: players.map((player, i) => i === index ? { ...player, leavesAt: null } : player),
+      description: `${players[index]!.name} back`,
+    });
+  }, [changeSlot, courtOverrides, liveCapacity, players, requestSessionChange]);
 
   const togglePlayerSuspended = useCallback((index: number) => {
     const player = players[index];
@@ -661,15 +606,24 @@ export function useLiveQueue({
 
   return {
     applyLiveGamesUpdate,
+    adjustCourtsAtSlot,
     blockedPlayerNames,
+    changeSlot,
+    liveCapacity,
+    sessionChangeNotice,
+    pendingSessionChange,
+    confirmSessionChange,
+    cancelSessionChange,
+    resetSessionChanges,
+    regenerateUpcoming,
     firstIncomplete,
     queueAdjustment,
     queuePromotionPrompt,
     resolveQueuePromotion,
     cancelQueuePromotion,
-    liveCapacity,
     setPlayerJoining,
     setPlayerLeaving,
+    setPlayerBack,
     toggleLiveGame,
     togglePlayerSuspended,
   };

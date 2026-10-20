@@ -23,8 +23,22 @@ function renderPanel(overrides = {}) {
 }
 
 describe('SessionSettingsPanel', () => {
+  it('keeps settings open before generation and compact during an active session', async () => {
+    const user = userEvent.setup();
+    const patchState = renderPanel({ scheduleActive: true, preferredPairs: [['Alice', 'Bob']] });
+    const summary = screen.getByText('Session settings');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: '3' })).not.toBeVisible();
+    await user.click(summary);
+    await user.click(screen.getByRole('button', { name: '3' }));
+    expect(patchState).toHaveBeenCalledWith({ numCourts: 3 });
+    await user.click(screen.getByRole('button', { name: 'Remove preferred pairing Alice and Bob' }));
+    expect(patchState).toHaveBeenCalledWith({ preferredPairs: [], scheduleDirty: true });
+  });
+
   it('shows the current session/game length', () => {
     renderPanel({ totalMinutes: 180, gameMinutes: 15 });
+    expect(screen.getByText('Session settings').closest('details')).toHaveAttribute('open');
     expect(screen.getByText('3h')).toBeInTheDocument();
     expect(screen.getByText('15m')).toBeInTheDocument();
   });
@@ -94,6 +108,7 @@ describe('SessionSettingsPanel', () => {
       players: [{ name: 'Alice', gender: 'F' }, { name: 'Bob', gender: 'M' }],
       preferredPairs: [],
     });
+    await user.click(screen.getByText('Session settings'));
     await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'Alice');
     await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'Bob');
     await user.click(screen.getByRole('button', { name: 'Add' }));

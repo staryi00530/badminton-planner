@@ -4,6 +4,7 @@ import { extractState, generateSchedule, generateScheduleGen } from '../algorith
 import type { ScheduleOptions } from '../algorithm/scheduler';
 import type { PlannerResult, PlannerState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
 import { initialLiveGamesForSchedule } from '../utils/liveQueue';
+import { getFutureChangeBoundary, reconcileFutureSessionChange } from '../utils/liveQueueTransition';
 
 interface RegeneratedPlan {
   newResult: PlannerResult;
@@ -11,6 +12,7 @@ interface RegeneratedPlan {
 }
 
 interface ScheduleActionOptions {
+  recordUndo: () => void;
   players: Player[];
   result: PlannerResult | null;
   totalSlots: number;
@@ -22,16 +24,18 @@ interface ScheduleActionOptions {
   completedGames: PlannerState['completedGames'];
   fromSlot: number;
   fromSlotCourts: number;
+  courtOverrides?: Record<number, number>;
   computeSkill: (name: string, level?: 1 | 2 | 3) => number;
   getPlayersWithAvailability: () => Player[];
   applyAvailability: (players: Player[]) => Player[];
-  getCourtsPerSlot: () => number[];
+  getCourtsPerSlot: (overrides?: Record<number, number>) => number[];
   getScheduleOptions: (players: Player[]) => ScheduleOptions;
   patchState: (patch: RuntimePatch) => void;
   keepGamesBeforeSlot: (games: PlannerState['liveGames'], slot: number) => PlannerState['liveGames'];
 }
 
 export function useScheduleActions({
+  recordUndo,
   players,
   result,
   totalSlots,
@@ -43,6 +47,7 @@ export function useScheduleActions({
   completedGames,
   fromSlot,
   fromSlotCourts,
+  courtOverrides = {},
   computeSkill,
   getPlayersWithAvailability,
   applyAvailability,
@@ -53,9 +58,9 @@ export function useScheduleActions({
 }: ScheduleActionOptions) {
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
-    patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1 });
+    patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1, fromSlotCourts: 0, courtOverrides: {} });
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-    const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot(), 0, null, null, getScheduleOptions(playersWithSkill));
+    const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot({}), 0, null, null, getScheduleOptions(playersWithSkill));
     let lastValue: GeneratorYield | null = null;
     function step() {
       const { value, done } = gen.next();
@@ -65,9 +70,9 @@ export function useScheduleActions({
       }
       if (done) {
         const initialLiveGames = lastValue
-          ? initialLiveGamesForSchedule(lastValue, getCourtsPerSlot()[0] ?? 0)
+          ? initialLiveGamesForSchedule(lastValue, getCourtsPerSlot({})[0] ?? 0)
           : [];
-        patchState({ result: lastValue, liveGames: initialLiveGames, scheduleDirty: false, isGenerating: false });
+        patchState({ result: lastValue, liveGames: initialLiveGames, activeTab: lastValue ? 'live' : 'setup', scheduleDirty: false, isGenerating: false });
       }
       else requestAnimationFrame(step);
     }
@@ -76,22 +81,25 @@ export function useScheduleActions({
 
   const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
     if (players.length < 4 || !result) return;
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-    const keptSlots = result.schedule.slice(0, targetFromSlot - 1);
-    const stateSnapshot = extractState(keptSlots, playersWithSkill);
-    const courtsArr = getCourtsPerSlot();
-    if (targetCourts > 0) {
-      for (let i = targetFromSlot - 1; i < totalSlots; i++) courtsArr[i] = targetCourts;
+    if (!Number.isInteger(targetFromSlot) || !Number.isInteger(targetCourts) || targetCourts < 0 || targetCourts > 5) return;
+    const boundarySlot = Math.max(targetFromSlot, getFutureChangeBoundary(liveGames, completedGames));
+    const nextOverrides = targetCourts > 0 ? { ...courtOverrides, [boundarySlot]: targetCourts } : courtOverrides;
+    const courtsArr = getCourtsPerSlot(nextOverrides);
+    const patch = reconcileFutureSessionChange({
+      result, totalSlots, boundarySlot, targetCapacity: courtsArr[boundarySlot - 1] ?? 1,
+      courtOverrides: nextOverrides, liveGames, completedGames, scores,
+      regenerate: () => {
+        const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
+        const snapshot = extractState(result.schedule.slice(0, boundarySlot - 1), playersWithSkill);
+        const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, boundarySlot - 1, snapshot, null, getScheduleOptions(playersWithSkill));
+        return newResult ? { newResult, nextScores: {} } : null;
+      },
+    });
+    if (patch) {
+      recordUndo();
+      patchState(patch);
     }
-    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, null, getScheduleOptions(playersWithSkill));
-    if (!newResult) return;
-    const nextScores: ScoresMap = {};
-    for (const key in scores) {
-      const match = key.match(/^s(\d+)c/);
-      if (match && parseInt(match[1]!, 10) < targetFromSlot && scores[key]) nextScores[key] = scores[key];
-    }
-    patchState({ result: newResult, scheduleDirty: false, scores: nextScores, copied: false, isConfirmed: false, loadedPlanId: null, liveGames: keepGamesBeforeSlot(liveGames, targetFromSlot), completedGames: keepGamesBeforeSlot(completedGames, targetFromSlot), suspendedPlayerNames: [], fromSlot: targetFromSlot, fromSlotCourts: targetCourts });
-  }, [completedGames, computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, keepGamesBeforeSlot, liveGames, patchState, players.length, result, scores, totalSlots]);
+  }, [completedGames, computeSkill, courtOverrides, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, patchState, players.length, result, scores, totalSlots, recordUndo]);
 
   const runRegenerateRemaining = useCallback(() => runRegenerateFromSlotWithCourts(fromSlot, fromSlotCourts), [fromSlot, fromSlotCourts, runRegenerateFromSlotWithCourts]);
 
@@ -101,17 +109,7 @@ export function useScheduleActions({
     else runRegenerateRemaining();
   }, [isConfirmed, patchState, players.length, result, runRegenerateRemaining]);
 
-  const adjustCourtsAtSlot = useCallback((slotNum: number, delta: number) => {
-    if (!result) return;
-    const slotData = result.schedule.find(s => s.slot === slotNum);
-    const current = slotData ? slotData.courts.length : 0;
-    const next = Math.max(1, Math.min(5, current + delta));
-    if (next === current) return;
-    if (isConfirmed) patchState({ fromSlot: slotNum, fromSlotCourts: next, pendingOverwrite: 'regenerateRemaining' });
-    else runRegenerateFromSlotWithCourts(slotNum, next);
-  }, [isConfirmed, patchState, result, runRegenerateFromSlotWithCourts]);
-
-  const runClearSchedule = useCallback(() => patchState({ result: null, scheduleDirty: false, scores: {}, fromSlot: 1, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] }), [patchState]);
+  const runClearSchedule = useCallback(() => patchState({ result: null, activeTab: 'setup', scheduleDirty: false, scores: {}, fromSlot: 1, fromSlotCourts: 0, courtOverrides: {}, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [] }), [patchState]);
   const clearSchedule = useCallback(() => {
     if (isConfirmed) patchState({ pendingOverwrite: 'clear' });
     else runClearSchedule();
@@ -119,7 +117,7 @@ export function useScheduleActions({
   const confirmSchedule = useCallback(() => patchState({ isConfirmed: true }), [patchState]);
   const unconfirmSchedule = useCallback(() => patchState({ isConfirmed: false }), [patchState]);
 
-  const doRegen = useCallback((targetFromSlot: number, overridePlayers: Player[] | null, blockedForFirstSlot: Set<string> = new Set(), overrideWinLoss: WinLossMap | null = null, overrideScores: ScoresMap | null = null, baseResult: PlannerResult | null = result, forcedFirstSlot: ForcedFirstSlot | null = null): RegeneratedPlan | null => {
+  const doRegen = useCallback((targetFromSlot: number, overridePlayers: Player[] | null, blockedForFirstSlot: Set<string> = new Set(), overrideWinLoss: WinLossMap | null = null, overrideScores: ScoresMap | null = null, baseResult: PlannerResult | null = result, forcedFirstSlot: ForcedFirstSlot | null = null, overrideCourtOverrides?: Record<number, number>): RegeneratedPlan | null => {
     if (!baseResult) return null;
     const basePlayers = overridePlayers ?? players;
     const targetSlotIdx = targetFromSlot - 1;
@@ -135,7 +133,7 @@ export function useScheduleActions({
     const playersWithSkill = applyAvailability(basePlayers).map(p => ({ ...p, skill: skillFor(p.name, p.level), ...(blockedForFirstSlot.has(p.name) && targetSlotIdx >= p.availFrom && targetSlotIdx <= p.availTo ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}) }));
     const keptSlots = baseResult.schedule.slice(0, targetFromSlot - 1);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
-    const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));
+    const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(overrideCourtOverrides), targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));
     if (!newResult) return null;
     const nextScores: ScoresMap = {};
     const sourceScores = overrideScores ?? scores;
@@ -146,5 +144,5 @@ export function useScheduleActions({
     return { newResult, nextScores };
   }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss]);
 
-  return { runGenerate, runRegenerateFromSlotWithCourts, runRegenerateRemaining, regenerateRemaining, adjustCourtsAtSlot, runClearSchedule, clearSchedule, confirmSchedule, unconfirmSchedule, doRegen };
+  return { runGenerate, runRegenerateFromSlotWithCourts, runRegenerateRemaining, regenerateRemaining, runClearSchedule, clearSchedule, confirmSchedule, unconfirmSchedule, doRegen };
 }

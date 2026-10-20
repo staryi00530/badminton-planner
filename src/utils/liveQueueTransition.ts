@@ -1,7 +1,78 @@
-import type { PlannerResult } from '../types';
+import type { ForcedFirstSlot, Player } from '../algorithm/types';
+import type { PlannerResult, RuntimePatch, ScoresMap, WinLossMap } from '../types';
 import type { GameRef } from './liveQueue';
 
 type ScheduleLike = PlannerResult['schedule'];
+
+export interface RegenerateArgs {
+  targetFromSlot: number;
+  overridePlayers?: Player[] | null;
+  blockedForFirstSlot?: Set<string>;
+  overrideWinLoss?: WinLossMap | null;
+  overrideScores?: ScoresMap | null;
+  baseResult: PlannerResult;
+  forcedFirstSlot?: ForcedFirstSlot | null;
+  courtOverrides?: Record<number, number>;
+}
+
+export interface RegeneratedPlan {
+  newResult: PlannerResult;
+  nextScores: ScoresMap;
+}
+
+/** Slots containing runtime records cannot be regenerated as contiguous court arrays. */
+export function getFutureChangeBoundary(liveGames: GameRef[], completedGames: GameRef[]) {
+  return Math.max(1, ...liveGames.map(game => game.slot + 1), ...completedGames.map(game => game.slot + 1));
+}
+
+export function reconcileFutureSessionChange(input: {
+  result: PlannerResult;
+  totalSlots: number;
+  boundarySlot: number;
+  targetCapacity: number;
+  overridePlayers?: Player[];
+  courtOverrides: Record<number, number>;
+  liveGames: GameRef[];
+  completedGames: GameRef[];
+  scores: ScoresMap;
+  regenerate: (args: RegenerateArgs) => RegeneratedPlan | null;
+}): RuntimePatch | null {
+  const boundarySlot = Math.max(input.boundarySlot, getFutureChangeBoundary(input.liveGames, input.completedGames));
+  if (!Number.isInteger(boundarySlot) || boundarySlot > input.totalSlots) return null;
+  if (!Number.isInteger(input.targetCapacity) || input.targetCapacity < 1 || input.targetCapacity > 5) return null;
+  const regenerated = input.regenerate({
+    targetFromSlot: boundarySlot,
+    baseResult: input.result,
+    overridePlayers: input.overridePlayers,
+    courtOverrides: input.courtOverrides,
+  });
+  if (!regenerated) return null;
+  const scores: ScoresMap = {};
+  for (const [key, score] of Object.entries(input.scores)) {
+    const match = key.match(/^s(\d+)c/);
+    if (match && Number(match[1]) < boundarySlot) scores[key] = score;
+  }
+  return {
+    result: {
+      ...regenerated.newResult,
+      schedule: [
+        ...input.result.schedule.filter(slot => slot.slot < boundarySlot),
+        ...regenerated.newResult.schedule.filter(slot => slot.slot >= boundarySlot),
+      ],
+    },
+    scores,
+    liveGames: input.liveGames,
+    completedGames: input.completedGames,
+    ...(input.overridePlayers ? { players: input.overridePlayers } : {}),
+    courtOverrides: input.courtOverrides,
+    fromSlot: boundarySlot,
+    fromSlotCourts: input.targetCapacity,
+    scheduleDirty: false,
+    copied: false,
+    isConfirmed: false,
+    loadedPlanId: null,
+  };
+}
 
 export interface LiveQueueTransitionInput {
   schedule: ScheduleLike;
@@ -23,14 +94,6 @@ export interface QueuePromotionDecision {
   firstBlockedPlayers: string[];
   lookahead: GameRef | null;
   mode: 'promote-first' | 'choose' | 'substitute-first';
-}
-
-export function getFutureChangeBoundary(liveGames: GameRef[], completedGames: GameRef[]) {
-  return Math.max(1, ...liveGames.map(game => game.slot + 1), ...completedGames.map(game => game.slot + 1));
-}
-
-export function targetLiveCountAfterCompletion(nextLiveCount: number, previousLiveCount: number, capacity: number) {
-  return Math.max(nextLiveCount, Math.min(capacity, previousLiveCount));
 }
 
 function gameKey(game: GameRef) {

@@ -42,4 +42,19 @@ describe('computeCourtsPerSlot', () => {
     });
     expect(result).toEqual([5]);
   });
+
+  it('applies 1-based overrides onwards, superseding base and timed extra courts', () => {
+    expect(computeCourtsPerSlot({
+      totalSlots: 6, gameMinutes: 15, numCourts: 2,
+      extraCourt: { enabled: true, startMin: 30, durationMin: 45 },
+      courtOverrides: { 2: 4, 4: 1, 6: 5 },
+    })).toEqual([2, 4, 4, 1, 1, 5]);
+  });
+
+  it('ignores invalid persisted overrides rather than scheduling invalid capacity', () => {
+    expect(computeCourtsPerSlot({
+      totalSlots: 4, gameMinutes: 15, numCourts: 2, extraCourt: OFF,
+      courtOverrides: { 0: 5, 1.5: 3, 2: 0, 3: 6, 4: 2.5 },
+    })).toEqual([2, 2, 2, 2]);
+  });
 });

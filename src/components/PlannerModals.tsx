@@ -98,6 +98,26 @@ export function ConfirmOverwriteModal({ onConfirm, onCancel }: { onConfirm: () =
   );
 }
 
+export function SessionChangeModal({ description, boundarySlot, targetCapacity, onConfirm, onCancel }: {
+  description: string;
+  boundarySlot: number;
+  targetCapacity: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return <ModalShell>
+    <div role="dialog" aria-modal="true" aria-labelledby="session-change-title" onKeyDown={event => { if (event.key === 'Escape') onCancel(); }}>
+      <h2 id="session-change-title" style={{ fontSize: 16, margin: '0 0 12px' }}>Update upcoming games?</h2>
+      <p style={{ fontSize: 13, color: C.textDim }}>{description} from slot {boundarySlot}: {targetCapacity} court{targetCapacity === 1 ? '' : 's'} planned.</p>
+      <p style={{ fontSize: 13, color: C.textDim }}>Current and completed games, their lineups and scores will not change. The updated future schedule will be unconfirmed.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <button autoFocus onClick={onCancel} style={{ background: C.card, color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 6, padding: '10px 16px', fontFamily: FONT }}>Cancel</button>
+        <button onClick={onConfirm} style={{ background: C.accentDim, color: '#fff', border: 'none', borderRadius: 6, padding: '10px 16px', fontWeight: 700, fontFamily: FONT }}>Update upcoming games</button>
+      </div>
+    </div>
+  </ModalShell>;
+}
+
 export function SavePlanModal({ needsPin, pinInput, pinError, setPinInput, submitPin, saveTag, setSaveTag, savePlan, canUpdate, savedPlans, isSharedSession, close }: {
   needsPin: boolean;
   pinInput: string;

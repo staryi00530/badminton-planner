@@ -18,6 +18,35 @@ describe('usePlannerState — defaults & loading', () => {
     expect(result.current.state.isConfirmed).toBe(false);
     expect(result.current.state.liveGames).toEqual([]);
     expect(result.current.state.completedGames).toEqual([]);
+    expect(result.current.state.activeTab).toBe('setup');
+    expect(result.current.state.courtOverrides).toEqual({});
+  });
+
+  it('defaults an existing schedule to Live session', () => {
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.activeTab).toBe('live');
+  });
+
+  it.each(['live', 'setup', 'past', 'archive', 'about'] as const)('retains the selected %s view on refresh with a schedule', activeTab => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ result: { schedule: [], gamesPlayed: [] }, activeTab }));
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.activeTab).toBe(activeTab);
+  });
+
+  it.each(['schedule', 'unknown', null])('falls back to Live session for an invalid persisted view (%s)', activeTab => {
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    localStorage.setItem('bp-active-tab', JSON.stringify(activeTab));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.activeTab).toBe('live');
+  });
+
+  it('falls back to Setup when a persisted Live session has no result', () => {
+    localStorage.setItem('bp-active-tab', JSON.stringify('live'));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.activeTab).toBe('setup');
   });
 
   it('loads persisted values from localStorage on init', () => {
@@ -40,6 +69,36 @@ describe('usePlannerState — defaults & loading', () => {
 });
 
 describe('usePlannerState — dispatch', () => {
+  it('captures reducer-current state, restores once atomically, and leaves drafts/navigation alone', () => {
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.undoSnapshot).toBeNull();
+    act(() => {
+      result.current.patchState({ fromSlot: 3, courtOverrides: { 3: 2 }, suspendedPlayerNames: ['Alice'] });
+      result.current.recordUndo();
+      result.current.patchState({ fromSlot: 4, courtOverrides: { 4: 5 }, suspendedPlayerNames: [], pinInput: '1234', nameInput: 'Draft', activeTab: 'past' });
+    });
+    act(() => result.current.restoreUndo());
+    expect(result.current.state).toMatchObject({ fromSlot: 3, courtOverrides: { 3: 2 }, suspendedPlayerNames: ['Alice'], pinInput: '1234', nameInput: 'Draft', activeTab: 'past', undoSnapshot: null });
+    const restored = result.current.state;
+    act(() => result.current.restoreUndo());
+    expect(result.current.state).toBe(restored);
+  });
+
+  it('replaces the single snapshot and never persists it across reload or schedule replacement', () => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => { result.current.recordUndo(); result.current.patchState({ fromSlot: 2 }); });
+    act(() => { result.current.recordUndo(); result.current.patchState({ fromSlot: 3 }); });
+    act(() => result.current.restoreUndo());
+    expect(result.current.state.fromSlot).toBe(2);
+    act(() => result.current.recordUndo());
+    act(() => result.current.patchState({ result: null }));
+    expect(result.current.state.undoSnapshot).toBeNull();
+    act(() => result.current.recordUndo());
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.undoSnapshot).toBeNull();
+  });
+
   it('patchState merges partial updates into state', () => {
     const { result } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ numCourts: 2, saved: true }));
@@ -57,6 +116,22 @@ describe('usePlannerState — dispatch', () => {
 });
 
 describe('usePlannerState — persistence to localStorage', () => {
+  it('restores slot-keyed court overrides on reload without changing base settings', () => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ courtOverrides: { 2: 5, 4: 1 } }));
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.courtOverrides).toEqual({ 2: 5, 4: 1 });
+    expect(reloaded.result.current.state.numCourts).toBe(1);
+  });
+
+  it('does not leak shared-session court overrides into the personal session', () => {
+    const { result } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ courtOverrides: { 2: 3 } }));
+    act(() => result.current.patchState({ isSharedSession: true, courtOverrides: { 1: 5 } }));
+    expect(JSON.parse(localStorage.getItem('bp-courtOverrides')!)).toEqual({ 2: 3 });
+  });
+
   it('persists settings changes back to localStorage', () => {
     const { result } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ numCourts: 4 }));
@@ -96,6 +171,13 @@ describe('usePlannerState — persistence to localStorage', () => {
 });
 
 describe('usePlannerState — cross-tab safety while viewing a shared schedule', () => {
+  it('does not overwrite the local selected view while viewing a shared schedule', () => {
+    const { result } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ activeTab: 'about' }));
+    act(() => result.current.patchState({ isSharedSession: true, activeTab: 'past' }));
+    expect(JSON.parse(localStorage.getItem('bp-active-tab')!)).toBe('about');
+  });
+
   // isSharedSession=true means this tab is showing someone else's share link, not the
   // device's own schedule — players/result/scores/isConfirmed must not leak into this
   // device's local persistence and silently overwrite it. See CLAUDE.md "Sharing".
