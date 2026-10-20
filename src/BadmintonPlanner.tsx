@@ -13,6 +13,7 @@ import { formatSlotTime } from './utils/slotTime';
 import { isValidBadmintonScore } from './utils/scoreValidation';
 import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot } from './utils/liveQueue';
 import type { GameRef } from './utils/liveQueue';
+import { targetLiveCountAfterCompletion } from './utils/liveQueueTransition';
 import { useLiveQueue } from './hooks/useLiveQueue';
 import { useScheduleActions } from './hooks/useScheduleActions';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
@@ -75,9 +76,15 @@ function preserveUnchangedGamesAtEditedSlot(games: GameRef[], before: PlannerRes
 }
 
 function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, editedSlot: number) {
-  return games.filter(game =>
-    game.slot < editedSlot || (game.slot === editedSlot && Boolean(after.schedule.find(slot => slot.slot === game.slot)?.courts[game.court]))
-  );
+  return games.flatMap(game => {
+    if (game.slot !== editedSlot) return [game];
+    const court = after.schedule.find(slot => slot.slot === game.slot)?.courts[game.court];
+    if (!court) return [];
+    return [{
+      ...game,
+      players: [...court.teamA, ...court.teamB].map(player => player.name),
+    }];
+  });
 }
 
 function BadmintonPlanner() {
@@ -356,6 +363,7 @@ function BadmintonPlanner() {
     queuePromotionPrompt,
     resolveQueuePromotion,
     cancelQueuePromotion,
+    liveCapacity,
     setPlayerJoining,
     setPlayerLeaving,
     toggleLiveGame,
@@ -515,7 +523,7 @@ function BadmintonPlanner() {
         editLayout: null,
         copied: false,
       },
-      { targetLiveCount: liveGames.length, overrideResult: newResult },
+      { targetLiveCount: liveGames.length, overrideResult: newResult, regenerate: false },
     );
   }, [applyLiveGamesUpdate, completedGames, editingSlot, editLayout, liveGames, players, result]);
 
@@ -558,8 +566,9 @@ function BadmintonPlanner() {
       ...completedGames.filter(game => !gameMatches(game, slot, courtIdx)),
       completedRef,
     ];
-    applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount: liveGames.length });
-  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveGames, result, scores, updateScoreBase, winLoss]);
+    const targetLiveCount = targetLiveCountAfterCompletion(nextLiveGames.length, liveGames.length, liveCapacity);
+    applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount });
+  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveCapacity, liveGames, result, scores, updateScoreBase, winLoss]);
 
   const buildCopyText = useCallback(
     (mode: 'full' | 'games') => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),

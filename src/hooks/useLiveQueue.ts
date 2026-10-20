@@ -11,7 +11,7 @@ import {
   normalizeGameRefs,
 } from '../utils/liveQueue';
 import type { GameRef } from '../utils/liveQueue';
-import { getQueuePromotionDecision, reconcileLiveQueue } from '../utils/liveQueueTransition';
+import { getFutureChangeBoundary, getQueuePromotionDecision, reconcileLiveQueue } from '../utils/liveQueueTransition';
 
 interface RegenerateArgs {
   targetFromSlot: number;
@@ -131,6 +131,8 @@ export function useLiveQueue({
   regenerate,
   patchState,
 }: LiveQueueOptions) {
+  const changeSlot = getFutureChangeBoundary(liveGames, completedGames);
+  const liveCapacity = getCourtsPerSlot()[Math.min(totalSlots - 1, changeSlot - 1)] ?? 1;
   const [queueAdjustment, setQueueAdjustment] = useState<QueueAdjustmentNotice | null>(null);
   const [queuePromotionPrompt, setQueuePromotionPrompt] = useState<{
     prompt: {
@@ -199,7 +201,7 @@ export function useLiveQueue({
     return forcedCourts;
   }, [players, result]);
 
-  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: RuntimePatch = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult; queueChoice?: 'lookahead' | 'substitute'; queueGame?: GameRef | null } = {}) => {
+  const applyLiveGamesUpdate = useCallback((newLiveGames: GameRef[], changedSlot: number, newCompletedGames = completedGames, extraPatch: RuntimePatch = {}, options: { targetLiveCount?: number; suspendedPlayerNames?: string[]; overridePlayers?: Player[]; overrideResult?: PlannerResult; regenerate?: boolean; queueChoice?: 'lookahead' | 'substitute'; queueGame?: GameRef | null } = {}) => {
     const scheduleResult = options.overrideResult ?? result;
     const targetLiveCount = options.targetLiveCount ?? newLiveGames.length;
     liveQueueDebug('apply:start', {
@@ -351,7 +353,7 @@ export function useLiveQueue({
     };
 
     const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
-    const shouldRegenerate = Boolean(
+    const shouldRegenerate = options.regenerate ?? Boolean(
       nextResult && (
         options.overrideResult ||
         newCompletedGames.length > completedGames.length ||
@@ -531,6 +533,7 @@ export function useLiveQueue({
     queuePromotionPrompt,
     resolveQueuePromotion,
     cancelQueuePromotion,
+    liveCapacity,
     setPlayerJoining,
     setPlayerLeaving,
     toggleLiveGame,

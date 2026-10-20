@@ -25,6 +25,14 @@ export interface QueuePromotionDecision {
   mode: 'promote-first' | 'choose' | 'substitute-first';
 }
 
+export function getFutureChangeBoundary(liveGames: GameRef[], completedGames: GameRef[]) {
+  return Math.max(1, ...liveGames.map(game => game.slot + 1), ...completedGames.map(game => game.slot + 1));
+}
+
+export function targetLiveCountAfterCompletion(nextLiveCount: number, previousLiveCount: number, capacity: number) {
+  return Math.max(nextLiveCount, Math.min(capacity, previousLiveCount));
+}
+
 function gameKey(game: GameRef) {
   return `${game.slot}:${game.court}`;
 }

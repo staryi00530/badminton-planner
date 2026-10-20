@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BadmintonPlanner from './BadmintonPlanner';
 
@@ -252,6 +252,60 @@ describe('BadmintonPlanner live game flow', () => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
       expect(within(sectionFor('Current game')).getByText(/SLOT 1 .* COURT 2/)).toBeInTheDocument();
     });
+  });
+
+  it('updates the live player snapshot when a lineup is edited', async () => {
+    const user = userEvent.setup();
+    render(<BadmintonPlanner />);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+
+    const current = within(sectionFor('Current game'));
+    const editButton = current.getAllByTitle('Edit who plays in this slot')[0]!;
+    const card = editButton.parentElement!.parentElement!.parentElement!;
+    await user.click(editButton);
+    await user.selectOptions(within(card).getAllByRole('combobox')[0]!, 'P9');
+    await user.click(within(card).getByRole('button', { name: 'This game only' }));
+
+    expect(sectionFor('Next game')).toHaveTextContent('P9 ⏳');
+    expect(sectionFor('Next game')).not.toHaveTextContent('P1 ⏳');
+  });
+
+  it('keeps This game only edits from regenerating future games or clearing their scores', async () => {
+    const user = userEvent.setup();
+    const futureScore = { a: '21', b: '18', applied: true, teamA: ['P3', 'P7'], teamB: ['P9', 'P11'] };
+    localStorage.setItem('bp-scores', JSON.stringify({ s3c0: futureScore }));
+    render(<BadmintonPlanner />);
+    await startNextVisibleGame(user);
+    await startNextVisibleGame(user);
+
+    const before = JSON.parse(localStorage.getItem('bp-result')!);
+    const current = within(sectionFor('Current game'));
+    const editButton = current.getAllByTitle('Edit who plays in this slot')[0]!;
+    const card = editButton.parentElement!.parentElement!.parentElement!;
+    await user.click(editButton);
+    await user.selectOptions(within(card).getAllByRole('combobox')[0]!, 'P9');
+    await user.click(within(card).getByRole('button', { name: 'This game only' }));
+
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('bp-result')!).schedule[0].courts[0].teamA[0].name).toBe('P9'));
+    const after = JSON.parse(localStorage.getItem('bp-result')!);
+    expect(after.schedule[0].courts[0].teamA[0].name).toBe('P9');
+    expect(after.schedule.slice(1).map((slot: any) => slot.courts)).toEqual(before.schedule.slice(1).map((slot: any) => slot.courts));
+    expect(JSON.parse(localStorage.getItem('bp-scores')!)).toEqual({ s3c0: futureScore });
+  });
+
+  it('scores a completed court without promoting above the changed future capacity', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('bp-extraCourt', JSON.stringify({ enabled: true, startMin: 0, durationMin: 15 }));
+    render(<BadmintonPlanner />);
+    await user.click(screen.getByRole('button', { name: /Re-roll/ }));
+    await waitFor(() => expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3));
+
+    const scoreInputs = within(sectionFor('Current game')).getAllByRole('spinbutton');
+    fireEvent.change(scoreInputs[4]!, { target: { value: '21' } });
+    fireEvent.change(scoreInputs[5]!, { target: { value: '10' } });
+    await waitFor(() => expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2));
+    expect(Object.values(JSON.parse(localStorage.getItem('bp-scores')!)).some((score: any) => score.applied)).toBe(true);
   });
 
   it('keeps every other live court running when one current court is regenerated', async () => {

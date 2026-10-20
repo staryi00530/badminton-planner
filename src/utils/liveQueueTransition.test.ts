@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getQueuePromotionDecision, reconcileLiveQueue } from './liveQueueTransition';
+import { getQueuePromotionDecision, reconcileLiveQueue, targetLiveCountAfterCompletion } from './liveQueueTransition';
 
 function scheduleFor(games: Array<[number, number, string[]]>) {
   const bySlot = new Map<number, Array<string[]>>();
@@ -18,6 +18,11 @@ function scheduleFor(games: Array<[number, number, string[]]>) {
 }
 
 describe('reconcileLiveQueue', () => {
+  it('drains to changed capacity after a game completes', () => {
+    expect(targetLiveCountAfterCompletion(2, 3, 2)).toBe(2);
+    expect(targetLiveCountAfterCompletion(1, 2, 3)).toBe(2);
+  });
+
   it('offers the following playable game when the first queued game is blocked', () => {
     const decision = getQueuePromotionDecision({
       schedule: scheduleFor([
