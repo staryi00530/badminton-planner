@@ -87,8 +87,8 @@ describe('SessionSettingsPanel', () => {
   it('toggles preferMixedTeams and reflects the label', async () => {
     const user = userEvent.setup();
     const patchState = renderPanel({ preferMixedTeams: false });
-    expect(screen.getByText('Spread F')).toBeInTheDocument();
-    await user.click(screen.getByText('Spread F'));
+    expect(screen.getByText('Even F counts')).toBeInTheDocument();
+    await user.click(screen.getByText('Even F counts'));
     expect(patchState).toHaveBeenCalledWith({ preferMixedTeams: true });
   });
 

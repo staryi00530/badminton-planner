@@ -268,8 +268,8 @@ export function* generateScheduleGen(
     }
 
     // ── Court grouping ───────────────────────────────────────────────────────
-    // Goal: give the pairing optimizer a balanced gender composition per court.
-    // Normal mode  → 2F+2M per court  (enables MF vs MF)
+    // Goal: avoid 1F+3M and 3F+1M courts when an even composition is possible.
+    // Normal mode  → 2F+2M, 4F, or 4M per court
     // WD mode      → 4F on one court, rest get 4M (enables FF vs FF + MM vs MM)
     //   WD mode activates when: wdTarget not met AND ≥4F selected AND ≥2 courts
     //   so that grouping an all-female court is possible without leaving a
@@ -298,17 +298,12 @@ export function* generateScheduleGen(
       }
     } else {
       for (let c = 0; c < actualCourts; c++) {
-        const courtsLeft = actualCourts - c;
-        const fPerCourt = courtsLeft > 0 ? Math.ceil(remF.length / courtsLeft) : 0;
-        if (fPerCourt >= 2 && remF.length >= 2 && remM.length >= 2) {
+        if (remF.length >= 2 && remM.length >= 2) {
           // 2F+2M: enables MF vs MF
           courtGroups.push([...remF.splice(0, 2), ...remM.splice(0, 2)]);
         } else if (remF.length >= 4) {
           // All-female court
           courtGroups.push(remF.splice(0, 4));
-        } else if (fPerCourt >= 1 && remM.length >= 3 && !options.preferMixedTeams) {
-          // 1F+3M: spread females evenly across courts instead of packing into court 0
-          courtGroups.push([remF.splice(0, 1)[0]!, ...remM.splice(0, 3)]);
         } else {
           courtGroups.push(takeGroup());
         }
@@ -502,6 +497,7 @@ export function* generateScheduleGen(
         score += (opponentCount[tA[1]]![tB[0]] ?? 0) + (opponentCount[tA[1]]![tB[1]] ?? 0);
         // Penalise unbalanced gender matchups (MF vs MM, MF vs FF, MM vs FF).
         if (genderType(tA) !== genderType(tB)) score += 15;
+        if (options.preferMixedTeams && (genderType(tA) !== 'MF' || genderType(tB) !== 'MF')) score += 30;
         const skillA = (players[tA[0]]!.skill ?? 0.5) + (players[tA[1]]!.skill ?? 0.5);
         const skillB = (players[tB[0]]!.skill ?? 0.5) + (players[tB[1]]!.skill ?? 0.5);
         score += Math.abs(skillA - skillB) * 2;

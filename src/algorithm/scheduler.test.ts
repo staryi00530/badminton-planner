@@ -240,6 +240,30 @@ describe('No player rests more than 2 consecutive slots when pool allows', () =>
 });
 
 describe('Gender balance — even female count per court', () => {
+  it('keeps two-female rosters from splitting into two 1F+3M courts when 2F+2M and 4M courts are possible', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const players = makePlayers(8, 2, 1);
+      const result = generateSchedule(players, 1, [2], 0, null, null, {}, seededRng(seed));
+
+      expect(result).not.toBeNull();
+      for (const court of result!.schedule[0]!.courts) {
+        const femaleCount = [...court.teamA, ...court.teamB].filter(player => player.gender === 'F').length;
+        expect(femaleCount % 2, `Seed ${seed}, court ${court.court} has an odd female count (${femaleCount})`).toBe(0);
+      }
+    }
+  });
+
+  it('honors mixed-team preference by pairing one female player on each side', () => {
+    const players = makePlayers(4, 2, 1);
+    const result = generateSchedule(players, 1, [1], 0, null, null, { preferMixedTeams: true }, seededRng(9));
+
+    expect(result).not.toBeNull();
+    const court = result!.schedule[0]!.courts[0]!;
+    for (const team of [court.teamA, court.teamB]) {
+      expect(team.filter(player => player.gender === 'F')).toHaveLength(1);
+    }
+  });
+
   it('8 players with 4 females, 1 court: each court has 0, 2, or 4 females', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const players = makePlayers(8, 4, 12);

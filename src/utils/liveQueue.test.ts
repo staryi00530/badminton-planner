@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { contiguousGamesForSlot, firstIncompleteSlot, initialLiveGamesForSchedule, keepGamesBeforeSlot, isSlotCompleted, normalizeGameRefs } from './liveQueue';
+import { contiguousGamesForSlot, exportLiveQueueLogs, firstIncompleteSlot, initialLiveGamesForSchedule, keepGamesBeforeSlot, isSlotCompleted, liveQueueDebug, normalizeGameRefs } from './liveQueue';
 
 const schedule = [
   { slot: 1, courts: [{}, {}] },
@@ -7,6 +8,15 @@ const schedule = [
 ];
 
 describe('live queue helpers', () => {
+  it('captures debug events by default without an opt-in flag', () => {
+    localStorage.removeItem('bp-debug-live-queue');
+    const marker = `default-capture-${Date.now()}`;
+    liveQueueDebug(marker, { action: 'test' });
+
+    const exported = JSON.parse(exportLiveQueueLogs());
+    expect(exported.logs).toContainEqual(expect.objectContaining({ label: marker, details: { action: 'test' } }));
+  });
+
   it('keeps only status references before a regenerated slot', () => {
     expect(keepGamesBeforeSlot([{ slot: 1, court: 0 }, { slot: 2, court: 0 }], 2))
       .toEqual([{ slot: 1, court: 0 }]);

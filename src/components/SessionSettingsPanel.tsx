@@ -112,9 +112,9 @@ export default function SessionSettingsPanel({
           <label style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mixed teams</label>
           <div style={{ marginTop: 4 }}>
             <button onClick={() => patchState({ preferMixedTeams: !preferMixedTeams })}
-              title={preferMixedTeams ? 'Each game has 1F+1M per side (2F per court)' : 'Females spread evenly across courts (1F per court when outnumbered)'}
+              title={preferMixedTeams ? 'Prefer 1F+1M on each side when the court has 2F+2M' : 'Avoid 3F+1M and 1F+3M courts when an even group is possible'}
               style={{ background: preferMixedTeams ? C.pinkDim : C.card, color: preferMixedTeams ? '#fff' : C.textDim, border: `1px solid ${preferMixedTeams ? C.pinkDim : C.border}`, borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, fontFamily: FONT }}>
-              {preferMixedTeams ? '1F+1M / side' : 'Spread F'}
+              {preferMixedTeams ? '1F+1M / side' : 'Even F counts'}
             </button>
           </div>
         </div>

@@ -10,10 +10,9 @@ const LIVE_QUEUE_LOG_LIMIT = 500;
 const liveQueueLogBuffer: Array<{ timestamp: string; label: string; details: Record<string, unknown> }> = [];
 
 export function liveQueueDebug(label: string, details: Record<string, unknown> = {}) {
-  if (typeof window === 'undefined' || window.localStorage?.getItem('bp-debug-live-queue') !== 'true') return;
+  if (typeof window === 'undefined') return;
   liveQueueLogBuffer.push({ timestamp: new Date().toISOString(), label, details });
   if (liveQueueLogBuffer.length > LIVE_QUEUE_LOG_LIMIT) liveQueueLogBuffer.shift();
-  console.log(`[live-queue] ${label}`, JSON.stringify(details));
 }
 
 export function exportLiveQueueLogs() {

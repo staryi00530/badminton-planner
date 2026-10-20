@@ -90,7 +90,6 @@ function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, e
 function BadmintonPlanner() {
   const { state, setField, patchState, recordUndo, restoreUndo } = usePlannerState();
   const scheduleRef = useRef<HTMLDivElement | null>(null);
-  const [debugQueueEnabled] = useState(() => typeof window !== 'undefined' && window.localStorage?.getItem('bp-debug-live-queue') === 'true');
   const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
   const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
 
@@ -829,8 +828,8 @@ function BadmintonPlanner() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+            <button onClick={exportDebugLogs} title="Download locally captured live-session debug logs" aria-label="Download debug logs" style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}><LucideIcon name="download" size={13} /> Logs</button>
             {selectedTab === 'setup' && <>
-            {debugQueueEnabled && <button onClick={exportDebugLogs} title="Download live queue debug logs" aria-label="Export debug logs" style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}><LucideIcon name="download" size={13} /> Debug</button>}
             {!isSharedSession && <button onClick={() => {
               if (privateLevelsVisible) {
                 setPrivateLevelsVisible(false);

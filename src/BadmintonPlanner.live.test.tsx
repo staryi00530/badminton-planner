@@ -735,13 +735,14 @@ describe('BadmintonPlanner live game flow', () => {
 
   it('keeps setup and admin controls off Live and one navigation action away', async () => {
     const user = userEvent.setup();
-    localStorage.setItem('bp-debug-live-queue', 'true');
     render(<BadmintonPlanner />);
+
+    expect(screen.getByRole('button', { name: 'Download debug logs' })).toBeVisible();
 
     expect(screen.queryByText('Session settings')).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Preferred pairing first player')).not.toBeInTheDocument();
-    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view', 'Export debug logs']) {
+    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view']) {
       expect(screen.queryByRole('button', { name, exact: true })).not.toBeInTheDocument();
     }
     expect(screen.queryByText('Re-generate from slot')).not.toBeInTheDocument();
@@ -749,7 +750,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
-    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view', 'Export debug logs']) {
+    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view']) {
       expect(screen.getByRole('button', { name, exact: true })).toBeVisible();
     }
     expect(screen.getByText('Re-generate from slot')).toBeVisible();
@@ -809,13 +810,12 @@ describe('BadmintonPlanner live game flow', () => {
 
   it.each(['Past games', 'Saved plans', 'How it works'])('does not expose setup controls on %s', async name => {
     const user = userEvent.setup();
-    localStorage.setItem('bp-debug-live-queue', 'true');
     render(<BadmintonPlanner />);
     await user.click(screen.getByRole('button', { name, exact: true }));
     expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Admin view', exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Export debug logs' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download debug logs' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     expect(screen.getByRole('button', { name: 'Re-roll' })).toBeVisible();
   });
