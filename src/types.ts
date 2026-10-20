@@ -67,6 +67,7 @@ export interface QueueRuntimeState {
   } | null;
   queueAdjustment: QueueAdjustmentNotice | null;
   queuePromotionPrompt: {
+    flowId?: string;
     prompt: {
       completedCourt: number;
       firstGame: { slot: number; court: number; players: string[] };

@@ -221,6 +221,56 @@ describe('BadmintonPlanner live game flow', () => {
       expect(undo()).toBeDisabled();
     });
 
+    it('updates a live game snapshot when its lineup is edited', async () => {
+      const user = userEvent.setup();
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      await startNextVisibleGame(user);
+
+      const firstLane = within(sectionFor('Current game')).getByRole('region', { name: 'Court 1', exact: true });
+      await user.click(within(firstLane).getByTitle('Edit who plays in this slot'));
+      await user.selectOptions(within(firstLane).getAllByRole('combobox')[0]!, 'P9');
+      await user.click(within(firstLane).getByRole('button', { name: 'This game only' }));
+      expect(firstLane).toHaveTextContent('P9');
+      expect(sectionFor('Next game')).toHaveTextContent('P9 ⏳');
+
+      await user.click(undo());
+      expect(firstLane).toHaveTextContent('P1');
+      expect(sectionFor('Next game')).toHaveTextContent('P1 ⏳');
+      await user.selectOptions(within(firstLane).getAllByRole('combobox')[0]!, 'P9');
+      await user.click(within(firstLane).getByRole('button', { name: 'This game only' }));
+      expect(firstLane).not.toHaveTextContent('P1');
+
+      await user.click(within(firstLane).getByRole('button', { name: 'Finish game' }));
+      const substitute = screen.queryByRole('button', { name: 'Substitute unavailable players' });
+      if (substitute) await user.click(substitute);
+      await user.click(screen.getByRole('button', { name: /Past games/ }));
+      const game = screen.getByText(/Game 1 · Slot 1 · Court 1/).parentElement!.parentElement!;
+      expect(game).toHaveTextContent('P9');
+      expect(game).not.toHaveTextContent('P1');
+    });
+
+    it('keeps a This game only edit local to its slot and preserves future scores', async () => {
+      const user = userEvent.setup();
+      const futureScore = { a: '21', b: '18', applied: true, teamA: ['P3', 'P7'], teamB: ['P9', 'P11'] };
+      localStorage.setItem('bp-scores', JSON.stringify({ s3c0: futureScore }));
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      await startNextVisibleGame(user);
+
+      const before = stored('bp-result');
+      const firstLane = screen.getByRole('region', { name: 'Court 1', exact: true });
+      await user.click(within(firstLane).getByTitle('Edit who plays in this slot'));
+      await user.selectOptions(within(firstLane).getAllByRole('combobox')[0]!, 'P9');
+      await user.click(within(firstLane).getByRole('button', { name: 'This game only' }));
+
+      const after = stored('bp-result');
+      expect(after.schedule[0].courts[0].teamA[0].name).toBe('P9');
+      expect(after.schedule.slice(1).map((slot: any) => slot.courts)).toEqual(before.schedule.slice(1).map((slot: any) => slot.courts));
+      expect(stored('bp-scores')).toEqual({ s3c0: futureScore });
+      expect(undo()).toBeEnabled();
+    });
+
     it('undoes a scored finish together with win/loss and automatic promotion', async () => {
       const user = userEvent.setup();
       localStorage.setItem('bp-scores', JSON.stringify({ s1c0: { a: '21', b: '', applied: false, teamA: ['P1', 'P2'], teamB: ['P3', 'P4'] } }));
@@ -390,6 +440,34 @@ describe('BadmintonPlanner live game flow', () => {
       await user.click(screen.getByRole('button', { name: 'Past games (1)' }));
       expect(screen.getByText(/Game 1.*Slot 1.*Court 1/)).toBeInTheDocument();
       expect(screen.getByText('21–17')).toBeInTheDocument();
+    });
+
+    it('drains to reduced capacity when a live game is completed by score', async () => {
+      const user = userEvent.setup();
+      seed(3);
+      render(<BadmintonPlanner />);
+      await start(user, 3);
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+
+      await user.click(screen.getByRole('button', { name: 'Remove court' }));
+      expect(stored('bp-courtOverrides')).toEqual({ 2: 2 });
+      const firstLane = lane(1);
+      const scores = within(firstLane).getAllByRole('spinbutton');
+      fireEvent.change(scores[0]!, { target: { value: '21' } });
+      fireEvent.change(scores[1]!, { target: { value: '10' } });
+
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
+      expect(stored('bp-scores').s1c0).toMatchObject({ a: '21', b: '10', applied: true });
+      expect(stored('bp-winloss')).toEqual(expect.any(Object));
+      const afterScore = stored('bp-scores');
+      const afterWinLoss = stored('bp-winloss');
+
+      await user.click(screen.getByRole('button', { name: 'Undo last action' }));
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+      expect(stored('bp-courtOverrides')).toEqual({ 2: 2 });
+      expect(stored('bp-scores').s1c0).toMatchObject({ applied: false });
+      expect(stored('bp-winloss')).not.toEqual(afterWinLoss);
+      expect(stored('bp-scores')).not.toEqual(afterScore);
     });
 
     describe.each(['Setup Apply', 'Add court', 'Remove court'] as const)('confirmed %s auto-archive', command => {

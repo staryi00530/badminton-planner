@@ -118,10 +118,15 @@ describe('ScheduleGrid integration with live presentation', () => {
   it('fills the next queue to the planned court count across future slots', () => {
     renderGrid({ liveCapacity: 3 });
 
+    const current = sectionFor('Current game');
+    expect(within(current).getByText(/SLOT 2 .* COURT 1/)).toBeInTheDocument();
+    expect(within(current).getByText(/SLOT 2 .* COURT 2/)).toBeInTheDocument();
+    expect(within(current).getByText(/SLOT 3 .* COURT 1/)).toBeInTheDocument();
     const next = sectionFor('Next game');
-    expect(within(next).getByText(/SLOT 2 .* COURT 2/)).toBeInTheDocument();
-    expect(within(next).getByText(/SLOT 3 .* COURT 1/)).toBeInTheDocument();
+    expect(within(next).getAllByRole('button', { name: 'Start game' })).toHaveLength(3);
     expect(within(next).getByText(/SLOT 3 .* COURT 2/)).toBeInTheDocument();
+    expect(within(next).getByText(/SLOT 4 .* COURT 1/)).toBeInTheDocument();
+    expect(within(next).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
   });
 
   it('renders the full schedule and history without owning the live layout', () => {
@@ -136,12 +141,4 @@ describe('ScheduleGrid integration with live presentation', () => {
     expect(within(future).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
   });
 
-  it('fills the next queue to the planned court count across future slots', () => {
-    renderGrid({ liveCapacity: 3 });
-
-    const next = sectionFor('Next game');
-    expect(within(next).getByText(/SLOT 2 .* COURT 1/)).toBeInTheDocument();
-    expect(within(next).getByText(/SLOT 2 .* COURT 2/)).toBeInTheDocument();
-    expect(within(next).getByText(/SLOT 3 .* COURT 1/)).toBeInTheDocument();
-  });
 });

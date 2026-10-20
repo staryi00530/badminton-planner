@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
+import type { SlotResult } from '../algorithm/types';
 import { C, FONT } from '../constants';
+import { liveQueueDebug } from '../utils/liveQueue';
 import type { StaggerMode } from '../types';
 import { LucideIcon } from './PlannerModals';
 import { SessionSummary } from './SessionStatusPanel';
@@ -21,7 +24,10 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
     return slot?.courts[ref.court] ? [{ slot, court: ref.court, displayCourt: ref.displayCourt ?? ref.court, ref }] : [];
   });
   const liveKeys = new Set(live.map(game => key(game.slot.slot, game.court)));
-  const pending = allGames.filter(game => !completed.has(key(game.slot.slot, game.court)) && !liveKeys.has(key(game.slot.slot, game.court)));
+  const firstVisibleSlot = Math.min(fromSlot, ...live.map(game => game.slot.slot));
+  const pending = allGames.filter(game => game.slot.slot >= firstVisibleSlot
+    && !completed.has(key(game.slot.slot, game.court))
+    && !liveKeys.has(key(game.slot.slot, game.court)));
   const plannedCapacity = props.liveCapacity ?? Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const capacity = Number.isFinite(plannedCapacity) ? plannedCapacity : 5;
   const changeSlot = props.changeSlot ?? fromSlot;
@@ -76,6 +82,45 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
       : live.length > 0
         ? 'Games are live. Select Finish game on the court when its game is over.'
         : 'No more games. The session is complete.';
+  useEffect(() => {
+    const describe = (game: { slot: SlotResult; court: number }) => {
+      const court = game.slot.courts[game.court];
+      return {
+        slot: game.slot.slot,
+        court: game.court + 1,
+        players: court ? [...court.teamA, ...court.teamB].map(player => player.name) : [],
+      };
+    };
+    liveQueueDebug('board:render', {
+      fromSlot,
+      changeSlot,
+      plannedCapacity: capacity,
+      liveCount: live.length,
+      liveGames: live.map(game => ({
+        ...describe(game),
+        displayCourt: game.displayCourt + 1,
+        playerSnapshot: game.ref.players ?? null,
+      })),
+      completedGames: completedGames.map(game => ({ slot: game.slot, court: game.court + 1, players: game.players ?? null })),
+      upcomingSlot: upcomingSlot?.slot ?? null,
+      nextGames: nextGames.map(describe),
+      waitingGames: pending.filter(game => waitingReason(game).length > 0).slice(0, 8).map(game => ({ ...describe(game), reason: waitingReason(game) })),
+      slotProgress: result.schedule
+        .filter(slot => slot.slot >= Math.max(1, Math.min(fromSlot, changeSlot) - 1) && slot.slot <= Math.max(fromSlot, changeSlot) + 2)
+        .map(slot => ({
+          slot: slot.slot,
+          courtCount: slot.courts.length,
+          completed: slot.courts.filter((_, court) => completed.has(key(slot.slot, court))).length,
+          live: slot.courts.filter((_, court) => liveKeys.has(key(slot.slot, court))).length,
+        })),
+      queueAdjustment: queueAdjustment ? {
+        queuedGame: queueAdjustment.queuedGame,
+        promotedGame: queueAdjustment.promotedGame,
+        unavailablePlayers: queueAdjustment.unavailablePlayers,
+        replacements: queueAdjustment.replacements,
+      } : null,
+    });
+  }, [capacity, changeSlot, completedGames, fromSlot, liveGames, queueAdjustment, result.schedule]);
   const gameProps = { ...props, blockedPlayerNames };
   return <div ref={props.scheduleRef} role="region" aria-label="Live session board" style={{ minWidth: 0, marginBottom: 24 }}>
     <SessionSummary players={props.players} liveGames={liveGames} completedGames={completedGames} result={result} fromSlot={fromSlot} staggerMode={props.staggerMode ?? 'none'} />
