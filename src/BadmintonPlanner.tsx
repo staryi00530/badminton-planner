@@ -828,7 +828,7 @@ function BadmintonPlanner() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
-            <button onClick={exportDebugLogs} title="Download locally captured live-session debug logs" aria-label="Download debug logs" style={{ display: 'flex', alignItems: 'center', gap: 5, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}><LucideIcon name="download" size={13} /> Logs</button>
+            <button onClick={exportDebugLogs} title="Download debug logs" aria-label="Download debug logs" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, width: 30, height: 28, padding: 0 }}><LucideIcon name="download" size={14} /></button>
             {selectedTab === 'setup' && <>
             {!isSharedSession && <button onClick={() => {
               if (privateLevelsVisible) {
