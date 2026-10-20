@@ -7,7 +7,7 @@ import { useLiveQueue } from './useLiveQueue';
 import { generateSchedule } from '../algorithm/scheduler';
 import { applyAvailability } from '../utils/availability';
 import { computeCourtsPerSlot } from '../utils/courtsPerSlot';
-import { initialLiveGamesForSchedule, keepGamesBeforeSlot } from '../utils/liveQueue';
+import { exportLiveQueueLogs, initialLiveGamesForSchedule, keepGamesBeforeSlot } from '../utils/liveQueue';
 import type { Player } from '../algorithm/types';
 
 const roster: Player[] = Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', level: 2, availFrom: 0, availTo: 5 }));
@@ -42,6 +42,59 @@ function session(courts = 3, players = roster, regenerationFails = false) {
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 describe('useLiveQueue future session changes with the real scheduler', () => {
+  it('logs the roster attributes used for the initial schedule', () => {
+    const players = roster.map((player, index) => index === 0
+      ? { ...player, gender: 'F' as const, level: 3 as const, availFrom: 2, availTo: 5 }
+      : player);
+    const { result } = session(2, players);
+    const requestFrame = window.requestAnimationFrame;
+    window.requestAnimationFrame = callback => {
+      callback(0);
+      return 0;
+    };
+
+    try {
+      act(() => result.current.actions.runGenerate());
+    } finally {
+      window.requestAnimationFrame = requestFrame;
+    }
+
+    const logs = JSON.parse(exportLiveQueueLogs()).logs;
+    expect(logs).toContainEqual(expect.objectContaining({
+      label: 'roster:snapshot',
+      details: expect.objectContaining({
+        phase: 'initial-generation',
+        fromSlot: 1,
+        players: expect.arrayContaining([
+          { name: 'P1', gender: 'F', level: 3, availFrom: 2, availTo: 5 },
+          { name: 'P2', gender: 'M', level: 2, availFrom: 0, availTo: 5 },
+        ]),
+      }),
+    }));
+  });
+
+  it('logs the roster attributes used for a regenerated schedule', () => {
+    const players = roster.map((player, index) => index === 0
+      ? { ...player, gender: 'F' as const, level: 3 as const, availFrom: 2, availTo: 5 }
+      : player);
+    const { result } = session(2, players);
+
+    act(() => result.current.actions.doRegen(2, null));
+
+    const logs = JSON.parse(exportLiveQueueLogs()).logs;
+    expect(logs).toContainEqual(expect.objectContaining({
+      label: 'roster:snapshot',
+      details: expect.objectContaining({
+        phase: 'regeneration',
+        fromSlot: 2,
+        players: expect.arrayContaining([
+          { name: 'P1', gender: 'F', level: 3, availFrom: 2, availTo: 5 },
+          { name: 'P2', gender: 'M', level: 2, availFrom: 0, availTo: 5 },
+        ]),
+      }),
+    }));
+  });
+
   it.each(['finish', 'start', 'leaving', 'joining', 'back', 'suspend', 'add court', 'remove court', 'regenerate', 'setup regenerate'])(
     'undo restores the exact runtime before %s', action => {
       const { result } = session(2);

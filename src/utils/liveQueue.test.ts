@@ -17,6 +17,14 @@ describe('live queue helpers', () => {
     expect(exported.logs).toContainEqual(expect.objectContaining({ label: marker, details: { action: 'test' } }));
   });
 
+  it('identifies the app build in each debug export', () => {
+    expect(JSON.parse(exportLiveQueueLogs())).toEqual(expect.objectContaining({
+      exportedAt: expect.any(String),
+      buildTime: expect.any(String),
+      logs: expect.any(Array),
+    }));
+  });
+
   it('keeps only status references before a regenerated slot', () => {
     expect(keepGamesBeforeSlot([{ slot: 1, court: 0 }, { slot: 2, court: 0 }], 2))
       .toEqual([{ slot: 1, court: 0 }]);

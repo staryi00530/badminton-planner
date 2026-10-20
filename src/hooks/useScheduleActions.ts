@@ -3,7 +3,7 @@ import type { ForcedFirstSlot, GeneratorYield, Player } from '../algorithm/types
 import { extractState, generateSchedule, generateScheduleGen } from '../algorithm/scheduler';
 import type { ScheduleOptions } from '../algorithm/scheduler';
 import type { PlannerResult, PlannerState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
-import { initialLiveGamesForSchedule } from '../utils/liveQueue';
+import { initialLiveGamesForSchedule, liveQueueDebug } from '../utils/liveQueue';
 import { getFutureChangeBoundary, reconcileFutureSessionChange } from '../utils/liveQueueTransition';
 
 interface RegeneratedPlan {
@@ -34,6 +34,20 @@ interface ScheduleActionOptions {
   keepGamesBeforeSlot: (games: PlannerState['liveGames'], slot: number) => PlannerState['liveGames'];
 }
 
+function logRosterSnapshot(players: Player[], phase: 'initial-generation' | 'regeneration', fromSlot: number) {
+  liveQueueDebug('roster:snapshot', {
+    phase,
+    fromSlot,
+    players: players.map(({ name, gender, level, availFrom, availTo }) => ({
+      name,
+      gender,
+      level: level ?? null,
+      availFrom,
+      availTo,
+    })),
+  });
+}
+
 export function useScheduleActions({
   recordUndo,
   players,
@@ -60,6 +74,7 @@ export function useScheduleActions({
     if (players.length < 4 || isGenerating) return;
     patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1, fromSlotCourts: 0, courtOverrides: {} });
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
+    logRosterSnapshot(playersWithSkill, 'initial-generation', 1);
     const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot({}), 0, null, null, getScheduleOptions(playersWithSkill));
     let lastValue: GeneratorYield | null = null;
     function step() {
@@ -131,6 +146,7 @@ export function useScheduleActions({
       return (prior * 3 + (wl!.wins / games) * games) / (3 + games);
     };
     const playersWithSkill = applyAvailability(basePlayers).map(p => ({ ...p, skill: skillFor(p.name, p.level), ...(blockedForFirstSlot.has(p.name) && targetSlotIdx >= p.availFrom && targetSlotIdx <= p.availTo ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}) }));
+    logRosterSnapshot(playersWithSkill, 'regeneration', targetFromSlot);
     const keptSlots = baseResult.schedule.slice(0, targetFromSlot - 1);
     const stateSnapshot = extractState(keptSlots, playersWithSkill);
     const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(overrideCourtOverrides), targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));

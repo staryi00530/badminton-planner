@@ -16,7 +16,7 @@ export function liveQueueDebug(label: string, details: Record<string, unknown> =
 }
 
 export function exportLiveQueueLogs() {
-  return JSON.stringify({ exportedAt: new Date().toISOString(), logs: liveQueueLogBuffer }, null, 2);
+  return JSON.stringify({ exportedAt: new Date().toISOString(), buildTime: typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : 'unknown', logs: liveQueueLogBuffer }, null, 2);
 }
 
 export function gameMatches(game: GameRef, slot: number, court: number) {
