@@ -107,9 +107,25 @@ export default function ScheduleGrid({
     liveGames: liveGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, displayCourt: ref.game.displayCourt, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
     completedGames: completedGames.map(game => ({ slot: game.slot, court: game.court + 1 })),
     fromSlot,
-    current: currentGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court })),
+    queueStartSlot: queueStartSlot,
+    liveCapacity,
+    slotProgress: result.schedule
+      .filter(slot => slot.slot >= Math.max(1, queueStartSlot - 1) && slot.slot <= queueStartSlot + 2)
+      .map(slot => ({
+        slot: slot.slot,
+        courtCount: slot.courts.length,
+        completed: slot.courts.filter((_, court) => completedKeys.has(gameKey(slot.slot, court))).length,
+        live: slot.courts.filter((_, court) => currentGameKeys.has(gameKey(slot.slot, court))).length,
+      })),
+    current: currentGameRefs.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, displayCourt: ref.game?.displayCourt })),
     next: nextFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
     future: foldedFutureGames.map(ref => ({ slot: ref.slot.slot, court: ref.court + 1, players: [...(ref.slot.courts[ref.court]?.teamA ?? []), ...(ref.slot.courts[ref.court]?.teamB ?? [])].map(player => player.name) })),
+    queueAdjustment: queueAdjustment ? {
+      queuedGame: queueAdjustment.queuedGame,
+      promotedGame: queueAdjustment.promotedGame,
+      unavailablePlayers: queueAdjustment.unavailablePlayers,
+      replacements: queueAdjustment.replacements,
+    } : null,
   });
   const courtCount = Math.max(0, ...result.schedule.map(slot => slot.courts.length));
   const courtStatuses = Array.from({ length: courtCount }, (_, ci) => {
