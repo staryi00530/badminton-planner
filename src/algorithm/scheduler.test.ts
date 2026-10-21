@@ -125,6 +125,19 @@ describe('Preferred pairings', () => {
     const courts = result!.schedule[0]!.courts;
     expect(courts.some(court => [...court.teamA, ...court.teamB].some(a => a.name === 'P1') && [...court.teamA, ...court.teamB].some(b => b.name === 'P5'))).toBe(true);
   });
+
+  it('keeps a preferred pair together through later court-level balancing', () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const players = makePlayers(8, 4, 1).map((player, index) => ({
+        ...player,
+        name: index === 0 ? 'Yiwei (F)' : index === 4 ? 'Siya' : player.name,
+        level: ((index * seed + Math.floor(seed / 2)) % 3 + 1) as 1 | 2 | 3,
+      }));
+      const result = generateSchedule(players, 1, [2], 0, null, null, { preferredPairs: [[0, 4]] }, seededRng(seed));
+      const courts = result!.schedule[0]!.courts;
+      expect(courts.some(court => [court.teamA, court.teamB].some(team => team.some(player => player.name === 'Yiwei (F)') && team.some(player => player.name === 'Siya'))), `seed ${seed}`).toBe(true);
+    }
+  });
 });
 
 describe('Level balancing', () => {

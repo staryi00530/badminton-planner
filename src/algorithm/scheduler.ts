@@ -400,12 +400,18 @@ export function* generateScheduleGen(
         return Math.max(...levels) - Math.min(...levels);
       };
       const totalSpan = () => courtGroups.reduce((sum, group) => sum + groupSpan(group), 0);
+      const splitPreferredPairs = () => (options.preferredPairs ?? []).filter(([first, second]) => {
+        const firstGroup = courtGroups.findIndex(group => group.includes(first));
+        const secondGroup = courtGroups.findIndex(group => group.includes(second));
+        return firstGroup >= 0 && secondGroup >= 0 && firstGroup !== secondGroup;
+      }).length;
 
       for (let pass = 0; pass < courtGroups.length; pass++) {
         let improved = false;
         for (let a = 0; a < courtGroups.length; a++) {
           for (let b = a + 1; b < courtGroups.length; b++) {
             const before = totalSpan();
+            const beforeSplitPreferredPairs = splitPreferredPairs();
             // A single swap cannot improve two equally mixed courts. Try
             // exchanging two same-gender players first so those courts can
             // become level-homogeneous when the roster permits it.
@@ -424,7 +430,7 @@ export function* generateScheduleGen(
                     courtGroups[a]![ai2] = right2;
                     courtGroups[b]![bi1] = left1;
                     courtGroups[b]![bi2] = left2;
-                    if (totalSpan() < before) {
+                    if (totalSpan() < before && splitPreferredPairs() <= beforeSplitPreferredPairs) {
                       improved = true;
                       break;
                     }
@@ -444,7 +450,7 @@ export function* generateScheduleGen(
                 if (players[left]!.gender !== players[right]!.gender) continue;
                 courtGroups[a]![ai] = right;
                 courtGroups[b]![bi] = left;
-                if (totalSpan() < before) {
+                if (totalSpan() < before && splitPreferredPairs() <= beforeSplitPreferredPairs) {
                   improved = true;
                   break;
                 }
@@ -476,9 +482,12 @@ export function* generateScheduleGen(
         const currentGroup = courtGroups[ci]!;
         if (!courtGroupHistory.has(groupKey(currentGroup))) continue;
         let fixed = false;
+        const protectedPreferredPlayers = new Set((options.preferredPairs ?? [])
+          .filter(([first, second]) => currentGroup.includes(first) && currentGroup.includes(second))
+          .flatMap(([first, second]) => [first, second]));
         const swappable = currentGroup
           .map((pid, pos) => ({ pid, pos }))
-          .filter(({ pid }) => !mustPlay.includes(pid));
+          .filter(({ pid }) => !mustPlay.includes(pid) && !protectedPreferredPlayers.has(pid));
 
         // 1. Try swapping 2 players first (game feels more different)
         outer2: for (let s1 = 0; s1 < allSubs.length; s1++) {
@@ -555,8 +564,8 @@ export function* generateScheduleGen(
         let score = 0;
         score += (partnerCount[tA[0]]![tA[1]] ?? 0) * 3;
         score += (partnerCount[tB[0]]![tB[1]] ?? 0) * 3;
-        if (preferredPairKeys.has(`${Math.min(tA[0], tA[1])}:${Math.max(tA[0], tA[1])}`)) score -= 100;
-        if (preferredPairKeys.has(`${Math.min(tB[0], tB[1])}:${Math.max(tB[0], tB[1])}`)) score -= 100;
+        if (preferredPairKeys.has(`${Math.min(tA[0], tA[1])}:${Math.max(tA[0], tA[1])}`)) score -= 1000;
+        if (preferredPairKeys.has(`${Math.min(tB[0], tB[1])}:${Math.max(tB[0], tB[1])}`)) score -= 1000;
         score += (opponentCount[tA[0]]![tB[0]] ?? 0) + (opponentCount[tA[0]]![tB[1]] ?? 0);
         score += (opponentCount[tA[1]]![tB[0]] ?? 0) + (opponentCount[tA[1]]![tB[1]] ?? 0);
         // Penalise unbalanced gender matchups (MF vs MM, MF vs FF, MM vs FF).

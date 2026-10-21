@@ -990,7 +990,7 @@ function BadmintonPlanner() {
 
         {result && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
-            {scheduleDirty && <span style={{ width: '100%', color: C.amber, fontSize: 12 }}>Roster changed — choose the first affected slot below, then apply regeneration to update the remaining schedule.</span>}
+            {scheduleDirty && <span style={{ width: '100%', color: C.amber, fontSize: 12 }}>Roster or scheduling preferences changed — choose the first affected slot below, then apply regeneration to update upcoming games.</span>}
             <span style={{ fontSize: 12, color: C.textDim }}>Re-generate from slot</span>
             <input aria-label="Regenerate from slot" type="number" min={changeSlot} max={totalSlots} disabled={changeSlot > totalSlots} value={Math.max(changeSlot, fromSlot)} onChange={e => patchState({ fromSlot: Math.min(totalSlots, Math.max(changeSlot, +e.target.value)) })} style={{ width: 48, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', color: C.text, fontSize: 13, fontFamily: FONT, textAlign: 'center' }} />
             <span style={{ fontSize: 12, color: C.textDim }}>with</span>
