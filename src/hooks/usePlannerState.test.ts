@@ -116,6 +116,44 @@ describe('usePlannerState — dispatch', () => {
 });
 
 describe('usePlannerState — persistence to localStorage', () => {
+  it('hydrates live/completed game snapshots and suspended players only when a result exists', () => {
+    const liveGames = [{ slot: 2, court: 1, displayCourt: 3, players: ['Alice', 'Bea', 'Cleo', 'Dee'] }];
+    const completedGames = [{ slot: 1, court: 0, players: ['Eli', 'Fran', 'Gia', 'Hal'] }];
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    localStorage.setItem('bp-live-games', JSON.stringify(liveGames));
+    localStorage.setItem('bp-completed-games', JSON.stringify(completedGames));
+    localStorage.setItem('bp-suspended-player-names', JSON.stringify(['Alice']));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.liveGames).toEqual(liveGames);
+    expect(result.current.state.completedGames).toEqual(completedGames);
+    expect(result.current.state.suspendedPlayerNames).toEqual(['Alice']);
+  });
+
+  it('persists queue updates and player snapshots after a result exists', () => {
+    const { result, unmount } = renderHook(() => usePlannerState());
+    const liveGames = [{ slot: 2, court: 0, players: ['Alice', 'Bea', 'Cleo', 'Dee'] }];
+    const completedGames = [{ slot: 1, court: 0, players: ['Eli', 'Fran', 'Gia', 'Hal'] }];
+    act(() => result.current.patchState({ result: { schedule: [], gamesPlayed: [] }, liveGames, completedGames, suspendedPlayerNames: ['Alice'] }));
+    expect(JSON.parse(localStorage.getItem('bp-live-games')!)).toEqual(liveGames);
+    expect(JSON.parse(localStorage.getItem('bp-completed-games')!)).toEqual(completedGames);
+    expect(JSON.parse(localStorage.getItem('bp-suspended-player-names')!)).toEqual(['Alice']);
+    unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.liveGames).toEqual(liveGames);
+    expect(reloaded.result.current.state.completedGames).toEqual(completedGames);
+    expect(reloaded.result.current.state.suspendedPlayerNames).toEqual(['Alice']);
+  });
+
+  it('does not hydrate stale queue data without a persisted result', () => {
+    localStorage.setItem('bp-live-games', JSON.stringify([{ slot: 9, court: 0, players: ['Old'] }]));
+    localStorage.setItem('bp-completed-games', JSON.stringify([{ slot: 8, court: 0, players: ['Older'] }]));
+    localStorage.setItem('bp-suspended-player-names', JSON.stringify(['Old']));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.liveGames).toEqual([]);
+    expect(result.current.state.completedGames).toEqual([]);
+    expect(result.current.state.suspendedPlayerNames).toEqual([]);
+  });
+
   it('restores slot-keyed court overrides on reload without changing base settings', () => {
     const { result, unmount } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ courtOverrides: { 2: 5, 4: 1 } }));
@@ -195,6 +233,37 @@ describe('usePlannerState — cross-tab safety while viewing a shared schedule',
     );
     expect(localStorage.getItem('bp-players')).toBe(playersBefore);
     expect(JSON.parse(localStorage.getItem('bp-is-confirmed')!)).toBe(false);
+  });
+
+  it('does not overwrite personal queue state while viewing a shared session', () => {
+    const ownLive = [{ slot: 3, court: 0, players: ['Own A', 'Own B', 'Own C', 'Own D'] }];
+    const ownCompleted = [{ slot: 2, court: 1, players: ['Own E', 'Own F', 'Own G', 'Own H'] }];
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    localStorage.setItem('bp-live-games', JSON.stringify(ownLive));
+    localStorage.setItem('bp-completed-games', JSON.stringify(ownCompleted));
+    localStorage.setItem('bp-suspended-player-names', JSON.stringify(['Own A']));
+    const { result } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({
+      isSharedSession: true,
+      result: { schedule: [], gamesPlayed: [] },
+      liveGames: [{ slot: 1, court: 0, players: ['Shared A', 'Shared B', 'Shared C', 'Shared D'] }],
+      completedGames: [],
+      suspendedPlayerNames: ['Shared A'],
+    }));
+    expect(JSON.parse(localStorage.getItem('bp-live-games')!)).toEqual(ownLive);
+    expect(JSON.parse(localStorage.getItem('bp-completed-games')!)).toEqual(ownCompleted);
+    expect(JSON.parse(localStorage.getItem('bp-suspended-player-names')!)).toEqual(['Own A']);
+  });
+
+  it('does not hydrate the personal queue into a shared session after refresh', () => {
+    const ownLive = [{ slot: 3, court: 0, players: ['Own A', 'Own B', 'Own C', 'Own D'] }];
+    localStorage.setItem('bp-result', JSON.stringify({ schedule: [], gamesPlayed: [] }));
+    localStorage.setItem('bp-live-games', JSON.stringify(ownLive));
+    sessionStorage.setItem('bp-is-shared-session', JSON.stringify(true));
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.isSharedSession).toBe(true);
+    expect(result.current.state.liveGames).toEqual([]);
+    expect(JSON.parse(localStorage.getItem('bp-live-games')!)).toEqual(ownLive);
   });
 
   it('still persists unrelated settings (numCourts) while isSharedSession is true', () => {

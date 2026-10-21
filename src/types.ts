@@ -186,6 +186,9 @@ export interface PlannerPersistedState {
   staggerMode: StaggerMode;
   sessionStart: string;
   result: PlannerResult | null;
+  liveGames: GameRef[];
+  completedGames: GameRef[];
+  suspendedPlayerNames: string[];
   scores: ScoresMap;
   winLoss: WinLossMap;
   savedPlans: SavedPlan[];

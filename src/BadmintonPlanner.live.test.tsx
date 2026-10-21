@@ -250,6 +250,33 @@ describe('BadmintonPlanner live game flow', () => {
       expect(game).not.toHaveTextContent('P1');
     });
 
+    it('keeps a completed game historical and immutable when its schedule slot is edited', async () => {
+      const user = userEvent.setup();
+      render(<BadmintonPlanner />);
+      await startNextVisibleGame(user);
+      await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]!);
+      const substitute = screen.queryByRole('button', { name: 'Substitute unavailable players' });
+      if (substitute) await user.click(substitute);
+
+      await user.click(screen.getByRole('button', { name: 'Setup' }));
+      const pastSchedule = screen.getByText(/Past games played \(1\)/).parentElement!;
+      await user.click(pastSchedule.querySelector('summary')!);
+      const historicalCourt = pastSchedule.querySelector('.schedule-grid > div')!;
+      await user.click(within(historicalCourt).getByTitle('Edit who plays in this slot'));
+      await user.selectOptions(within(historicalCourt).getAllByRole('combobox')[0]!, 'P9');
+      await user.click(within(historicalCourt).getByRole('button', { name: 'This game only' }));
+
+      await user.click(screen.getByRole('button', { name: /Past games/ }));
+      const gameLabel = screen.queryByText(/Game 1 · Slot 1 · Court 1/);
+      expect(gameLabel).not.toBeNull();
+      const pastGame = gameLabel!.parentElement!.parentElement!;
+      expect(pastGame).toHaveTextContent('P1');
+      expect(pastGame).not.toHaveTextContent('P9');
+
+      await user.click(screen.getByRole('button', { name: 'Live session' }));
+      expect(sectionFor('Current game')).not.toHaveTextContent('P9 ⏳');
+    });
+
     it('keeps a This game only edit local to its slot and preserves future scores', async () => {
       const user = userEvent.setup();
       const futureScore = { a: '21', b: '18', applied: true, teamA: ['P3', 'P7'], teamB: ['P9', 'P11'] };

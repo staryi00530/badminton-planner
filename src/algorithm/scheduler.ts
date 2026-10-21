@@ -154,9 +154,33 @@ export function* generateScheduleGen(
       for (const p of candidatesByRate(canPlay.filter(i => !forcedSet.has(i)))) addCandidate(p);
       for (const p of shuffle(mustRest.filter(i => !forcedSet.has(i)), rng)) addCandidate(p);
 
+      const additionalF = selectedAdditional.filter(i => players[i]!.gender === 'F');
+      const swappableF = additionalF.find(i => !mustPlay.includes(i)) ?? additionalF[0];
+      const unselected = available.filter(i => !forcedSet.has(i) && !selectedAdditional.includes(i));
+      const unselectedM = unselected.find(i => players[i]!.gender === 'M');
+      if (additionalF.length % 2 !== 0) {
+        if (swappableF != null && unselectedM != null) {
+          selectedAdditional[selectedAdditional.indexOf(swappableF)] = unselectedM;
+        } else {
+          const selectedM = selectedAdditional.find(i => players[i]!.gender === 'M' && !mustPlay.includes(i));
+          const unselectedF = unselected.find(i => players[i]!.gender === 'F');
+          if (selectedM != null && unselectedF != null) {
+            selectedAdditional[selectedAdditional.indexOf(selectedM)] = unselectedF;
+          }
+        }
+      }
+
       const courtsToBuild = [...courtsForced];
-      for (let i = 0; i + 3 < selectedAdditional.length; i += 4) {
-        courtsToBuild.push(selectedAdditional.slice(i, i + 4));
+      const remF = shuffle(selectedAdditional.filter(i => players[i]!.gender === 'F'), rng);
+      const remM = shuffle(selectedAdditional.filter(i => players[i]!.gender === 'M'), rng);
+      while (remF.length + remM.length >= 4) {
+        if (remF.length >= 2 && remM.length >= 2) {
+          courtsToBuild.push([...remF.splice(0, 2), ...remM.splice(0, 2)]);
+        } else if (remF.length >= 4) {
+          courtsToBuild.push(remF.splice(0, 4));
+        } else {
+          courtsToBuild.push(remM.splice(0, 4));
+        }
       }
       const courts: Court[] = [];
       for (let c = 0; c < courtsToBuild.length; c++) {
@@ -256,7 +280,8 @@ export function* generateScheduleGen(
     if (!isForcedSlot && selFCount % 2 !== 0) {
       // Odd F — try swapping one non-mustPlay F out for an unselected M
       const swappableF = selected.filter(i => players[i]!.gender === 'F' && !mustPlay.includes(i));
-      const unselM = remaining.filter(i => players[i]!.gender === 'M' && !selected.includes(i));
+      const parityCandidates = [...remaining, ...mustRest];
+      const unselM = parityCandidates.filter(i => players[i]!.gender === 'M' && !selected.includes(i));
       const femaleToSwap = swappableF.at(-1)
         ?? selected.find(i => players[i]!.gender === 'F');
       if (femaleToSwap != null && unselM.length > 0) {
@@ -265,7 +290,7 @@ export function* generateScheduleGen(
       } else {
         // If no eligible male can replace a female, trade one selected male
         // for an available female. This changes parity without changing court count.
-        const unselF = remaining.filter(i => players[i]!.gender === 'F' && !selected.includes(i));
+        const unselF = parityCandidates.filter(i => players[i]!.gender === 'F' && !selected.includes(i));
         const maleToSwap = selected.find(i => players[i]!.gender === 'M' && !mustPlay.includes(i));
         if (maleToSwap != null && unselF.length > 0) {
           selected = selected.filter(i => i !== maleToSwap);
@@ -491,9 +516,12 @@ export function* generateScheduleGen(
       };
       const isWD = (t: [number, number]): boolean => genderType(t) === 'FF';
 
-      let bestPairing = pairings[0]!;
+      const mixedVsMixed = pairings.filter(([teamA, teamB]) => genderType(teamA) === 'MF' && genderType(teamB) === 'MF');
+      const pairingsToScore = mixedVsMixed.length > 0 ? mixedVsMixed : pairings;
+
+      let bestPairing = pairingsToScore[0]!;
       let bestScore = Infinity;
-      for (const pairing of pairings) {
+      for (const pairing of pairingsToScore) {
         const [tA, tB] = pairing;
         let score = 0;
         score += (partnerCount[tA[0]]![tA[1]] ?? 0) * 3;

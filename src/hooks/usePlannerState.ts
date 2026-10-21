@@ -14,6 +14,9 @@ const STORAGE_KEYS = {
   staggerMode: 'bp-staggerMode',
   sessionStart: 'bp-sessionStart',
   result: 'bp-result',
+  liveGames: 'bp-live-games',
+  completedGames: 'bp-completed-games',
+  suspendedPlayerNames: 'bp-suspended-player-names',
   scores: 'bp-scores',
   winLoss: 'bp-winloss',
   savedPlans: 'bp-saved-plans',
@@ -58,6 +61,7 @@ function createInitialState(): PlannerState {
   const storedPlayers = loadState<PlannerState['players']>(STORAGE_KEYS.players, []);
   const storedHistory = loadState<PlannerState['playerHistory']>(STORAGE_KEYS.playerHistory, []);
   const result = loadState<PlannerState['result']>(STORAGE_KEYS.result, null);
+  const isSharedSession = loadSession('bp-is-shared-session', false);
   const storedTab = loadState<unknown>(STORAGE_KEYS.activeTab, null);
   const activeTab = (['live', 'setup', 'past', 'archive', 'about'] as const).find(tab => tab === storedTab)
     ?? (result ? 'live' : 'setup');
@@ -109,16 +113,16 @@ function createInitialState(): PlannerState {
     shareIsUpdate: false,
     shareId: loadSession('bp-share-id', null),
     shareToken: loadSession('bp-share-token', null),
-    isSharedSession: loadSession('bp-is-shared-session', false),
+    isSharedSession,
     preferMixedTeams: loadState(STORAGE_KEYS.preferMixedTeams, false),
     preferredPairs: loadState(STORAGE_KEYS.preferredPairs, []),
     isConfirmed: loadState(STORAGE_KEYS.isConfirmed, false),
     pendingOverwrite: null,
     shareNotice: null,
     loadedPlanId: loadState(STORAGE_KEYS.loadedPlanId, null),
-    liveGames: [],
-    completedGames: [],
-    suspendedPlayerNames: [],
+    liveGames: result && !isSharedSession ? loadState(STORAGE_KEYS.liveGames, []) : [],
+    completedGames: result && !isSharedSession ? loadState(STORAGE_KEYS.completedGames, []) : [],
+    suspendedPlayerNames: result && !isSharedSession ? loadState(STORAGE_KEYS.suspendedPlayerNames, []) : [],
   };
 }
 
@@ -159,6 +163,9 @@ export function usePlannerState() {
       staggerMode: state.staggerMode,
       sessionStart: state.sessionStart,
       result: state.result,
+      liveGames: state.liveGames,
+      completedGames: state.completedGames,
+      suspendedPlayerNames: state.suspendedPlayerNames,
       scores: state.scores,
       winLoss: state.winLoss,
       savedPlans: state.savedPlans,
@@ -172,12 +179,13 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
       if (state.isSharedSession && liveSessionExempt.has(key)) continue;
       const value = persisted[key as keyof PlannerPersistedState];
       if (key === 'result' && !value) localStorage.removeItem(storageKey);
+      else if (['liveGames', 'completedGames', 'suspendedPlayerNames'].includes(key) && !state.result) localStorage.removeItem(storageKey);
       else localStorage.setItem(storageKey, JSON.stringify(value));
     }
   }, [
@@ -191,6 +199,9 @@ export function usePlannerState() {
     state.staggerMode,
     state.sessionStart,
     state.result,
+    state.liveGames,
+    state.completedGames,
+    state.suspendedPlayerNames,
     state.scores,
     state.winLoss,
     state.savedPlans,

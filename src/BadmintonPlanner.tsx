@@ -60,19 +60,15 @@ function copyText(text: string, onCopied?: () => void) {
   document.body.removeChild(ta);
 }
 
-function courtLineup(result: PlannerResult, game: GameRef) {
-  const court = result.schedule.find(slot => slot.slot === game.slot)?.courts[game.court];
-  return court ? [...court.teamA, ...court.teamB].map(player => player.name).sort().join('|') : '';
-}
-
 function playerNamesLineup(names: string[]) {
   return [...names].sort().join('|');
 }
 
-function preserveUnchangedGamesAtEditedSlot(games: GameRef[], before: PlannerResult, after: PlannerResult, editedSlot: number) {
-  return games.filter(game =>
-    game.slot < editedSlot || (game.slot === editedSlot && courtLineup(before, game) === courtLineup(after, game))
-  );
+function preserveCompletedGameSnapshots(games: GameRef[]) {
+  return games.map(game => ({
+    ...game,
+    ...(game.players ? { players: [...game.players] } : {}),
+  }));
 }
 
 function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, editedSlot: number) {
@@ -489,7 +485,7 @@ function BadmintonPlanner() {
       if (match && parseInt(match[1]!, 10) < editingSlot && scores[key]) nextScores[key] = scores[key];
     }
     const preservedLiveGames = preserveLiveGamesAtEditedSlot(liveGames, newResult, editingSlot);
-    const preservedCompletedGames = preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot);
+    const preservedCompletedGames = preserveCompletedGameSnapshots(completedGames);
     applyLiveGamesUpdate(
       preservedLiveGames,
       editingSlot,
@@ -524,7 +520,7 @@ function BadmintonPlanner() {
     const { schedule: newSchedule, gamesPlayed } = recomputeStats(newScheduleRaw, players);
     const newResult = { schedule: newSchedule, gamesPlayed };
     const preservedLiveGames = preserveLiveGamesAtEditedSlot(liveGames, newResult, editingSlot);
-    const preservedCompletedGames = preserveUnchangedGamesAtEditedSlot(completedGames, result, newResult, editingSlot);
+    const preservedCompletedGames = preserveCompletedGameSnapshots(completedGames);
     applyLiveGamesUpdate(
       preservedLiveGames,
       editingSlot,

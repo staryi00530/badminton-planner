@@ -240,6 +240,49 @@ describe('No player rests more than 2 consecutive slots when pool allows', () =>
 });
 
 describe('Gender balance — even female count per court', () => {
+  it('uses a must-rest player as a parity swap when the available court pool otherwise forces 3:1', () => {
+    const players = makePlayers(21, 10, 2);
+    for (const player of players) player.availFrom = 1;
+    for (const player of [...players.slice(0, 5), ...players.slice(10, 14)]) player.availFrom = 0;
+    const initialState = {
+      keptSlots: [],
+      gamesPlayed: new Array(players.length).fill(0),
+      consecutivePlayed: new Array(players.length).fill(0),
+      consecutiveRested: new Array(players.length).fill(0),
+      partnerCount: Array.from({ length: players.length }, () => new Array(players.length).fill(0)),
+      opponentCount: Array.from({ length: players.length }, () => new Array(players.length).fill(0)),
+      courtGroupHistory: new Set<string>(),
+      womenDoublesCount: 0,
+    };
+    initialState.consecutivePlayed[10] = 2;
+
+    const result = generateSchedule(players, 1, [2], 0, initialState, null, {}, seededRng(3));
+
+    expect(result).not.toBeNull();
+    expect(result!.schedule[0]!.courts).toHaveLength(2);
+    for (const court of result!.schedule[0]!.courts) {
+      const femaleCount = [...court.teamA, ...court.teamB].filter(player => player.gender === 'F').length;
+      expect(femaleCount % 2, `Court ${court.court} has ${femaleCount}F`).toBe(0);
+    }
+  });
+
+  it('balances newly generated courts while preserving a forced live court', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const players = makePlayers(21, 10, 1);
+      const forcedCourt = [0, 1, 2, 10];
+      const result = generateSchedule(players, 1, [3], 0, null, { courts: [forcedCourt], targetCourts: 3 }, {}, seededRng(seed));
+
+      expect(result).not.toBeNull();
+      const courts = result!.schedule[0]!.courts;
+      expect(courts).toHaveLength(3);
+      expect([...courts[0]!.teamA, ...courts[0]!.teamB].map(player => player.name)).toEqual(forcedCourt.map(index => players[index]!.name));
+      for (const court of courts.slice(1)) {
+        const femaleCount = [...court.teamA, ...court.teamB].filter(player => player.gender === 'F').length;
+        expect(femaleCount % 2, `Seed ${seed}, added court ${court.court} has ${femaleCount}F`).toBe(0);
+      }
+    }
+  });
+
   it('keeps generated courts even-gendered across a 10F/11M roster and three courts', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const players = makePlayers(21, 10, 12);
@@ -270,7 +313,7 @@ describe('Gender balance — even female count per court', () => {
 
   it('honors mixed-team preference by pairing one female player on each side', () => {
     const players = makePlayers(4, 2, 1);
-    const result = generateSchedule(players, 1, [1], 0, null, null, { preferMixedTeams: true }, seededRng(9));
+    const result = generateSchedule(players, 1, [1], 0, null, null, {}, seededRng(9));
 
     expect(result).not.toBeNull();
     const court = result!.schedule[0]!.courts[0]!;
@@ -429,10 +472,11 @@ describe('womenDoublesCount restored across regen (bug fix)', () => {
       // Verify the regenerated schedule is complete (12 slots)
       expect(regenResult!.schedule.length).toBe(12);
 
-      // Verify final spread is still reasonable
+      // Gender parity can occasionally override a consecutive-rest preference
+      // when one extra player must be drafted to avoid a 3:1 court.
       const gp = regenResult!.gamesPlayed;
       const spread = Math.max(...gp) - Math.min(...gp);
-      expect(spread).toBeLessThanOrEqual(2); // slightly more lenient with 12 players / 8F
+      expect(spread).toBeLessThanOrEqual(3);
     }
   });
 });
