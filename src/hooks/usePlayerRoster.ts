@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { DEFAULT_PLAYERS } from '../constants';
+import { buildImportedPlayers } from '../utils/rosterPaste';
 
 /** Roster + player-bank management: adding/removing players, bulk-adding from the bank, editing fields. */
 export function usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, scheduleActive, patchState }) {
@@ -47,6 +48,16 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     });
   }, [players, scheduleActive, totalSlots]);
 
+  const addImportedPlayers = useCallback((entries) => {
+    const additions = buildImportedPlayers(players, playerHistory, entries, totalSlots);
+    if (additions.length === 0) return;
+    patchState({
+      players: [...players, ...additions],
+      undoSnapshot: null,
+      ...(scheduleActive ? { scheduleDirty: true } : { result: null }),
+    });
+  }, [patchState, playerHistory, players, scheduleActive, totalSlots]);
+
   const addToBank = useCallback((name, gender) => {
     const trimmed = name.trim();
     if (!trimmed || playerHistory.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) return;
@@ -75,6 +86,7 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
     clearPlayers,
     addPlayer,
     addSelectedFromBank,
+    addImportedPlayers,
     addToBank,
     removeFromHistory,
     removePlayer,

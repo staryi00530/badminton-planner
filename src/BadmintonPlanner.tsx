@@ -163,6 +163,7 @@ function BadmintonPlanner() {
     resetPlayers,
     clearPlayers,
     addPlayer,
+    addImportedPlayers,
     addSelectedFromBank,
     addToBank,
     removeFromHistory,
@@ -934,6 +935,7 @@ function BadmintonPlanner() {
           setGenderInput={value => setField('genderInput', value)}
           setLevelInput={value => setField('levelInput', value)}
           addPlayer={addPlayer}
+          addImportedPlayers={addImportedPlayers}
           addSelectedFromBank={addSelectedFromBank}
           addToBank={addToBank}
           removeFromHistory={removeFromHistory}

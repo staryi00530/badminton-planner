@@ -19,6 +19,7 @@ function renderPlayerList(overrides = {}) {
     setNameInput: vi.fn(),
     setGenderInput: vi.fn(),
     addPlayer: vi.fn(),
+    addImportedPlayers: vi.fn(),
     addSelectedFromBank: vi.fn(),
     addToBank: vi.fn(),
     removeFromHistory: vi.fn(),
@@ -47,6 +48,26 @@ function renderPlayerList(overrides = {}) {
 }
 
 describe('PlayerList — gender-grouped alphabetical display', () => {
+  it('previews pasted names, detects gender markers, and switches an unavailable guest to its fallback', async () => {
+    const user = userEvent.setup();
+    const handlers = renderPlayerList();
+    await user.click(screen.getByText('Paste roster'));
+    await user.type(screen.getByLabelText('Paste attendee list'), 'Wednesday 10/21 8:30pm–11:30pm\n1. New man 🙋‍♂️\n2. Alice\n3. Yiwei +1 (Siya)');
+    await user.selectOptions(screen.getByLabelText('Default gender for unmarked names'), 'F');
+    await user.click(screen.getByRole('button', { name: 'Preview names' }));
+
+    expect(screen.getByLabelText('Gender for New man')).toHaveValue('M');
+    expect(screen.getByText('Already on roster')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Guest named; uncheck to use Yiwei +1'));
+    expect(screen.getByText('Yiwei +1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add 2 players' }));
+
+    expect(handlers.addImportedPlayers).toHaveBeenCalledWith([
+      { name: 'New man', gender: 'M', level: 2 },
+      { name: 'Yiwei +1', gender: 'F', level: 2 },
+    ]);
+  });
+
   it('keeps an active roster compact while preserving bank and original-index actions', async () => {
     const user = userEvent.setup();
     const handlers = renderPlayerList({
@@ -78,8 +99,8 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
 
   it('shows an M group header before an F group header', () => {
     renderPlayerList();
-    const mHeader = screen.getByText('M');
-    const fHeader = screen.getByText('F');
+    const mHeader = screen.getAllByText('M').find(element => element.tagName === 'P')!;
+    const fHeader = screen.getAllByText('F').find(element => element.tagName === 'P')!;
     expect(mHeader.compareDocumentPosition(fHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

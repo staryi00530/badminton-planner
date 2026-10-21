@@ -1,7 +1,9 @@
 import { Fragment, useState } from 'react';
 import { C, DEFAULT_PLAYERS, FONT } from '../constants';
 import type { Player, StaggerMode, WinLossMap } from '../types';
+import type { Gender } from '../algorithm/types';
 import { sortPlayerIndicesForDisplay } from '../utils/sortPlayers';
+import { parseRosterPaste, type ParsedRosterEntry } from '../utils/rosterPaste';
 
 type PlayerField = 'name' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
 type PlayerFieldValue = string | number | null;
@@ -23,6 +25,7 @@ interface PlayerListProps {
   setGenderInput: (value: 'M' | 'F') => void;
   setLevelInput?: (value: 1 | 2 | 3) => void;
   addPlayer: () => void;
+  addImportedPlayers: (entries: Array<Pick<Player, 'name' | 'gender' | 'level'>>) => void;
   addSelectedFromBank: (entries: Array<Pick<Player, 'name' | 'gender' | 'level'>>) => void;
   addToBank: (name: string, gender: 'M' | 'F') => void;
   removeFromHistory: (name: string) => void;
@@ -52,6 +55,21 @@ function SkillDot({ name, winLoss }: { name: string; winLoss: WinLossMap }) {
   );
 }
 
+interface ImportPreviewRow {
+  id: number;
+  parsed: ParsedRosterEntry;
+  name: string;
+  gender: Gender;
+  level: 1 | 2 | 3;
+  knownPlayer: boolean;
+  alreadyActive: boolean;
+  useNamedGuest: boolean;
+}
+
+function rosterNameKey(name: string) {
+  return name.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 export default function PlayerList({
   visible = true,
   players,
@@ -69,6 +87,7 @@ export default function PlayerList({
   setGenderInput,
   setLevelInput = () => {},
   addPlayer,
+  addImportedPlayers,
   addSelectedFromBank,
   addToBank,
   removeFromHistory,
@@ -83,6 +102,10 @@ export default function PlayerList({
   const [selectedBank, setSelectedBank] = useState<Set<string>>(() => new Set());
   const [bankNameInput, setBankNameInput] = useState('');
   const [bankGenderInput, setBankGenderInput] = useState<'M' | 'F'>('M');
+  const [rosterPaste, setRosterPaste] = useState('');
+  const [defaultImportGender, setDefaultImportGender] = useState<Gender>(genderInput);
+  const [importPreview, setImportPreview] = useState<ImportPreviewRow[]>([]);
+  const [importMessage, setImportMessage] = useState('');
   if (!visible) return null;
   const currentNames = new Set(players.map(p => p.name.toLowerCase()));
   const bankUnsorted = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
@@ -107,6 +130,54 @@ export default function PlayerList({
     if (!bankNameInput.trim()) return;
     addToBank(bankNameInput, bankGenderInput);
     setBankNameInput('');
+  };
+
+  const findKnownPlayer = (name: string, genderHint: Gender | null) => {
+    const direct = [...players, ...playerHistory].find(player =>
+      rosterNameKey(player.name) === rosterNameKey(name) && (!genderHint || player.gender === genderHint),
+    );
+    if (direct || !genderHint) return direct;
+    const baseName = name.replace(/ \([MF]\)$/, '');
+    return [...players, ...playerHistory].find(player =>
+      rosterNameKey(player.name) === rosterNameKey(baseName) && player.gender === genderHint,
+    );
+  };
+
+  const makePreviewRow = (parsed: ParsedRosterEntry, id: number, useNamedGuest = true): ImportPreviewRow => {
+    const rawName = useNamedGuest ? parsed.name : parsed.fallbackName ?? parsed.name;
+    const genderHint = useNamedGuest ? parsed.genderHint : parsed.fallbackGenderHint ?? null;
+    const known = findKnownPlayer(rawName, genderHint);
+    const name = known?.name ?? rawName;
+    return {
+      id,
+      parsed,
+      name,
+      gender: known?.gender ?? genderHint ?? defaultImportGender,
+      level: known?.level ?? 2,
+      knownPlayer: Boolean(known),
+      alreadyActive: players.some(player => rosterNameKey(player.name) === rosterNameKey(name)),
+      useNamedGuest,
+    };
+  };
+
+  const previewRosterPaste = () => {
+    const parsed = parseRosterPaste(rosterPaste);
+    setImportMessage(parsed.length ? '' : 'No player names found.');
+    setImportPreview(parsed.map((entry, index) => makePreviewRow(entry, index)));
+  };
+
+  const applyRosterPaste = () => {
+    const entries = importPreview
+      .filter(row => !row.alreadyActive)
+      .map(({ name, gender, level }) => ({ name, gender, level }));
+    addImportedPlayers(entries);
+    setImportMessage(`${entries.length} player${entries.length === 1 ? '' : 's'} added.`);
+    setImportPreview([]);
+    setRosterPaste('');
+  };
+
+  const updatePreviewRow = (id: number, update: Partial<ImportPreviewRow>) => {
+    setImportPreview(rows => rows.map(row => row.id === id ? { ...row, ...update } : row));
   };
   return (
     <details open={!scheduleActive} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
@@ -171,6 +242,76 @@ export default function PlayerList({
           ADD
         </button>
       </div>
+
+      <details style={{ margin: '0 0 14px', borderBottom: `1px solid ${C.border}`, paddingBottom: 12 }}>
+        <summary style={{ cursor: 'pointer', color: C.text, fontSize: 13, fontWeight: 700 }}>Paste roster</summary>
+        <p style={{ margin: '8px 0', color: C.textDim, fontSize: 12, lineHeight: 1.5 }}>
+          Paste an attendee list, then review names and genders before adding them.
+        </p>
+        <textarea
+          aria-label="Paste attendee list"
+          value={rosterPaste}
+          onChange={event => setRosterPaste(event.target.value)}
+          placeholder={'Wednesday 8:30pm–11:30pm\n1. Eamon\n2. Jialin'}
+          rows={5}
+          style={{ display: 'block', width: '100%', boxSizing: 'border-box', resize: 'vertical', background: C.bg, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: 10, font: `13px ${FONT}` }}
+        />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
+          <label style={{ color: C.textDim, fontSize: 12 }}>
+            Default gender for unmarked names{' '}
+            <select aria-label="Default gender for unmarked names" value={defaultImportGender} onChange={event => setDefaultImportGender(event.target.value as Gender)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 8px' }}>
+              <option value="M">M</option>
+              <option value="F">F</option>
+            </select>
+          </label>
+          <button onClick={previewRosterPaste} disabled={!rosterPaste.trim()} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 11px', fontSize: 12, fontWeight: 600, fontFamily: FONT }}>
+            Preview names
+          </button>
+          {importMessage && <span role="status" style={{ color: C.textDim, fontSize: 12 }}>{importMessage}</span>}
+        </div>
+        {importPreview.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ margin: '0 0 8px', color: C.textDim, fontSize: 12 }}>
+              {importPreview.length} names found. Existing roster entries will be skipped; saved player details are retained.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '0 20px', maxHeight: 320, overflowY: 'auto', padding: '0 8px 0 0' }}>
+              {importPreview.map(row => (
+                <div key={row.id} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderTop: `1px solid ${C.border}`, padding: '8px 0' }}>
+                  <div style={{ minWidth: 0, flex: '1 1 130px' }}>
+                    <div style={{ color: row.gender === 'F' ? C.pink : C.text, fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere' }}>{row.name}</div>
+                    {row.parsed.isGuest && row.parsed.fallbackName && (
+                      <label style={{ display: 'flex', gap: 5, alignItems: 'center', marginTop: 4, color: C.textMuted, fontSize: 11 }}>
+                        <input
+                          type="checkbox"
+                          checked={row.useNamedGuest}
+                          onChange={event => updatePreviewRow(row.id, makePreviewRow(row.parsed, row.id, event.target.checked))}
+                        />
+                        Guest named; uncheck to use {row.parsed.fallbackName}
+                      </label>
+                    )}
+                  </div>
+                  {row.alreadyActive ? (
+                    <span style={{ color: C.textMuted, fontSize: 11 }}>Already on roster</span>
+                  ) : row.knownPlayer ? (
+                    <span style={{ color: C.textDim, fontSize: 11 }}>Saved · {row.gender} · Level {row.level}</span>
+                  ) : (
+                    <label style={{ display: 'flex', gap: 4, alignItems: 'center', color: C.textDim, fontSize: 11 }}>
+                      Gender
+                      <select aria-label={`Gender for ${row.name}`} value={row.gender} onChange={event => updatePreviewRow(row.id, { gender: event.target.value as Gender })} style={{ background: C.card, color: row.gender === 'F' ? C.pink : C.text, border: `1px solid ${C.border}`, borderRadius: 5, padding: '5px 7px' }}>
+                        <option value="M">M</option>
+                        <option value="F">F</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button onClick={applyRosterPaste} disabled={!importPreview.some(row => !row.alreadyActive)} style={{ marginTop: 10, background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>
+              Add {importPreview.filter(row => !row.alreadyActive).length} players
+            </button>
+          </div>
+        )}
+      </details>
 
       <div style={{ marginBottom: 12 }}>
           <p style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Player bank</p>

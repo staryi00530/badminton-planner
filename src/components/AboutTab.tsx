@@ -51,6 +51,7 @@ export default function AboutTab() {
         <Row label="This game only">Changes only the selected game's lineup. Other games, scores, and the rest of the schedule are left alone.</Row>
         <Row label="Confirm">Confirm a schedule to mark it as the session plan. Destructive schedule changes ask for confirmation and preserve the prior plan in Saved plans.</Row>
         <Row label="Player Bank">Players you add are remembered for later sessions. Select several bank entries to add them to the current roster together.</Row>
+        <Row label="Paste roster">In Setup, paste an attendee list to review parsed names and genders before adding players. A named guest can be switched to a host +1/+2 placeholder.</Row>
       </Section>
 
       <Section title="Saved Plans & Sharing">

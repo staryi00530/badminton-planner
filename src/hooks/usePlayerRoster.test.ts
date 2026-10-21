@@ -99,6 +99,28 @@ describe('usePlayerRoster — addSelectedFromBank', () => {
   });
 });
 
+describe('usePlayerRoster — addImportedPlayers', () => {
+  it('adds a batch once and preserves player-bank metadata', () => {
+    const { result, patchState } = setup({
+      players: [{ name: 'Alice', gender: 'F', availFrom: 0, availTo: 11 }],
+      playerHistory: [{ name: 'Bank player', gender: 'F', level: 3 }],
+      totalSlots: 9,
+      scheduleActive: true,
+    });
+    act(() => result.current.addImportedPlayers([
+      { name: 'Alice', gender: 'M' },
+      { name: 'Bank player', gender: 'M' },
+      { name: 'New player', gender: 'M' },
+    ]));
+
+    const patch = patchState.mock.calls[0][0];
+    expect(patch.players).toHaveLength(3);
+    expect(patch.players[1]).toMatchObject({ name: 'Bank player', gender: 'F', level: 3 });
+    expect(patch.players[2]).toMatchObject({ name: 'New player', gender: 'M', availTo: 8 });
+    expect(patch).toMatchObject({ scheduleDirty: true, undoSnapshot: null });
+  });
+});
+
 describe('usePlayerRoster — bank management', () => {
   it('addToBank adds a trimmed name+gender, rejecting a case-insensitive duplicate', () => {
     const { result, patchState } = setup({ playerHistory: [{ name: 'Bob', gender: 'M' }] });
