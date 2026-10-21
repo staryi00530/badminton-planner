@@ -272,7 +272,21 @@ export function useLiveQueue({
       });
     }
     if (options.queueChoice === 'substitute' && queuedSubstitution && queuedSubstitution.unavailablePlayers.length === 0) {
+      const beforeCount = nextLiveGames.length;
       nextLiveGames = addUniqueGame(nextLiveGames, queuedSubstitution.game);
+      if (nextLiveGames.length > beforeCount && queuedPreviewGame && nextResult) {
+        const assigned = assignDisplayCourts(nextLiveGames, displayCapacity)
+          .find(game => game.slot === queuedSubstitution.game.slot && game.court === queuedSubstitution.game.court);
+        liveQueueDebug('queue:substitution-applied', {
+          flowId,
+          queuedGame: describeGames([queuedPreviewGame], nextResult)[0],
+          replacements: queuedSubstitution.replacements,
+          promotedGame: {
+            ...describeGames([queuedSubstitution.game], nextResult)[0],
+            displayCourt: (assigned?.displayCourt ?? queuedSubstitution.game.court) + 1,
+          },
+        });
+      }
     }
     if (options.queueChoice === 'lookahead' && options.queueGame) {
       nextLiveGames = addUniqueGame(nextLiveGames, options.queueGame);

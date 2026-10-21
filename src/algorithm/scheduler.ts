@@ -257,13 +257,20 @@ export function* generateScheduleGen(
       // Odd F — try swapping one non-mustPlay F out for an unselected M
       const swappableF = selected.filter(i => players[i]!.gender === 'F' && !mustPlay.includes(i));
       const unselM = remaining.filter(i => players[i]!.gender === 'M' && !selected.includes(i));
-      if (swappableF.length > 0 && unselM.length > 0) {
-        selected = selected.filter(i => i !== swappableF[swappableF.length - 1]);
+      const femaleToSwap = swappableF.at(-1)
+        ?? selected.find(i => players[i]!.gender === 'F');
+      if (femaleToSwap != null && unselM.length > 0) {
+        selected = selected.filter(i => i !== femaleToSwap);
         selected.push(unselM[0]!);
       } else {
-        // Alternatively add one more F if available
+        // If no eligible male can replace a female, trade one selected male
+        // for an available female. This changes parity without changing court count.
         const unselF = remaining.filter(i => players[i]!.gender === 'F' && !selected.includes(i));
-        if (unselF.length > 0) selected = [...selected.slice(0, actualCourts * 4 - 1), unselF[0]!];
+        const maleToSwap = selected.find(i => players[i]!.gender === 'M' && !mustPlay.includes(i));
+        if (maleToSwap != null && unselF.length > 0) {
+          selected = selected.filter(i => i !== maleToSwap);
+          selected.push(unselF[0]!);
+        }
       }
     }
 

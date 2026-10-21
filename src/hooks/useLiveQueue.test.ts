@@ -95,6 +95,35 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     }));
   });
 
+  it('logs a queued substitution only when its replacement lineup is promoted', () => {
+    const { result } = session(2);
+    const plan = structuredClone(result.current.state.result!);
+    const secondLiveCourt = plan.schedule[0]!.courts[1]!;
+    const blockedPlayer = secondLiveCourt.teamA[0]!;
+    const queuedCourt = plan.schedule[1]!.courts[0]!;
+    queuedCourt.teamA[0] = { ...blockedPlayer };
+
+    act(() => result.current.patchState({
+      result: plan,
+      liveGames: [
+        { slot: 1, court: 0, displayCourt: 0 },
+        { slot: 1, court: 1, displayCourt: 1 },
+      ],
+    }));
+    act(() => result.current.toggleLiveGame(1, 0));
+    expect(result.current.queuePromotionPrompt).not.toBeNull();
+    act(() => result.current.resolveQueuePromotion('substitute'));
+
+    const logs = JSON.parse(exportLiveQueueLogs()).logs;
+    const applied = [...logs].reverse().find((event: { label: string }) => event.label === 'queue:substitution-applied');
+    expect(applied).toBeDefined();
+    expect(applied.details.queuedGame.players).toContain(blockedPlayer.name);
+    expect(applied.details.replacements).toContainEqual({ replacee: blockedPlayer.name, replacer: expect.any(String) });
+    expect(applied.details.promotedGame.players).not.toContain(blockedPlayer.name);
+    expect(applied.details.promotedGame.court).toBe(1);
+    expect(applied.details.promotedGame.displayCourt).toBe(1);
+  });
+
   it.each(['finish', 'start', 'leaving', 'joining', 'back', 'suspend', 'add court', 'remove court', 'regenerate', 'setup regenerate'])(
     'undo restores the exact runtime before %s', action => {
       const { result } = session(2);
