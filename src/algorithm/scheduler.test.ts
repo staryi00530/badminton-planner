@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateSchedule, generateScheduleGen, extractState, recomputeStats } from './scheduler.js';
+import { generateSchedule, generateScheduleGen, extractState, recomputeStats, normalizeUnstartedMixedCourts } from './scheduler.js';
 import type { Player, SlotResult } from './types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -29,6 +29,35 @@ function seededRng(seed: number): () => number {
 function courtsPerSlot(courts: number, totalSlots: number): number[] {
   return new Array(totalSlots).fill(courts);
 }
+
+describe('Queued mixed-team normalization', () => {
+  it('re-pairs unstarted 2F/2M courts as MF vs MF without changing participants', () => {
+    const court = {
+      court: 1,
+      teamA: [{ name: 'F1', gender: 'F' as const }, { name: 'F2', gender: 'F' as const }] as const,
+      teamB: [{ name: 'M1', gender: 'M' as const }, { name: 'M2', gender: 'M' as const }] as const,
+    };
+    const schedule = [{ slot: 1, courts: [court], sitting: [], playerState: [], repeatedCourts: [] }];
+    const normalized = normalizeUnstartedMixedCourts(schedule, new Set());
+    const resultCourt = normalized[0]!.courts[0]!;
+    expect(resultCourt.teamA.map(player => player.gender)).toEqual(['M', 'F']);
+    expect(resultCourt.teamB.map(player => player.gender)).toEqual(['M', 'F']);
+    expect([...resultCourt.teamA, ...resultCourt.teamB].map(player => player.name).sort())
+      .toEqual(['F1', 'F2', 'M1', 'M2']);
+  });
+
+  it('leaves locked games and courts without an even gender split unchanged', () => {
+    const court = {
+      court: 1,
+      teamA: [{ name: 'F1', gender: 'F' as const }, { name: 'F2', gender: 'F' as const }] as const,
+      teamB: [{ name: 'M1', gender: 'M' as const }, { name: 'M2', gender: 'M' as const }] as const,
+    };
+    const schedule = [{ slot: 4, courts: [court], sitting: [], playerState: [], repeatedCourts: [] }];
+    const normalized = normalizeUnstartedMixedCourts(schedule, new Set(['4:0']));
+    expect(normalized).toBe(schedule);
+    expect(normalized[0]!.courts[0]).toBe(court);
+  });
+});
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

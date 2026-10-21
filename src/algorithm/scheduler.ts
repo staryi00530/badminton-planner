@@ -24,6 +24,35 @@ export function groupKey(idxs: number[]): string {
   return idxs.slice().sort((a, b) => a - b).join(',');
 }
 
+export function normalizeUnstartedMixedCourts(schedule: SlotResult[], lockedGames: Set<string>): SlotResult[] {
+  let scheduleChanged = false;
+  const normalized = schedule.map(slot => {
+    let slotChanged = false;
+    const courts = slot.courts.map((court, courtIndex) => {
+      if (lockedGames.has(`${slot.slot}:${courtIndex}`)) return court;
+      const players = [...court.teamA, ...court.teamB];
+      const women = players.filter(player => player.gender === 'F');
+      const men = players.filter(player => player.gender === 'M');
+      if (women.length !== 2 || men.length !== 2) return court;
+      const alreadyMixed = court.teamA.some(player => player.gender === 'F')
+        && court.teamA.some(player => player.gender === 'M')
+        && court.teamB.some(player => player.gender === 'F')
+        && court.teamB.some(player => player.gender === 'M');
+      if (alreadyMixed) return court;
+      slotChanged = true;
+      return {
+        ...court,
+        teamA: [men[0]!, women[0]!] as Court['teamA'],
+        teamB: [men[1]!, women[1]!] as Court['teamB'],
+      };
+    });
+    if (!slotChanged) return slot;
+    scheduleChanged = true;
+    return { ...slot, courts };
+  });
+  return scheduleChanged ? normalized : schedule;
+}
+
 // ─── Algorithm ───────────────────────────────────────────────────────────────
 
 export interface ScheduleOptions {

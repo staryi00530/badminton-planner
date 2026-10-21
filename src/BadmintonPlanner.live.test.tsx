@@ -85,6 +85,37 @@ describe('BadmintonPlanner live game flow', () => {
     vi.restoreAllMocks();
   });
 
+  it('normalizes queued mixed-gender teams but preserves a live court lineup', async () => {
+    const storedResult = JSON.parse(localStorage.getItem('bp-result')!);
+    const femaleNames = new Set(['P1', 'P2', 'P3', 'P4']);
+    const players = JSON.parse(localStorage.getItem('bp-players')!).map((player: Player) => ({
+      ...player,
+      gender: femaleNames.has(player.name) ? 'F' : 'M',
+    }));
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    storedResult.schedule[0].courts = [
+      {
+        court: 1,
+        teamA: [{ name: 'P1', gender: 'F' }, { name: 'P2', gender: 'F' }],
+        teamB: [{ name: 'P5', gender: 'M' }, { name: 'P6', gender: 'M' }],
+      },
+      {
+        court: 2,
+        teamA: [{ name: 'P3', gender: 'F' }, { name: 'P4', gender: 'F' }],
+        teamB: [{ name: 'P7', gender: 'M' }, { name: 'P8', gender: 'M' }],
+      },
+    ];
+    localStorage.setItem('bp-result', JSON.stringify(storedResult));
+    localStorage.setItem('bp-live-games', JSON.stringify([{ slot: 1, court: 0, players: ['P1', 'P2', 'P5', 'P6'] }]));
+    render(<BadmintonPlanner />);
+    await waitFor(() => {
+      const updated = JSON.parse(localStorage.getItem('bp-result')!);
+      expect(updated.schedule[0].courts[0].teamA.map((player: Player) => player.gender)).toEqual(['F', 'F']);
+      expect(updated.schedule[0].courts[1].teamA.map((player: Player) => player.gender)).toEqual(['M', 'F']);
+      expect(updated.schedule[0].courts[1].teamB.map((player: Player) => player.gender)).toEqual(['M', 'F']);
+    });
+  });
+
   describe('atomic undo', () => {
     const stored = (key: string) => JSON.parse(localStorage.getItem(key)!);
     const undo = () => screen.getByRole('button', { name: 'Undo last action' });

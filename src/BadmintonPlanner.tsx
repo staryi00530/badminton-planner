@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Player, PlayerInGame } from './algorithm/types';
-import { extractState, generateSchedule, recomputeStats } from './algorithm/scheduler';
+import { extractState, generateSchedule, normalizeUnstartedMixedCourts, recomputeStats } from './algorithm/scheduler';
 import { C, DEFAULT_PLAYERS, FONT } from './constants';
 import { usePlannerState } from './hooks/usePlannerState';
 import { useAdminAuth } from './hooks/useAdminAuth';
@@ -185,6 +185,20 @@ function BadmintonPlanner() {
     const fresh = pruneExpiredPlans(savedPlans, Date.now());
     if (fresh.length !== savedPlans.length) patchState({ savedPlans: fresh, undoSnapshot: null });
   }, [savedPlans]);
+
+  useEffect(() => {
+    if (!result || isSharedSession) return;
+    const lockedGames = new Set<string>();
+    for (const game of [...liveGames, ...completedGames]) {
+      lockedGames.add(`${game.slot}:${game.court}`);
+    }
+    for (const key of Object.keys(scores)) {
+      const match = /^s(\d+)c(\d+)$/.exec(key);
+      if (match) lockedGames.add(`${Number(match[1])}:${Number(match[2])}`);
+    }
+    const schedule = normalizeUnstartedMixedCourts(result.schedule, lockedGames);
+    if (schedule !== result.schedule) patchState({ result: { ...result, schedule } });
+  }, [completedGames, isSharedSession, liveGames, patchState, result, scores]);
 
   useEffect(() => {
     if (!result) return;
