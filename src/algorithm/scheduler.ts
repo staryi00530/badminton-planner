@@ -375,18 +375,64 @@ export function* generateScheduleGen(
     // optimizing only the final two-team split has no effect when the players
     // were drafted onto different courts.
     if (!isForcedSlot && options.preferredPairs?.length && courtGroups.length > 1) {
-      const groupFor = (player: number) => courtGroups.findIndex(group => group.includes(player));
-      for (const [first, second] of options.preferredPairs) {
-        const firstGroup = groupFor(first);
-        const secondGroup = groupFor(second);
-        if (firstGroup < 0 || secondGroup < 0 || firstGroup === secondGroup) continue;
-        const target = courtGroups[firstGroup]!;
-        const source = courtGroups[secondGroup]!;
-        const targetSwap = target.findIndex(player => player !== first && players[player]!.gender === players[second]!.gender);
-        const sourceSwap = source.findIndex(player => player === second);
-        const targetIndex = targetSwap >= 0 ? targetSwap : target.findIndex(player => player !== first);
-        if (sourceSwap < 0 || targetIndex < 0) continue;
-        [target[targetIndex], source[sourceSwap]] = [source[sourceSwap]!, target[targetIndex]!];
+      const pairCount = (groups: number[][]) => options.preferredPairs!.filter(([first, second]) => {
+        const firstGroup = groups.findIndex(group => group.includes(first));
+        return firstGroup >= 0 && groups[firstGroup]!.includes(second);
+      }).length;
+      const evenFemaleCounts = (groups: number[][]) => groups.every(group =>
+        group.filter(player => players[player]!.gender === 'F').length % 2 === 0,
+      );
+      const combinations = (values: number[], count: number): number[][] => {
+        if (count === 1) return values.map(value => [value]);
+        const result: number[][] = [];
+        for (let i = 0; i < values.length; i++) {
+          for (const rest of combinations(values.slice(i + 1), count - 1)) result.push([values[i]!, ...rest]);
+        }
+        return result;
+      };
+
+      for (let pass = 0; pass < options.preferredPairs.length; pass++) {
+        let best: { target: number; source: number; targetGroup: number[]; sourceGroup: number[] } | null = null;
+        let bestCount = pairCount(courtGroups);
+        for (const [first, second] of options.preferredPairs) {
+          const targetIndex = courtGroups.findIndex(group => group.includes(first));
+          const sourceIndex = courtGroups.findIndex(group => group.includes(second));
+          if (targetIndex < 0 || sourceIndex < 0 || targetIndex === sourceIndex) continue;
+          const target = courtGroups[targetIndex]!;
+          const source = courtGroups[sourceIndex]!;
+          const targetChoices = [
+            ...combinations(target.filter(player => player !== first), 1),
+            ...combinations(target.filter(player => player !== first), 2),
+          ];
+          const sourceChoices = [
+            ...combinations(source, 1).filter(choice => choice.includes(second)),
+            ...combinations(source, 2).filter(choice => choice.includes(second)),
+          ];
+
+          for (const outgoingTarget of targetChoices) {
+            for (const outgoingSource of sourceChoices) {
+              if (outgoingTarget.length !== outgoingSource.length) continue;
+              const nextTarget = [...target];
+              const nextSource = [...source];
+              outgoingTarget.forEach((player, index) => {
+                nextTarget[nextTarget.indexOf(player)] = outgoingSource[index]!;
+                nextSource[nextSource.indexOf(outgoingSource[index]!)] = player;
+              });
+              const nextGroups = courtGroups.map((group, index) =>
+                index === targetIndex ? nextTarget : index === sourceIndex ? nextSource : group,
+              );
+              if (!evenFemaleCounts(nextGroups)) continue;
+              const count = pairCount(nextGroups);
+              if (count > bestCount) {
+                bestCount = count;
+                best = { target: targetIndex, source: sourceIndex, targetGroup: nextTarget, sourceGroup: nextSource };
+              }
+            }
+          }
+        }
+        if (!best) break;
+        courtGroups[best.target] = best.targetGroup;
+        courtGroups[best.source] = best.sourceGroup;
       }
     }
 

@@ -30,6 +30,7 @@ export default function AboutTab() {
         <Row label="Skip next">Suspend a player to leave them out of the next generated game without changing the game already in progress.</Row>
         <Row label="Undo">Undo last action restores the previous session state after an accidental finish, substitution, or session update.</Row>
         <Row label="Past games">Past games records completed lineups and scores. Player stats summarize games played, rotation rests, live games, and recorded wins and losses.</Row>
+        <Row label="Pairings">Pairings shows each player's completed-game teammate and opponent history, including repeated matchups.</Row>
       </Section>
 
       <Section title="How Matchups Are Made">

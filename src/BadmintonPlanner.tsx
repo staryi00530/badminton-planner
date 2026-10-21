@@ -18,6 +18,7 @@ import { useScheduleActions } from './hooks/useScheduleActions';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
 import PastGamesTab from './components/PastGamesTab';
+import PairingsTab from './components/PairingsTab';
 import PlayerList from './components/PlayerList';
 import LiveSessionBoard from './components/LiveSessionBoard';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
@@ -870,7 +871,7 @@ function BadmintonPlanner() {
         )}
 
         <nav aria-label="Session views" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
-          {([['live', 'Live session'], ['setup', 'Setup'], ['past', `Past games${completedGames.length ? ` (${completedGames.length})` : ''}`], ['archive', `Saved plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How it works']] as const).map(([val, label]) => (
+          {([['live', 'Live session'], ['setup', 'Setup'], ['past', `Past games${completedGames.length ? ` (${completedGames.length})` : ''}`], ['pairings', 'Pairings'], ['archive', `Saved plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How it works']] as const).map(([val, label]) => (
             <button key={val} onClick={() => patchState({ activeTab: val })}
               disabled={val === 'live' && !result}
               aria-current={selectedTab === val ? 'page' : undefined}
@@ -896,6 +897,8 @@ function BadmintonPlanner() {
         )}
 
         {activeTab === 'past' && <PastGamesTab result={result} completedGames={completedGames} liveGames={liveGames} scores={scores} players={players} winLoss={winLoss} />}
+
+        {activeTab === 'pairings' && <PairingsTab players={players} result={result} completedGames={completedGames} scores={scores} />}
 
         {activeTab === 'about' && <AboutTab />}
 

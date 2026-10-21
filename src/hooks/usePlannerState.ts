@@ -63,7 +63,7 @@ function createInitialState(): PlannerState {
   const result = loadState<PlannerState['result']>(STORAGE_KEYS.result, null);
   const isSharedSession = loadSession('bp-is-shared-session', false);
   const storedTab = loadState<unknown>(STORAGE_KEYS.activeTab, null);
-  const activeTab = (['live', 'setup', 'past', 'archive', 'about'] as const).find(tab => tab === storedTab)
+  const activeTab = (['live', 'setup', 'past', 'pairings', 'archive', 'about'] as const).find(tab => tab === storedTab)
     ?? (result ? 'live' : 'setup');
   return {
     ...EMPTY_QUEUE_STATE,

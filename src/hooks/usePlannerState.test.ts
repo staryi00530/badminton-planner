@@ -28,7 +28,7 @@ describe('usePlannerState — defaults & loading', () => {
     expect(result.current.state.activeTab).toBe('live');
   });
 
-  it.each(['live', 'setup', 'past', 'archive', 'about'] as const)('retains the selected %s view on refresh with a schedule', activeTab => {
+  it.each(['live', 'setup', 'past', 'pairings', 'archive', 'about'] as const)('retains the selected %s view on refresh with a schedule', activeTab => {
     const { result, unmount } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ result: { schedule: [], gamesPlayed: [] }, activeTab }));
     unmount();

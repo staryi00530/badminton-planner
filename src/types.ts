@@ -135,7 +135,7 @@ export interface PlannerState extends QueueRuntimeState {
   savedPlans: SavedPlan[];
   showSavePlan: boolean;
   saveTag: string;
-  activeTab: 'live' | 'setup' | 'past' | 'archive' | 'about';
+  activeTab: 'live' | 'setup' | 'past' | 'pairings' | 'archive' | 'about';
   editingSlot: number | null;
   editLayout: EditLayout | null;
   pendingShare: SharePayload | null;

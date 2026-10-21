@@ -138,6 +138,26 @@ describe('Preferred pairings', () => {
       expect(courts.some(court => [court.teamA, court.teamB].some(team => team.some(player => player.name === 'Yiwei (F)') && team.some(player => player.name === 'Siya'))), `seed ${seed}`).toBe(true);
     }
   });
+
+  it('keeps overlapping preferred pairs co-located without breaking even female counts', () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const players = makePlayers(8, 4, 1);
+      const result = generateSchedule(players, 1, [2], 0, null, null, {
+        preferredPairs: [[0, 4], [0, 5]],
+      }, seededRng(seed));
+
+      expect(result).not.toBeNull();
+      const courts = result!.schedule[0]!.courts;
+      for (const court of courts) {
+        const femaleCount = [...court.teamA, ...court.teamB].filter(player => player.gender === 'F').length;
+        expect(femaleCount % 2, `seed ${seed}`).toBe(0);
+      }
+      expect(courts.some(court => {
+        const lineup = [...court.teamA, ...court.teamB];
+        return lineup.includes(players[0]!) && lineup.includes(players[4]!) && lineup.includes(players[5]!);
+      }), `seed ${seed}`).toBe(true);
+    }
+  });
 });
 
 describe('Level balancing', () => {
