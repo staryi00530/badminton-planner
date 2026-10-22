@@ -133,6 +133,24 @@ describe('LiveSessionBoard', () => {
     expect(within(lane(2)).getByRole('button', { name: 'Start game' })).toBeEnabled();
   });
 
+  it('does not resurface unplayed games from slots before the current queue boundary', () => {
+    const currentSlot = slot(3, [
+      court(1, [21, 22, 23, 24]),
+      court(2, [5, 6, 7, 8]),
+    ]);
+    render(<LiveSessionBoard {...props({
+      fromSlot: 3,
+      liveCapacity: 2,
+      result: { schedule: [schedule[0]!, schedule[1]!, currentSlot], gamesPlayed: [] },
+      liveGames: [{ slot: 3, court: 0, displayCourt: 0 }],
+    })} />);
+
+    expect(lane(2)).toHaveTextContent('SLOT 3');
+    expect(lane(2)).toHaveTextContent('P5');
+    expect(lane(2)).toHaveTextContent('P8');
+    expect(screen.queryByText('P1 · P2')).not.toBeInTheDocument();
+  });
+
   it.each([
     {
       name: 'the remaining scheduled Court 2 game',

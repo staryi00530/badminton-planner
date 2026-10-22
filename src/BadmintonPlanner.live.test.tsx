@@ -116,6 +116,19 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('opens the Pairings tab from the session navigation', () => {
+    localStorage.setItem('bp-active-tab', JSON.stringify('pairings'));
+    localStorage.setItem('bp-completed-games', JSON.stringify([
+      { slot: 1, court: 0, players: ['P1', 'P2', 'P3', 'P4'] },
+    ]));
+    render(<BadmintonPlanner />);
+
+    expect(screen.getByRole('button', { name: 'Pairings' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { name: 'Pairings' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Teammates' })).toHaveTextContent('P2');
+    expect(screen.getByRole('region', { name: 'Opponents' })).toHaveTextContent('P3');
+  });
+
   describe('atomic undo', () => {
     const stored = (key: string) => JSON.parse(localStorage.getItem(key)!);
     const undo = () => screen.getByRole('button', { name: 'Undo last action' });
