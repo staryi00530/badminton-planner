@@ -493,8 +493,29 @@ function BadmintonPlanner() {
       return names.map(name => nameToIdx.get(name)).filter(i => i !== undefined);
     });
     if (courtsForced.some(c => c.length !== 4)) return;
-    const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, getScheduleOptions(playersWithSkill));
+    let newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, getScheduleOptions(playersWithSkill));
     if (!newResult) return;
+    const runtimeSlots = [...new Set([...liveGames, ...completedGames]
+      .map(game => game.slot)
+      .filter(slot => slot > editingSlot))].sort((a, b) => a - b);
+    for (const slotNum of runtimeSlots) {
+      const originalRuntimeSlot = result.schedule.find(slot => slot.slot === slotNum);
+      if (!originalRuntimeSlot) continue;
+      const prefix = newResult.schedule.filter(slot => slot.slot < slotNum);
+      const stateThroughRuntimeSlot = recomputeStats([...prefix, originalRuntimeSlot], playersWithSkill);
+      const continuedResult = generateSchedule(
+        playersWithSkill,
+        totalSlots,
+        getCourtsPerSlot(),
+        slotNum,
+        extractState(stateThroughRuntimeSlot.schedule, playersWithSkill),
+        null,
+        getScheduleOptions(playersWithSkill),
+      );
+      if (!continuedResult) return;
+      newResult = continuedResult;
+    }
+    newResult = recomputeStats(newResult.schedule, playersWithSkill);
     const nextScores: ScoresMap = {};
     for (const key in scores) {
       const match = key.match(/^s(\d+)c/);

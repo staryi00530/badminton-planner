@@ -1115,6 +1115,56 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('preserves later live slots and generates the tail from their actual rotation history', async () => {
+    const user = userEvent.setup();
+    const players = Array.from({ length: 13 }, (_, i) => makePlayer(`P${i + 1}`));
+    const schedule = Array.from({ length: 7 }, (_, i) => makeSlot(i + 1, [
+      ['P1', 'P2', 'P3', 'P4'],
+      ['P5', 'P6', 'P7', 'P8'],
+      ['P9', 'P10', 'P11', 'P12'],
+    ], ['P13']));
+    const result = { schedule, gamesPlayed: players.map(() => 2) };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(result));
+    localStorage.setItem('bp-totalMinutes', JSON.stringify(105));
+    localStorage.setItem('bp-numCourts', JSON.stringify(3));
+    localStorage.setItem('bp-live-games', JSON.stringify([
+      { slot: 4, court: 0, players: ['P1', 'P2', 'P3', 'P4'] },
+      { slot: 5, court: 1, players: ['P5', 'P6', 'P7', 'P8'] },
+      { slot: 6, court: 2, players: ['P9', 'P10', 'P11', 'P12'] },
+    ]));
+    const generateSpy = vi.spyOn(scheduler, 'generateSchedule');
+    render(<BadmintonPlanner />);
+
+    const current = sectionFor('Current game');
+    await user.click(within(current).getAllByTitle('Edit who plays in this slot')[0]!);
+    await user.click(within(sectionFor('Current game')).getByRole('button', { name: 'Apply & regenerate after' }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('bp-result')!);
+      const lineups = (slots: typeof schedule) => slots.map(slot => slot.courts.map(court => [
+        ...court.teamA.map(player => player.name),
+        ...court.teamB.map(player => player.name),
+      ]));
+      expect(lineups(saved.schedule.slice(4, 6))).toEqual(lineups(schedule.slice(4, 6)));
+      expect(saved.schedule[5].playerState.find((player: { name: string }) => player.name === 'P9').total).toBe(6);
+      expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
+    });
+    const regenerateAfterLastRuntimeSlot = generateSpy.mock.calls.find(call => call[3] === 6);
+    expect(regenerateAfterLastRuntimeSlot).toBeDefined();
+    const state = regenerateAfterLastRuntimeSlot![4]!;
+    const rowLineup = (slot: typeof schedule[number]) => slot.courts.map(court => [
+      ...court.teamA.map(player => player.name),
+      ...court.teamB.map(player => player.name),
+    ]);
+    expect(rowLineup(state.keptSlots[4]!)).toEqual(rowLineup(schedule[4]!));
+    expect(rowLineup(state.keptSlots[5]!)).toEqual(rowLineup(schedule[5]!));
+    expect(state.gamesPlayed[8]).toBe(state.keptSlots.filter(slot => slot.courts.some(court =>
+      [...court.teamA, ...court.teamB].some(player => player.name === 'P9'),
+    )).length);
+    generateSpy.mockRestore();
+  });
+
   it('skips a player from the immediate next selection and clears the skip after regeneration', async () => {
     const user = userEvent.setup();
     const players = ['SkipMe', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11', 'P12'].map(makePlayer);
