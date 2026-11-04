@@ -81,6 +81,7 @@ During a session, current and completed games are preserved. Attendance or court
 
 ## Stack
 
+- Node.js 24 for development and CI (`nvm use` reads `.nvmrc`)
 - React 18 + TypeScript, built with Vite (`npm run dev` / `build` / `preview`)
 - Vitest for the algorithm test suite
 - Firebase Realtime Database for sharing and cross-device win/loss sync, with Firebase App Check (reCAPTCHA v3) and scoped database rules for security
@@ -99,3 +100,27 @@ See [CLAUDE.md](CLAUDE.md) for the full architecture, algorithm internals, and d
 A Cloudflare Worker (`workers/share-links/`) and a base64-hash link remain as fallbacks if
 Firebase isn't configured (`window.FIREBASE_CONFIG` unset in `index.html`), though neither
 supports pushing edits back — just a one-shot link.
+
+### Cloud troubleshooting
+
+Shared links show loading, success, or an error notice. A failed load keeps the link in the
+address bar so it can be retried by refreshing; it leaves your personal schedule intact.
+Firebase reads and writes stop waiting after 15 seconds. Sharing only advertises a cloud link
+after the database acknowledges its write. A timeout means the result is unconfirmed; the
+underlying request can still complete after connectivity returns.
+
+Use **Download debug logs** in the header after reproducing an issue. Cloud entries include
+operations such as `share.load`, `firebase.share.read`, and `firebase.share.create`, their
+status, and sanitized error codes. They do not include shared payloads, share IDs, tokens, or
+raw error messages. The existing session/game diagnostics are included in the same file.
+
+If reCAPTCHA reports **Invalid domain for site key**, open the
+[reCAPTCHA admin console](https://www.google.com/recaptcha/admin), select the v3 key configured
+as `window.RECAPTCHA_SITE_KEY` in `index.html`, and add `staryi00530.github.io` under Domains.
+Use only the hostname, without a protocol or path. Main and beta use the same hostname.
+Keep domain validation and Firebase App Check enforcement enabled. Also check that this key
+is registered for the matching web app under Firebase Console → App Check.
+
+The dependency override for `@firebase/firestore` → `@grpc/grpc-js` keeps Firebase's bundled
+Node-only Firestore transport on a patched compatible 1.x release. This app uses Realtime
+Database rather than Firestore; review the override when Firebase updates its dependency pin.

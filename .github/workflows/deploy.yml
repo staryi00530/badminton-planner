@@ -15,23 +15,23 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           path: site-main
 
       - name: Checkout beta
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: beta
           path: site-beta
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Test & build main
         working-directory: site-main
@@ -47,6 +47,7 @@ jobs:
           VITE_BETA: 'true'
         run: |
           npm ci
+          npx playwright install --with-deps chromium
           npm test
           npx vite build --base=/badminton-planner/beta/ --outDir=dist-beta
 
@@ -57,16 +58,16 @@ jobs:
           mkdir -p combined/beta
           cp -r site-beta/dist-beta/. combined/beta/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: combined
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
