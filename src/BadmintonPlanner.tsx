@@ -876,8 +876,8 @@ function BadmintonPlanner() {
         {queuePromotionPrompt && <QueuePromotionModal prompt={queuePromotionPrompt.prompt} onUseLookahead={() => resolveQueuePromotion('lookahead')} onSubstitute={() => resolveQueuePromotion('substitute')} onCancel={cancelQueuePromotion} />}
         {pendingSessionChange && <SessionChangeModal {...pendingSessionChange} onConfirm={confirmSessionChange} onCancel={cancelSessionChange} />}
 
-        <div style={{ marginBottom: 28, borderBottom: `1px solid ${C.border}`, paddingBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div>
+        <div style={{ marginBottom: 28, borderBottom: `1px solid ${C.border}`, paddingBottom: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ flex: '1 1 180px', minWidth: 0 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
               Match Planner
               {import.meta.env.VITE_BETA === 'true' && (
@@ -893,7 +893,7 @@ function BadmintonPlanner() {
               Updated {new Date(__BUILD_TIME__).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0, maxWidth: '100%', marginLeft: 'auto', alignItems: 'center' }}>
             <button onClick={exportDebugLogs} title="Download debug logs" aria-label="Download debug logs" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, width: 30, height: 28, padding: 0 }}><LucideIcon name="download" size={14} /></button>
             {selectedTab === 'setup' && <>
             {!isSharedSession && <button onClick={() => {
