@@ -1,5 +1,6 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import { initializeAppCheck, ReCaptchaV3Provider, getToken, type AppCheck } from 'firebase/app-check';
+import { cloudOperation } from './utils/cloudDiagnostics';
 import {
   getDatabase,
   ref,
@@ -8,7 +9,6 @@ import {
   update,
   remove,
   get,
-  onValue,
   type Database,
 } from 'firebase/database';
 
@@ -30,19 +30,28 @@ declare global {
 
 let app: FirebaseApp | null = null;
 let db: Database | null = null;
+let appCheck: AppCheck | null = null;
 
 function getDb(): Database | null {
   if (db) return db;
   if (!window.FIREBASE_CONFIG) return null;
   app = initializeApp(window.FIREBASE_CONFIG);
   if (window.RECAPTCHA_SITE_KEY) {
-    initializeAppCheck(app, {
+    appCheck = initializeAppCheck(app, {
       provider: new ReCaptchaV3Provider(window.RECAPTCHA_SITE_KEY),
       isTokenAutoRefreshEnabled: true,
     });
   }
   db = getDatabase(app);
   return db;
+}
+
+async function requireDatabase(): Promise<Database> {
+  const database = getDb();
+  if (!database) throw Object.assign(new Error('Firebase is not configured'), { code: 'cloud/not-configured' });
+  // Surface attestation failures directly instead of waiting indefinitely for RTDB reconnects.
+  if (appCheck) await getToken(appCheck);
+  return database;
 }
 
 export function isFirebaseConfigured(): boolean {
@@ -52,34 +61,39 @@ export function isFirebaseConfigured(): boolean {
 // ─── Win/loss sync (legacy bp-winloss path, unchanged shape) ──────────────────
 
 export function loadWinLoss(): Promise<Record<string, { wins: number; losses: number }>> {
-  const database = getDb();
-  if (!database) return Promise.resolve({});
-  return new Promise(resolve => {
-    onValue(ref(database, 'winLoss'), snapshot => resolve(snapshot.val() || {}), { onlyOnce: true });
+  if (!isFirebaseConfigured()) return Promise.resolve({});
+  return cloudOperation('firebase.winLoss.read', async () => {
+    const database = await requireDatabase();
+    const snapshot = await get(ref(database, 'winLoss'));
+    return snapshot.val() || {};
   });
 }
 
 export function saveWinLoss(data: Record<string, { wins: number; losses: number }>): Promise<void> {
-  const database = getDb();
-  if (!database) return Promise.resolve();
-  return set(ref(database, 'winLoss'), data);
+  if (!isFirebaseConfigured()) return Promise.resolve();
+  return cloudOperation('firebase.winLoss.write', async () => {
+    const database = await requireDatabase();
+    await set(ref(database, 'winLoss'), data);
+  });
 }
 
 // ─── Shared schedule live sync ─────────────────────────────────────────────
 
-export function createShare(payload: unknown): string | null {
-  const database = getDb();
-  if (!database) return null;
-  const newRef = push(ref(database, 'shares'));
-  set(newRef, { ...(payload as object), createdAt: Date.now() });
-  return newRef.key;
+export function createShare(payload: unknown): Promise<string | null> {
+  return cloudOperation('firebase.share.create', async () => {
+    const database = await requireDatabase();
+    const newRef = push(ref(database, 'shares'));
+    await set(newRef, { ...(payload as object), createdAt: Date.now() });
+    return newRef.key;
+  });
 }
 
-export function updateShare(shareId: string, payload: unknown): void {
-  const database = getDb();
-  if (!database) return;
-  // Partial update (not set) so it never clobbers the original createdAt timestamp.
-  update(ref(database, `shares/${shareId}`), payload as object);
+export function updateShare(shareId: string, payload: unknown): Promise<void> {
+  return cloudOperation('firebase.share.update', async () => {
+    const database = await requireDatabase();
+    // Partial update (not set) so it never clobbers the original createdAt timestamp.
+    await update(ref(database, `shares/${shareId}`), payload as object);
+  });
 }
 
 export type FetchShareResult =
@@ -88,15 +102,16 @@ export type FetchShareResult =
   | { status: 'not_found' };
 
 export async function fetchShare(shareId: string): Promise<FetchShareResult> {
-  const database = getDb();
-  if (!database) return { status: 'not_found' };
-  const shareRef = ref(database, `shares/${shareId}`);
-  const snapshot = await get(shareRef);
-  const data = snapshot.val();
-  if (!data) return { status: 'not_found' };
-  if (data.createdAt && Date.now() - data.createdAt > SHARE_TTL_MS) {
-    remove(shareRef).catch(() => {});
-    return { status: 'expired' };
-  }
-  return { status: 'ok', data };
+  return cloudOperation<FetchShareResult>('firebase.share.read', async () => {
+    const database = await requireDatabase();
+    const shareRef = ref(database, `shares/${shareId}`);
+    const snapshot = await get(shareRef);
+    const data = snapshot.val();
+    if (!data) return { status: 'not_found' };
+    if (data.createdAt && Date.now() - data.createdAt > SHARE_TTL_MS) {
+      remove(shareRef).catch(() => {});
+      return { status: 'expired' };
+    }
+    return { status: 'ok', data };
+  });
 }

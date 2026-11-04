@@ -72,7 +72,7 @@ export function useWinLossSync({ winLoss, scores, isAdmin, patchState }) {
 
   const clearWinLoss = useCallback(() => {
     patchState({ winLoss: {} });
-    if (isFirebaseConfigured() && isAdmin) saveWinLoss({});
+    if (isFirebaseConfigured() && isAdmin) saveWinLoss({}).catch(() => setDbSynced('error'));
   }, [isAdmin]);
 
   return { dbSynced, computeSkill, updateScore, clearWinLoss };

@@ -37,6 +37,24 @@ describe('buildSharePayload', () => {
 });
 
 describe('buildSharePayload -> reconstructScheduleFromSharePayload roundtrip', () => {
+  it('loads a Firebase slot whose empty sitting list was omitted', () => {
+    const decoded = reconstructScheduleFromSharePayload({
+      p: [['A', 'M'], ['B', 'M'], ['C', 'F'], ['D', 'F']],
+      slots: [{ s: 1, c: [[[0, 1], [2, 3]]] }],
+    }, { currentGameMinutes: 15, currentNumCourts: 1 });
+    expect(decoded.result.schedule[0].sitting).toEqual([]);
+    expect(decoded.result.schedule[0].courts[0].teamA.map(player => player.name)).toEqual(['A', 'B']);
+  });
+
+  it('loads a Firebase rest slot whose empty court list was omitted', () => {
+    const decoded = reconstructScheduleFromSharePayload({
+      p: [['A', 'M'], ['B', 'M'], ['C', 'F'], ['D', 'F']],
+      slots: [{ s: 1, sit: [0, 1, 2, 3] }],
+    }, { currentGameMinutes: 15, currentNumCourts: 1 });
+    expect(decoded.result.schedule[0].courts).toEqual([]);
+    expect(decoded.result.schedule[0].sitting.map(player => player.name)).toEqual(['A', 'B', 'C', 'D']);
+  });
+
   it('reconstructs the same court assignments and games-played counts', () => {
     const players = makePlayers(12);
     const result = generateSchedule(players, 6, [2, 2, 2, 2, 2, 2], 0, null, null, {});

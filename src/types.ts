@@ -151,7 +151,7 @@ export interface PlannerState extends QueueRuntimeState {
   preferredPairs: PreferredPair[];
   isConfirmed: boolean;
   pendingOverwrite: 'generate' | 'clear' | 'import' | 'regenerateRemaining' | null;
-  shareNotice: 'expired' | null;
+  shareNotice: 'loading' | 'loaded' | 'saved' | 'expired' | 'not_found' | 'error' | 'save_error' | 'invalid' | null;
   loadedPlanId: number | null;
   liveGames: GameRef[];
   completedGames: GameRef[];

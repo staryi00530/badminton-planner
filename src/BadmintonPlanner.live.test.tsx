@@ -3,7 +3,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BadmintonPlanner from './BadmintonPlanner';
-import { fetchShare, isFirebaseConfigured } from './firebase';
+import { createShare, fetchShare, isFirebaseConfigured } from './firebase';
+import { exportLiveQueueLogs } from './utils/liveQueue';
 import type { SharePayload } from './types';
 import { generateSchedule } from './algorithm/scheduler';
 import * as scheduler from './algorithm/scheduler';
@@ -742,6 +743,62 @@ describe('BadmintonPlanner live game flow', () => {
       render(<BadmintonPlanner />);
       expect(screen.getByRole('button', { name: activeTab === 'about' ? 'How it works' : /^Saved plans/ })).toHaveAttribute('aria-current', 'page');
     });
+  });
+
+  describe('share load failures', () => {
+    it('detaches a missing remembered share so a personal plan cannot be saved into it', async () => {
+      vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+      vi.mocked(fetchShare).mockResolvedValue({ status: 'expired' });
+      sessionStorage.setItem('bp-share-id', JSON.stringify('old-share'));
+      sessionStorage.setItem('bp-is-shared-session', 'true');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('expired'));
+      expect(sessionStorage.getItem('bp-share-id')).toBeNull();
+      expect(sessionStorage.getItem('bp-is-shared-session')).toBe('false');
+      expect(window.location.search).toBe('?share=old-share');
+    });
+    it.each(['not_found', 'expired', 'rejected', 'invalid'] as const)('shows and logs %s without replacing the personal schedule or losing the link', async failure => {
+      vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+      if (failure === 'rejected') vi.mocked(fetchShare).mockRejectedValue(Object.assign(new Error('private error text'), { code: 'PERMISSION_DENIED' }));
+      else if (failure === 'invalid') vi.mocked(fetchShare).mockResolvedValue({ status: 'ok', data: { v: 1, p: [], slots: [{ s: 1 }] } });
+      else vi.mocked(fetchShare).mockResolvedValue({ status: failure });
+      const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const personal = localStorage.getItem('bp-result');
+      window.history.replaceState(null, '', '/?share=private-link-id');
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/share link|shared schedule/i));
+      expect(window.location.search).toBe('?share=private-link-id');
+      expect(localStorage.getItem('bp-result')).toBe(personal);
+      expect(JSON.stringify(log.mock.calls)).toContain('share.load');
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-link-id|private error text/);
+      expect(exportLiveQueueLogs()).toContain('share.load');
+    });
+  });
+
+  it('waits for Firebase before showing a successfully published share link', async () => {
+    const user = userEvent.setup();
+    vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+    let acknowledge!: (id: string) => void;
+    vi.mocked(createShare).mockReturnValue(new Promise(resolve => { acknowledge = resolve; }));
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) });
+    render(<BadmintonPlanner />);
+    await user.click(screen.getByRole('button', { name: 'Share', exact: true }));
+    expect(screen.queryByText(/\?share=/)).not.toBeInTheDocument();
+    acknowledge('acknowledged-share');
+    await waitFor(() => expect(screen.getByDisplayValue(/\?share=acknowledged-share/)).toBeInTheDocument());
+  });
+
+  it('shows a failed publish without creating a phantom share session', async () => {
+    const user = userEvent.setup();
+    vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+    vi.mocked(createShare).mockRejectedValue(Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(<BadmintonPlanner />);
+    await user.click(screen.getByRole('button', { name: 'Share', exact: true }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not publish'));
+    expect(sessionStorage.getItem('bp-share-id')).toBeNull();
+    expect(exportLiveQueueLogs()).toContain('PERMISSION_DENIED');
   });
 
   it('generates a schedule into Live session with all initial courts live', async () => {

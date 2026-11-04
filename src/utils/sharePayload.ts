@@ -46,12 +46,20 @@ export function reconstructScheduleFromSharePayload(
   { currentGameMinutes, currentNumCourts }: { currentGameMinutes: number; currentNumCourts: number }
 ) {
   const { p: sharedPlayers, cfg, slots, scores: sharedScores, confirmed } = data;
+  const invalid = () => Object.assign(new Error('Invalid shared schedule'), { code: 'share/invalid' });
+  if (!Array.isArray(sharedPlayers) || !Array.isArray(slots)
+    || (slots.length > 0 && sharedPlayers.length === 0)
+    || sharedPlayers.some(player => !Array.isArray(player) || typeof player[0] !== 'string' || typeof player[1] !== 'string')) throw invalid();
   const n = sharedPlayers.length;
   const gp = new Array(n).fill(0);
   const cp = new Array(n).fill(0);
   const cr = new Array(n).fill(0);
   const newSchedule = slots.map(slot => {
-    const playing = new Set(slot.c.flat(2));
+    if (!slot || !Number.isInteger(slot.s) || !Array.isArray(slot.c ?? []) || !Array.isArray(slot.sit ?? [])) throw invalid();
+    const validIndex = (index: number) => Number.isInteger(index) && index >= 0 && index < n;
+    if (!(slot.sit ?? []).every(validIndex) || !(slot.c ?? []).every((court: unknown) =>
+      Array.isArray(court) && court.length === 2 && court.every(team => Array.isArray(team) && team.every(validIndex)))) throw invalid();
+    const playing = new Set((slot.c ?? []).flat(2));
     for (let i = 0; i < n; i++) {
       if (playing.has(i)) {
         gp[i]++;
@@ -64,12 +72,12 @@ export function reconstructScheduleFromSharePayload(
     }
     return {
       slot: slot.s,
-      courts: slot.c.map((court: any, ci: number) => ({
+      courts: (slot.c ?? []).map((court: any, ci: number) => ({
         court: ci + 1,
         teamA: court[0].map((i: number) => ({ name: sharedPlayers[i]![0], gender: sharedPlayers[i]![1] })),
         teamB: court[1].map((i: number) => ({ name: sharedPlayers[i]![0], gender: sharedPlayers[i]![1] })),
       })),
-      sitting: slot.sit.map((i: number) => ({ name: sharedPlayers[i]![0], gender: sharedPlayers[i]![1] })),
+      sitting: (slot.sit ?? []).map((i: number) => ({ name: sharedPlayers[i]![0], gender: sharedPlayers[i]![1] })),
       playerState: sharedPlayers.map(([name, gender], i) => ({
         name,
         gender,

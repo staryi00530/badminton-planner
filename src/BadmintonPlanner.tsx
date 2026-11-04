@@ -7,6 +7,7 @@ import { useAdminAuth } from './hooks/useAdminAuth';
 import { usePlayerRoster } from './hooks/usePlayerRoster';
 import { useWinLossSync } from './hooks/useWinLossSync';
 import { pruneExpiredPlans } from './utils/pruneExpiredPlans';
+import { cloudDiagnostic, cloudOperation } from './utils/cloudDiagnostics';
 import { computeCourtsPerSlot } from './utils/courtsPerSlot';
 import { applyAvailability as applyAvailabilityUtil } from './utils/availability';
 import { formatSlotTime } from './utils/slotTime';
@@ -213,24 +214,45 @@ function BadmintonPlanner() {
     const params = new URLSearchParams(window.location.search);
     const urlShareId = params.get('share');
 
+    const loadFirebaseShare = async (id: string) => {
+      patchState({ shareNotice: 'loading' });
+      cloudDiagnostic('share.load', 'started');
+      const fail = (notice: 'not_found' | 'expired' | 'invalid' | 'error') => {
+        patchState({ shareNotice: notice, shareId: null, shareToken: null, isSharedSession: false });
+        if (!urlShareId) window.history.replaceState(null, '', `${window.location.pathname}?share=${encodeURIComponent(id)}`);
+      };
+      try {
+        const response = await fetchShare(id);
+        if (response.status !== 'ok') {
+          cloudDiagnostic('share.load', response.status);
+          fail(response.status);
+          return;
+        }
+        const data = response.data;
+        if (data?.v !== 1 || !Array.isArray(data.p) || !Array.isArray(data.slots)) {
+          cloudDiagnostic('share.load', 'invalid');
+          fail('invalid');
+          return;
+        }
+        applySharePayload(data, id);
+        patchState({ shareId: id, isSharedSession: true, shareNotice: 'loaded' });
+        cloudDiagnostic('share.load', 'ok');
+        if (urlShareId) window.history.replaceState(null, '', window.location.pathname);
+      } catch (error) {
+        cloudDiagnostic('share.load', 'failed', error);
+        fail('error');
+      }
+    };
+
     if (urlShareId && isFirebaseConfigured()) {
-      fetchShare(urlShareId)
-        .then(result => {
-          if (result.status === 'ok' && result.data?.v === 1 && result.data.p && result.data.slots) {
-            applySharePayload(result.data, urlShareId);
-            patchState({ shareId: urlShareId, isSharedSession: true });
-          } else if (result.status === 'expired') {
-            patchState({ shareNotice: 'expired' });
-          }
-        })
-        .catch(() => {})
-        .finally(() => window.history.replaceState(null, '', window.location.pathname));
+      void loadFirebaseShare(urlShareId);
       return;
     }
 
     const apiBase = normalizeApiBase(window.SHARE_API_BASE);
     if (urlShareId && apiBase) {
-      fetch(`${apiBase}/shares/${encodeURIComponent(urlShareId)}`)
+      patchState({ shareNotice: 'loading' });
+      cloudOperation('share.api.read', () => fetch(`${apiBase}/shares/${encodeURIComponent(urlShareId)}`))
         .then(async response => {
           if (!response.ok) throw new Error(`Share load failed: ${response.status}`);
           return response.json();
@@ -239,10 +261,15 @@ function BadmintonPlanner() {
           const data = payload?.data;
           if (data?.v === 1 && data.p && data.slots) {
             applySharePayload(data);
+            cloudDiagnostic('share.load', 'ok');
+            patchState({ shareNotice: 'loaded' });
             window.history.replaceState(null, '', window.location.pathname);
-          }
+          } else throw Object.assign(new Error('Invalid share payload'), { code: 'share/invalid' });
         })
-        .catch(() => {});
+        .catch(error => {
+          cloudDiagnostic('share.load', 'failed', error);
+          patchState({ shareNotice: 'error' });
+        });
       return;
     }
 
@@ -252,9 +279,14 @@ function BadmintonPlanner() {
         const data = JSON.parse(atob(hash.slice(7)));
         if (data.v === 1 && data.p && data.slots) {
           applySharePayload(data);
+          cloudDiagnostic('share.load', 'ok');
+          patchState({ shareNotice: 'loaded' });
           window.history.replaceState(null, '', window.location.pathname);
-        }
-      } catch {}
+        } else throw Object.assign(new Error('Invalid share payload'), { code: 'share/invalid' });
+      } catch (error) {
+        cloudDiagnostic('share.load', 'failed', error);
+        patchState({ shareNotice: 'invalid' });
+      }
       return;
     }
 
@@ -262,15 +294,7 @@ function BadmintonPlanner() {
     // viewing/editing a share (e.g. a page refresh) — re-fetch its content, since that
     // content is deliberately excluded from localStorage.
     if (isSharedSession && shareId && isFirebaseConfigured()) {
-      fetchShare(shareId)
-        .then(result => {
-          if (result.status === 'ok' && result.data?.v === 1 && result.data.p && result.data.slots) {
-            applySharePayload(result.data, shareId);
-          } else if (result.status === 'expired') {
-            patchState({ shareNotice: 'expired', shareId: null, isSharedSession: false });
-          }
-        })
-        .catch(() => {});
+      void loadFirebaseShare(shareId);
     }
   }, []);
 
@@ -696,7 +720,10 @@ function BadmintonPlanner() {
 
     if (isSharedSession && shareId && isFirebaseConfigured()) {
       const payload = buildSharePayload();
-      if (payload) updateShare(shareId, payload);
+      if (payload) void updateShare(shareId, payload).then(() => patchState({ shareNotice: 'saved' })).catch(error => {
+        cloudDiagnostic('share.save', 'failed', error);
+        patchState({ shareNotice: 'save_error' });
+      });
     }
   }, [buildSharePayload, isSharedSession, loadedPlanId, result, saveTag, savedPlans, shareId]);
 
@@ -718,16 +745,22 @@ function BadmintonPlanner() {
     if (!data) return;
 
     if (isFirebaseConfigured()) {
+      try {
       const existingId = !forceNew ? shareId : null;
-      const id = existingId || createShare(data);
-      if (existingId) updateShare(existingId, data);
+      const id = existingId || await createShare(data);
+      if (existingId) await updateShare(existingId, data);
       if (id) {
-        patchState({ shareId: id, shareToken: null, isSharedSession: true });
+        patchState({ shareId: id, shareToken: null, isSharedSession: true, shareNotice: null });
         const url = `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(id)}`;
         copyText(url, () => {
           patchState({ sharedUrl: url, copiedShareUrl: true, showShareModal: true, shareIsUpdate: !!existingId });
           setTimeout(() => patchState({ copiedShareUrl: false }), 2000);
         });
+        return;
+      }
+      } catch (error) {
+        cloudDiagnostic('share.publish', 'failed', error);
+        patchState({ shareNotice: 'save_error' });
         return;
       }
     }
@@ -884,10 +917,19 @@ function BadmintonPlanner() {
           </div>
         </div>
 
-        {shareNotice === 'expired' && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16, background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '10px 14px' }}>
-            <span style={{ fontSize: 12, color: C.amber }}>⚡ This share link has expired (older than 30 days) and was removed.</span>
-            <button onClick={() => patchState({ shareNotice: null })} style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 16, padding: 0 }}>×</button>
+        {shareNotice && (
+          <div role={['loading', 'loaded', 'saved'].includes(shareNotice) ? 'status' : 'alert'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16, background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '10px 14px' }}>
+            <span style={{ fontSize: 12, color: C.amber }}>{({
+              loading: 'Loading shared schedule…',
+              loaded: 'Shared schedule loaded.',
+              saved: 'Shared schedule saved to the cloud.',
+              expired: 'This share link has expired (older than 30 days). Ask for a new link.',
+              not_found: 'This share link was not found. Ask the organizer to share it again.',
+              invalid: 'This shared schedule could not be read. Ask for a new share link.',
+              error: 'Could not load this shared schedule. Refresh to retry, or download debug logs for details.',
+              save_error: 'Could not publish this shared schedule. Your local changes are kept. Try Share or Save again, or download debug logs for details.',
+            })[shareNotice]}</span>
+            {shareNotice !== 'loading' && <button aria-label="Dismiss share notice" onClick={() => patchState({ shareNotice: null })} style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 16, padding: 0 }}>×</button>}
           </div>
         )}
 
