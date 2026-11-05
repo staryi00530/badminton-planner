@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import type { Court, Player, SlotResult } from '../algorithm/types';
 import ScheduleGrid from './ScheduleGrid';
 import LiveSessionBoard from './LiveSessionBoard';
 
-function makeSlot(slotNum: number) {
+function makeSlot(slotNum: number): SlotResult {
   return {
     slot: slotNum,
-    courts: [0, 1].map(ci => ({
+    courts: [0, 1].map((ci): Court => ({
       court: ci + 1,
       teamA: [{ name: `A${slotNum}${ci}1`, gender: 'M' }, { name: `A${slotNum}${ci}2`, gender: 'M' }],
       teamB: [{ name: `B${slotNum}${ci}1`, gender: 'M' }, { name: `B${slotNum}${ci}2`, gender: 'M' }],
@@ -19,7 +20,7 @@ function makeSlot(slotNum: number) {
 }
 
 function renderGrid(overrides = {}, Component = LiveSessionBoard) {
-  const players = [{ name: 'A11', gender: 'M' }, { name: 'A12', gender: 'M' }];
+  const players: Player[] = [{ name: 'A11', gender: 'M', availFrom: 0, availTo: 4 }, { name: 'A12', gender: 'M', availFrom: 0, availTo: 4 }];
   render(
     <Component
       result={{ schedule: [1, 2, 3, 4].map(makeSlot), gamesPlayed: [1, 1] }}
@@ -50,7 +51,7 @@ function renderGrid(overrides = {}, Component = LiveSessionBoard) {
 }
 
 function sectionFor(title: string) {
-  return screen.getByRole('heading', { name: title }).closest('section');
+  return required(screen.getByRole('heading', { name: title }).closest('section'));
 }
 
 function expectInSection(title: string, pattern: RegExp) {
@@ -68,11 +69,11 @@ describe('ScheduleGrid integration with live presentation', () => {
 
     const past = screen.getByText('Past games played (2)').closest('details');
     expect(past).not.toHaveAttribute('open');
-    expect(within(past).getAllByText(/SLOT 1/)).toHaveLength(2);
+    expect(within(required(past)).getAllByText(/SLOT 1/)).toHaveLength(2);
 
     const future = screen.getByText('Future games (2)').closest('details');
     expect(future).not.toHaveAttribute('open');
-    expect(within(future).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
+    expect(within(required(future)).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
   });
 
   it('keeps a live earlier slot in Current game until the slot is done', () => {
@@ -137,8 +138,13 @@ describe('ScheduleGrid integration with live presentation', () => {
     const future = screen.getByText('Future games (7)').closest('details')!;
     expect(past).not.toHaveAttribute('open');
     expect(future).not.toHaveAttribute('open');
-    expect(within(past).getByText(/SLOT 1 .* COURT 1/)).toBeInTheDocument();
-    expect(within(future).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
+    expect(within(required(past)).getByText(/SLOT 1 .* COURT 1/)).toBeInTheDocument();
+    expect(within(required(future)).getByText(/SLOT 4 .* COURT 2/)).toBeInTheDocument();
   });
 
 });
+
+function required<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error('Expected test element to exist');
+  return value;
+}

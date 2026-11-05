@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { parseScheduleText, buildCopyText } from './scheduleText.js';
 import { generateSchedule } from '../algorithm/scheduler.js';
+import type { Player } from '../algorithm/types';
 
 const OFF = { enabled: false, startMin: 0, durationMin: 0 };
 
-function makePlayers(count: number) {
+function makePlayers(count: number): Player[] {
   return Array.from({ length: count }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 11 }));
 }
 
@@ -60,7 +61,7 @@ describe('parseScheduleText / buildCopyText roundtrip', () => {
   });
 
   it('resolves round-tripped names back to their correct gender from the roster', () => {
-    const players = [
+    const players: Player[] = [
       { name: 'Amy', gender: 'F', availFrom: 0, availTo: 0 },
       { name: 'Bob', gender: 'M', availFrom: 0, availTo: 0 },
       { name: 'Cara', gender: 'F', availFrom: 0, availTo: 0 },

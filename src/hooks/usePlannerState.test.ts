@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { usePlannerState } from './usePlannerState.js';
 
@@ -54,7 +54,7 @@ describe('usePlannerState — defaults & loading', () => {
     localStorage.setItem('bp-players', JSON.stringify([{ name: 'Alice', gender: 'F' }]));
     const { result } = renderHook(() => usePlannerState());
     expect(result.current.state.numCourts).toBe(3);
-    expect(result.current.state.players).toEqual([{ name: 'Alice', gender: 'F', level: 2 }]);
+    expect(result.current.state.players).toMatchObject([{ name: 'Alice', gender: 'F', level: 3, id: expect.any(String), statsKey: 'Alice' }]);
   });
 
   it('cleans up legacy bp-share-id/bp-share-token localStorage keys on init', () => {
@@ -227,7 +227,7 @@ describe('usePlannerState — cross-tab safety while viewing a shared schedule',
     act(() =>
       result.current.patchState({
         isSharedSession: true,
-        players: [{ name: 'X', gender: 'M' }],
+        players: [{ name: 'X', gender: 'M', availFrom: 0, availTo: 11 }],
         isConfirmed: true,
       })
     );
@@ -266,17 +266,84 @@ describe('usePlannerState — cross-tab safety while viewing a shared schedule',
     expect(JSON.parse(localStorage.getItem('bp-live-games')!)).toEqual(ownLive);
   });
 
-  it('still persists unrelated settings (numCourts) while isSharedSession is true', () => {
+  it('keeps personal court settings separate while isSharedSession is true', () => {
     const { result } = renderHook(() => usePlannerState());
     act(() => result.current.patchState({ isSharedSession: true, numCourts: 3 }));
-    expect(JSON.parse(localStorage.getItem('bp-numCourts')!)).toBe(3);
+    expect(JSON.parse(localStorage.getItem('bp-numCourts')!)).toBe(1);
   });
 
   it('resumes persisting players/result once isSharedSession turns back off', () => {
     const { result } = renderHook(() => usePlannerState());
-    act(() => result.current.patchState({ isSharedSession: true, players: [{ name: 'X', gender: 'M' }] }));
+    act(() => result.current.patchState({ isSharedSession: true, players: [{ name: 'X', gender: 'M', availFrom: 0, availTo: 11 }] }));
     expect(JSON.parse(localStorage.getItem('bp-players')!)).toEqual([]);
     act(() => result.current.patchState({ isSharedSession: false }));
-    expect(JSON.parse(localStorage.getItem('bp-players')!)).toEqual([{ name: 'X', gender: 'M' }]);
+    expect(JSON.parse(localStorage.getItem('bp-players')!)).toEqual([{ name: 'X', gender: 'M', availFrom: 0, availTo: 11 }]);
   });
+});
+
+describe('five-level migration', () => {
+  it('migrates legacy roster and bank once and retains quarantine across reloads', () => {
+    const players = [1, 2, 3].map((level, i) => ({ name: `L${i}`, gender: 'M', level, quarantined: i === 0 }));
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-player-history', JSON.stringify(players));
+    const first = renderHook(() => usePlannerState());
+    expect(first.result.current.state.players.map(p => p.level)).toEqual([1, 3, 5]);
+    expect(first.result.current.state.playerHistory.map(p => p.level)).toEqual([1, 3, 5]);
+    act(() => first.result.current.patchState({ players: first.result.current.state.players.map(p => ({ ...p, level: 4 })) }));
+    first.unmount();
+    const second = renderHook(() => usePlannerState());
+    expect(second.result.current.state.players.map(p => p.level)).toEqual([4, 4, 4]);
+    expect(second.result.current.state.players[0]!.quarantined).toBe(true);
+    expect(second.result.current.state.playerHistory.map(p => p.level)).toEqual([1, 3, 5]);
+  });
+});
+
+describe('beta storage isolation', () => {
+  it('copies the main roster once and migrates only the beta copy', () => {
+    vi.stubEnv('VITE_BETA', 'true');
+    const original = JSON.stringify([{ name: 'Personal', gender: 'M', level: 3, availFrom: 0, availTo: 11 }]);
+    localStorage.setItem('bp-players', original);
+    const first = renderHook(() => usePlannerState());
+    expect(first.result.current.state.players[0]!.level).toBe(5);
+    act(() => first.result.current.patchState({ players: [{ name: 'Beta only', gender: 'F', level: 4, quarantined: true, availFrom: 0, availTo: 11 }] }));
+    expect(localStorage.getItem('bp-players')).toBe(original);
+    first.unmount();
+    localStorage.setItem('bp-players', JSON.stringify([{ name: 'Changed main', gender: 'M', level: 1 }]));
+    const second = renderHook(() => usePlannerState());
+    expect(second.result.current.state.players[0]).toMatchObject({ name: 'Beta only', level: 4, quarantined: true });
+  });
+
+  it('does not restore a cleared beta roster from main on reload', () => {
+    vi.stubEnv('VITE_BETA', 'true');
+    localStorage.setItem('bp-players', JSON.stringify([{ name: 'Personal', gender: 'M', level: 2 }]));
+    const first = renderHook(() => usePlannerState());
+    act(() => first.result.current.patchState({ players: [] }));
+    first.unmount();
+    const second = renderHook(() => usePlannerState());
+    expect(second.result.current.state.players).toEqual([]);
+    expect(JSON.parse(localStorage.getItem('bp-players')!)).toHaveLength(1);
+  });
+
+  it('keeps main and beta share bindings separate', () => {
+    vi.stubEnv('VITE_BETA', 'true');
+    sessionStorage.setItem('bp-share-id', JSON.stringify('main-share'));
+    sessionStorage.setItem('bp-is-shared-session', 'true');
+    const { result } = renderHook(() => usePlannerState());
+    expect(result.current.state.isSharedSession).toBe(false);
+    act(() => result.current.patchState({ shareId: 'beta-share', isSharedSession: true }));
+    expect(JSON.parse(sessionStorage.getItem('bp-share-id')!)).toBe('main-share');
+    expect(JSON.parse(sessionStorage.getItem('beta:bp-share-id')!)).toBe('beta-share');
+  });
+});
+
+it('does not mark the personal roster migrated while a shared session prevents saving it', () => {
+  localStorage.setItem('bp-players', JSON.stringify([{ name: 'Personal', gender: 'M', level: 3 }]));
+  localStorage.setItem('bp-player-history', JSON.stringify([{ name: 'Bank', gender: 'F', level: 2 }]));
+  sessionStorage.setItem('bp-is-shared-session', 'true');
+  const shared = renderHook(() => usePlannerState());
+  shared.unmount();
+  sessionStorage.clear();
+  const personal = renderHook(() => usePlannerState());
+  expect(personal.result.current.state.players[0]!.level).toBe(5);
+  expect(personal.result.current.state.playerHistory[0]!.level).toBe(3);
 });

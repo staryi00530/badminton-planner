@@ -16,6 +16,7 @@ export type PreferredPair = [string, string];
 export interface PlannerResult {
   schedule: SlotResult[];
   gamesPlayed: number[];
+  preserveLineups?: boolean;
 }
 
 export interface ScoreEntry {
@@ -52,7 +53,7 @@ export interface QueueAdjustmentNotice {
   queuedGame: { slot: number; court: number; players: string[] };
   promotedGame: { slot: number; court: number; displayCourt: number; players: string[] };
   unavailablePlayers: string[];
-  replacements: Array<{ replacee: string; replacer: string; court: number }>;
+  replacements: Array<{ replacee: string; replacer: string; court: number; gamesWaited?: number }>;
 }
 
 export interface QueueRuntimeState {
@@ -73,7 +74,7 @@ export interface QueueRuntimeState {
       firstGame: { slot: number; court: number; players: string[] };
       blockedPlayers: string[];
       lookaheadGame: { slot: number; court: number; players: string[] } | null;
-      replacements: Array<{ replacee: string; replacer: string }>;
+      replacements: Array<{ replacee: string; replacer: string; gamesWaited?: number }>;
     };
     nextLiveGames: GameRef[];
     nextCompletedGames: GameRef[];
@@ -83,16 +84,23 @@ export interface QueueRuntimeState {
   } | null;
 }
 
-export interface SharedPlayer {
-  0: string;
-  1: 'M' | 'F' | '?';
-}
+export type SharedPlayer = [string, 'M' | 'F' | '?'];
 
 export interface SharePayload {
   v: 1;
+  schema?: 2;
+  revision?: number;
+  ids?: string[];
+  active?: number[];
   p: SharedPlayer[];
-  cfg?: { g?: number; c?: number };
-  scores?: Record<string, { a: string; b: string }>;
+  /** Public session availability only; private balancing levels are never shared. */
+  q?: number[];
+  cfg?: { g?: number; c?: number; totalMinutes?: number; sessionStart?: string; staggerMode?: StaggerMode; extraCourt?: ExtraCourt; courtOverrides?: Record<number, number> };
+  availability?: Array<{ from: number; to: number; group?: string; leavesAt?: number | null }>;
+  runtime?: { live?: GameRef[]; completed?: GameRef[]; suspended?: string[] };
+  actions?: SharedFinishAction[];
+  receipts?: string[];
+  scores?: Record<string, { a: string; b: string; applied?: boolean }>;
   slots: Array<{
     s: number;
     c: number[][][];
@@ -101,13 +109,20 @@ export interface SharePayload {
   confirmed?: boolean;
 }
 
+export interface SharedFinishAction {
+  id: string;
+  gameId: string;
+  game: GameRef;
+  promoted?: GameRef[];
+}
+
 export interface PlannerState extends QueueRuntimeState {
   undoSnapshot: UndoSnapshot | null;
   players: Player[];
-  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
+  playerHistory: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level' | 'quarantined'>>;
   nameInput: string;
   genderInput: 'M' | 'F';
-  levelInput: 1 | 2 | 3;
+  levelInput: 1 | 2 | 3 | 4 | 5;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;
@@ -177,7 +192,7 @@ export type RuntimePatch = Pick<Partial<PlannerState>,
 export interface PlannerPersistedState {
   activeTab: PlannerState['activeTab'];
   players: Player[];
-  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
+  playerHistory: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level' | 'quarantined'>>;
   totalMinutes: number;
   gameMinutes: number;
   numCourts: number;

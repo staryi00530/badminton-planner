@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { act, renderHook } from '@testing-library/react';
+import { createElement } from 'react';
+import { act, renderHook, render, screen } from '@testing-library/react';
+import { QueuePromotionModal } from '../components/PlannerModals';
 import { usePlannerState } from './usePlannerState';
 import { useScheduleActions } from './useScheduleActions';
 import { useLiveQueue } from './useLiveQueue';
@@ -31,7 +33,7 @@ function session(courts = 3, players = roster, regenerationFails = false) {
     });
     const queue = useLiveQueue({
       ...state, totalSlots: 6, canPlayerJoin: true, getCourtsPerSlot, patchState, recordUndo: planner.recordUndo,
-      regenerate: args => regenerationFails ? null : actions.doRegen(args.targetFromSlot, args.overridePlayers ?? null, args.blockedForFirstSlot, args.overrideWinLoss, args.overrideScores, args.baseResult, args.forcedFirstSlot, args.courtOverrides),
+      regenerate: args => regenerationFails ? null : actions.doRegen(args.targetFromSlot, args.overridePlayers ?? null, args.blockedForFirstSlot, args.overrideWinLoss, args.overrideScores, args.baseResult, args.forcedFirstSlot, args.courtOverrides, args.actualGames),
     });
     return { ...planner, ...queue, actions };
   });
@@ -42,6 +44,23 @@ function session(courts = 3, players = roster, regenerationFails = false) {
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 describe('useLiveQueue future session changes with the real scheduler', () => {
+  it('proposes substitutions for a shared open court without changing saved progress and prefers actual waiting history', () => {
+    const { result } = session(2);
+    const plan = structuredClone(result.current.state.result!);
+    const p = roster;
+    plan.schedule[0]!.courts = [{ court: 1, teamA: [p[0]!, p[1]!], teamB: [p[2]!, p[3]!] }, { court: 2, teamA: [p[4]!, p[5]!], teamB: [p[6]!, p[7]!] }];
+    plan.schedule[1]!.courts = [{ court: 1, teamA: [p[4]!, p[8]!], teamB: [p[9]!, p[10]!] }];
+    plan.schedule[1]!.sitting = [p[0]!, p[11]!];
+    act(() => result.current.patchState({ result: plan, players: p.map((player, i) => i === 11 ? { ...player, gender: 'F' } : i >= 12 ? { ...player, quarantined: true } : player), liveGames: [{ slot: 1, court: 1, displayCourt: 1 }], completedGames: [{ slot: 1, court: 0 }], fromSlot: 1 }));
+    const before = result.current.state;
+    act(() => result.current.prepareQueuePromotionForOpenCourt(1, 0));
+    expect(result.current.state.liveGames).toEqual(before.liveGames);
+    expect(result.current.state.completedGames).toEqual(before.completedGames);
+    expect(result.current.state.result).toEqual(before.result);
+    expect(result.current.queuePromotionPrompt?.prompt.replacements).toContainEqual({ replacee: 'P5', replacer: 'P12', gamesWaited: 1 });
+    render(createElement(QueuePromotionModal, { prompt: result.current.queuePromotionPrompt!.prompt, onUseLookahead: () => {}, onSubstitute: () => {}, onCancel: () => {} }));
+    expect(screen.getByText(/1 games waited/)).toBeInTheDocument();
+  });
   it('logs the roster attributes used for the initial schedule', () => {
     const players = roster.map((player, index) => index === 0
       ? { ...player, gender: 'F' as const, level: 3 as const, availFrom: 2, availTo: 5 }
@@ -66,8 +85,8 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
         phase: 'initial-generation',
         fromSlot: 1,
         players: expect.arrayContaining([
-          { name: 'P1', gender: 'F', level: 3, availFrom: 2, availTo: 5 },
-          { name: 'P2', gender: 'M', level: 2, availFrom: 0, availTo: 5 },
+          { name: 'P1', gender: 'F', level: 5, availFrom: 2, availTo: 5 },
+          { name: 'P2', gender: 'M', level: 3, availFrom: 0, availTo: 5 },
         ]),
       }),
     }));
@@ -88,8 +107,8 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
         phase: 'regeneration',
         fromSlot: 2,
         players: expect.arrayContaining([
-          { name: 'P1', gender: 'F', level: 3, availFrom: 2, availTo: 5 },
-          { name: 'P2', gender: 'M', level: 2, availFrom: 0, availTo: 5 },
+          { name: 'P1', gender: 'F', level: 5, availFrom: 2, availTo: 5 },
+          { name: 'P2', gender: 'M', level: 3, availFrom: 0, availTo: 5 },
         ]),
       }),
     }));
@@ -118,7 +137,7 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     const applied = [...logs].reverse().find((event: { label: string }) => event.label === 'queue:substitution-applied');
     expect(applied).toBeDefined();
     expect(applied.details.queuedGame.players).toContain(blockedPlayer.name);
-    expect(applied.details.replacements).toContainEqual({ replacee: blockedPlayer.name, replacer: expect.any(String) });
+    expect(applied.details.replacements).toContainEqual({ replacee: blockedPlayer.name, replacer: expect.any(String), gamesWaited: expect.any(Number) });
     expect(applied.details.promotedGame.players).not.toContain(blockedPlayer.name);
     expect(applied.details.promotedGame.court).toBe(1);
     expect(applied.details.promotedGame.displayCourt).toBe(1);
@@ -139,7 +158,7 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
         if (action === 'leaving') q.setPlayerLeaving(0);
         if (action === 'joining') q.setPlayerJoining(0);
         if (action === 'back') q.setPlayerBack(0);
-        if (action === 'suspend') q.togglePlayerSuspended(0);
+        if (action === 'suspend') q.togglePlayerQuarantined(0);
         if (action === 'add court') q.adjustCourtsAtSlot(2, 1);
         if (action === 'remove court') q.adjustCourtsAtSlot(2, -1);
         if (action === 'regenerate') q.regenerateUpcoming(2, 3);
@@ -295,7 +314,9 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     const before = result.current.state;
     for (const capacity of [-1, 6, 1.5, NaN]) {
       act(() => result.current.actions.runRegenerateFromSlotWithCourts(2, capacity));
-      expect(result.current.state).toBe(before);
+      expect(result.current.state.courtOverrides).toEqual(before.courtOverrides);
+      expect(result.current.state.result).toBe(before.result);
+      expect(result.current.state.sessionChangeNotice).toMatch(/valid/i);
     }
   });
 
@@ -321,4 +342,81 @@ describe('useLiveQueue future session changes with the real scheduler', () => {
     expect(result.current.state.courtOverrides).toEqual({ 2: 5 });
     expect(result.current.state.result!.schedule[1]!.courts).toHaveLength(5);
   });
+});
+
+describe('persistent quarantine', () => {
+  it('keeps current games intact, excludes from every future regeneration and restores explicitly', () => {
+    const { result } = session(2);
+    const before = result.current.state;
+    const name = before.liveGames[0]!.players![0]!;
+    const idx = before.players.findIndex(p => p.name === name);
+    act(() => result.current.togglePlayerQuarantined(idx));
+    expect(result.current.state.players[idx]!.quarantined).toBe(true);
+    expect(result.current.state.liveGames).toEqual(before.liveGames);
+    expect(result.current.state.result!.schedule[0]!.courts.map(c => [...c.teamA, ...c.teamB].map(p => p.name))).toEqual(before.result!.schedule[0]!.courts.map(c => [...c.teamA, ...c.teamB].map(p => p.name)));
+    const futureNames = () => result.current.state.result!.schedule.slice(1).flatMap(s => s.courts.flatMap(c => [...c.teamA, ...c.teamB])).map(p => p.name);
+    expect(futureNames()).not.toContain(name);
+    act(() => result.current.regenerateUpcoming(2, 2));
+    expect(futureNames()).not.toContain(name);
+    act(() => result.current.togglePlayerQuarantined(idx));
+    expect(result.current.state.players[idx]!.quarantined).toBe(false);
+    expect(futureNames()).toContain(name);
+  });
+
+  it('quarantines even when regeneration fails and prevents starting a stale game', () => {
+    const { result } = session(2, roster, true);
+    const staleResult = result.current.state.result!;
+    const game = staleResult.schedule[1]!.courts[0]!;
+    const name = game.teamA[0].name;
+    const idx = result.current.state.players.findIndex(p => p.name === name);
+    act(() => result.current.togglePlayerQuarantined(idx));
+    expect(result.current.state.players[idx]!.quarantined).toBe(true);
+    const before = result.current.state.liveGames;
+    act(() => result.current.patchState({ liveGames: [], result: staleResult }));
+    act(() => result.current.toggleLiveGame(2, 0));
+    expect(result.current.state.liveGames).toEqual([]);
+    expect(before.length).toBe(2);
+  });
+});
+
+it('retains the live court when quarantine leaves fewer than four eligible players', () => {
+  const { result } = session(1, roster.slice(0, 4));
+  const before = result.current.state.liveGames;
+  act(() => result.current.togglePlayerQuarantined(0));
+  expect(result.current.state.liveGames).toEqual(before);
+  expect(result.current.state.result!.schedule[0]!.courts).toHaveLength(1);
+  expect(result.current.state.result!.schedule.slice(1).every(s => s.courts.length === 0)).toBe(true);
+});
+
+it('removes quarantined upcoming courts in sparse live slots while preserving live lineup and scores', () => {
+  const { result } = session(2);
+  const before = result.current.state;
+  const live = before.liveGames[1]!;
+  const name = before.result!.schedule[0]!.courts[0]!.teamA[0].name;
+  const idx = before.players.findIndex(p => p.name === name);
+  act(() => result.current.patchState({ liveGames: [live], scores: { s1c1: { a: '12', b: '10', applied: false, teamA: [], teamB: [] } } }));
+  act(() => result.current.togglePlayerQuarantined(idx));
+  const state = result.current.state;
+  expect(state.liveGames[0]!.players).toEqual(live.players);
+  expect(state.liveGames[0]!.displayCourt).toBe(live.displayCourt);
+  const liveKey = state.liveGames[0]!;
+  expect(state.scores[`s1c${liveKey.court}`]).toMatchObject({ a: '12', b: '10', applied: false, teamA: [], teamB: [] });
+  const protectedKeys = new Set([...state.liveGames, ...state.completedGames].map(g => `${g.slot}:${g.court}`));
+  expect(state.result!.schedule.flatMap(slot => slot.courts.filter((_, c) => !protectedKeys.has(`${slot.slot}:${c}`)).flatMap(c => [...c.teamA, ...c.teamB])).map(p => p.name)).not.toContain(name);
+});
+
+it('preserves ongoing games across different slots during quarantine', () => {
+  const { result } = session(2);
+  const plan = result.current.state.result!;
+  const court = plan.schedule[1]!.courts[1]!;
+  const later = { slot: 2, court: 1, displayCourt: 1, players: [...court.teamA, ...court.teamB].map(p => p.name) };
+  const name = later.players[0]!;
+  const idx = result.current.state.players.findIndex(p => p.name === name);
+  act(() => result.current.patchState({ liveGames: [result.current.state.liveGames[0]!, later], scores: { s2c1: { a: '17', b: '15', applied: false, teamA: [], teamB: [] } } }));
+  act(() => result.current.togglePlayerQuarantined(idx));
+  const live = result.current.state.liveGames.find(g => g.slot === 2)!;
+  const afterCourt = result.current.state.result!.schedule[1]!.courts[live.court]!;
+  expect(live.players).toEqual(later.players);
+  expect([...afterCourt.teamA, ...afterCourt.teamB].map(p => p.name)).toEqual(later.players);
+  expect(result.current.state.scores[`s2c${live.court}`]).toMatchObject({ a: '17', b: '15', applied: false, teamA: [], teamB: [] });
 });

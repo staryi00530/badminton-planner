@@ -1,3 +1,4 @@
+import { computeSkill as computePlayerSkill } from '../utils/skill';
 import { useCallback } from 'react';
 import type { ForcedFirstSlot, GeneratorYield, Player } from '../algorithm/types';
 import { extractState, generateSchedule, generateScheduleGen } from '../algorithm/scheduler';
@@ -5,6 +6,8 @@ import type { ScheduleOptions } from '../algorithm/scheduler';
 import type { PlannerResult, PlannerState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
 import { initialLiveGamesForSchedule, liveQueueDebug } from '../utils/liveQueue';
 import { getFutureChangeBoundary, reconcileFutureSessionChange } from '../utils/liveQueueTransition';
+import { extractRuntimeScheduleState } from '../utils/runtimeScheduleState';
+import type { GameRef } from '../utils/liveQueue';
 
 interface RegeneratedPlan {
   newResult: PlannerResult;
@@ -25,7 +28,7 @@ interface ScheduleActionOptions {
   fromSlot: number;
   fromSlotCourts: number;
   courtOverrides?: Record<number, number>;
-  computeSkill: (name: string, level?: 1 | 2 | 3) => number;
+  computeSkill: (name: string, level?: 1 | 2 | 3 | 4 | 5) => number;
   getPlayersWithAvailability: () => Player[];
   applyAvailability: (players: Player[]) => Player[];
   getCourtsPerSlot: (overrides?: Record<number, number>) => number[];
@@ -95,9 +98,11 @@ export function useScheduleActions({
   }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players.length, totalSlots]);
 
   const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
-    if (players.length < 4 || !result) return;
-    if (!Number.isInteger(targetFromSlot) || !Number.isInteger(targetCourts) || targetCourts < 0 || targetCourts > 5) return;
+    const fail = (reason: string) => { liveQueueDebug('regenerate:blocked', { reason, targetFromSlot, targetCourts, totalSlots }); patchState({ sessionChangeNotice: reason }); };
+    if (players.length < 4 || !result) { fail('Add at least four eligible players and generate a schedule before regenerating games.'); return; }
+    if (!Number.isInteger(targetFromSlot) || !Number.isInteger(targetCourts) || targetFromSlot < 1 || targetCourts < 0 || targetCourts > 5) { fail('Choose a valid starting slot and between one and five courts.'); return; }
     const boundarySlot = Math.max(targetFromSlot, getFutureChangeBoundary(liveGames, completedGames));
+    if (boundarySlot > totalSlots) { fail('No upcoming slot can be regenerated. Extend the session duration to add more games.'); return; }
     const nextOverrides = targetCourts > 0 ? { ...courtOverrides, [boundarySlot]: targetCourts } : courtOverrides;
     const courtsArr = getCourtsPerSlot(nextOverrides);
     const patch = reconcileFutureSessionChange({
@@ -105,15 +110,16 @@ export function useScheduleActions({
       courtOverrides: nextOverrides, liveGames, completedGames, scores,
       regenerate: () => {
         const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-        const snapshot = extractState(result.schedule.slice(0, boundarySlot - 1), playersWithSkill);
+        const snapshot = extractRuntimeScheduleState(result.schedule.slice(0, boundarySlot - 1), playersWithSkill, [...completedGames, ...liveGames]);
         const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, boundarySlot - 1, snapshot, null, getScheduleOptions(playersWithSkill));
         return newResult ? { newResult, nextScores: {} } : null;
       },
     });
     if (patch) {
       recordUndo();
-      patchState(patch);
-    }
+      patchState({ ...patch, sessionChangeNotice: `Upcoming games regenerated from slot ${boundarySlot}. Current and completed games are unchanged.` });
+      liveQueueDebug('regenerate:applied', { boundarySlot, totalSlots });
+    } else fail('Unable to regenerate upcoming games with the current roster and availability. Review attendance and quarantine, then retry.');
   }, [completedGames, computeSkill, courtOverrides, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, patchState, players.length, result, scores, totalSlots, recordUndo]);
 
   const runRegenerateRemaining = useCallback(() => runRegenerateFromSlotWithCourts(fromSlot, fromSlotCourts), [fromSlot, fromSlotCourts, runRegenerateFromSlotWithCourts]);
@@ -132,23 +138,16 @@ export function useScheduleActions({
   const confirmSchedule = useCallback(() => patchState({ isConfirmed: true }), [patchState]);
   const unconfirmSchedule = useCallback(() => patchState({ isConfirmed: false }), [patchState]);
 
-  const doRegen = useCallback((targetFromSlot: number, overridePlayers: Player[] | null, blockedForFirstSlot: Set<string> = new Set(), overrideWinLoss: WinLossMap | null = null, overrideScores: ScoresMap | null = null, baseResult: PlannerResult | null = result, forcedFirstSlot: ForcedFirstSlot | null = null, overrideCourtOverrides?: Record<number, number>): RegeneratedPlan | null => {
+  const doRegen = useCallback((targetFromSlot: number, overridePlayers: Player[] | null, blockedForFirstSlot: Set<string> = new Set(), overrideWinLoss: WinLossMap | null = null, overrideScores: ScoresMap | null = null, baseResult: PlannerResult | null = result, forcedFirstSlot: ForcedFirstSlot | null = null, overrideCourtOverrides?: Record<number, number>, actualGames: GameRef[] = [...completedGames, ...liveGames]): RegeneratedPlan | null => {
     if (!baseResult) return null;
     const basePlayers = overridePlayers ?? players;
     const targetSlotIdx = targetFromSlot - 1;
     const sourceWinLoss = overrideWinLoss ?? winLoss;
-    const skillFor = (name: string, level?: 1 | 2 | 3) => {
-      const wl = sourceWinLoss[name];
-      const games = (wl?.wins ?? 0) + (wl?.losses ?? 0);
-      if (level == null) return games === 0 ? 0.5 : wl!.wins / games;
-      const prior = (level - 1) / 2;
-      if (games === 0) return prior;
-      return (prior * 3 + (wl!.wins / games) * games) / (3 + games);
-    };
+    const skillFor = (name: string, level?: Player['level']) => computePlayerSkill(basePlayers.find(p => p.name === name)?.statsKey ?? name, sourceWinLoss, level);
     const playersWithSkill = applyAvailability(basePlayers).map(p => ({ ...p, skill: skillFor(p.name, p.level), ...(blockedForFirstSlot.has(p.name) && targetSlotIdx >= p.availFrom && targetSlotIdx <= p.availTo ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}) }));
     logRosterSnapshot(playersWithSkill, 'regeneration', targetFromSlot);
     const keptSlots = baseResult.schedule.slice(0, targetFromSlot - 1);
-    const stateSnapshot = extractState(keptSlots, playersWithSkill);
+    const stateSnapshot = extractRuntimeScheduleState(keptSlots, playersWithSkill, actualGames);
     const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(overrideCourtOverrides), targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));
     if (!newResult) return null;
     const nextScores: ScoresMap = {};
@@ -158,7 +157,7 @@ export function useScheduleActions({
       if (match && parseInt(match[1]!, 10) < targetFromSlot && sourceScores[key]) nextScores[key] = sourceScores[key];
     }
     return { newResult, nextScores };
-  }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss]);
+  }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss, liveGames, completedGames]);
 
   return { runGenerate, runRegenerateFromSlotWithCourts, runRegenerateRemaining, regenerateRemaining, runClearSchedule, clearSchedule, confirmSchedule, unconfirmSchedule, doRegen };
 }

@@ -2,11 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { getFutureChangeBoundary, getQueuePromotionDecision, reconcileFutureSessionChange, reconcileLiveQueue } from './liveQueueTransition';
 import { extractState, generateSchedule } from '../algorithm/scheduler';
 import { computeCourtsPerSlot } from './courtsPerSlot';
-import type { Player } from '../algorithm/types';
+import type { Player, SlotResult } from '../algorithm/types';
 import type { PlannerResult } from '../types';
 
-function scheduleFor(games: Array<[number, number, string[]]>) {
-  const bySlot = new Map<number, Array<string[]>>();
+it('passes actual runtime records to future regeneration instead of treating the plan prefix as played', () => {
+  const liveGames = [{ slot: 1, court: 1 }];
+  const completedGames = [{ slot: 1, court: 0 }];
+  let actual: unknown;
+  reconcileFutureSessionChange({
+    result: { schedule: scheduleFor([[1, 0, ['A', 'B', 'C', 'D']]]), gamesPlayed: [] },
+    totalSlots: 3, boundarySlot: 2, targetCapacity: 1, courtOverrides: {}, liveGames, completedGames, scores: {},
+    regenerate: args => { actual = args.actualGames; return null; },
+  });
+  expect(actual).toEqual([...completedGames, ...liveGames]);
+});
+
+function scheduleFor(games: Array<[number, number, [string, string, string, string]]>): SlotResult[] {
+  const bySlot = new Map<number, Array<[string, string, string, string]>>();
   for (const [slot, court, players] of games) {
     const courts = bySlot.get(slot) ?? [];
     courts[court] = players;
@@ -14,9 +26,13 @@ function scheduleFor(games: Array<[number, number, string[]]>) {
   }
   return [...bySlot.entries()].map(([slot, courts]) => ({
     slot,
-    courts: courts.map(players => ({
-      teamA: players.slice(0, 2).map(name => ({ name, gender: 'M' as const })),
-      teamB: players.slice(2, 4).map(name => ({ name, gender: 'M' as const })),
+    sitting: [],
+    playerState: [],
+    repeatedCourts: [],
+    courts: courts.map(([a, b, c, d], index) => ({
+      court: index + 1,
+      teamA: [{ name: a, gender: 'M' }, { name: b, gender: 'M' }],
+      teamB: [{ name: c, gender: 'M' }, { name: d, gender: 'M' }],
     })),
   }));
 }

@@ -15,7 +15,7 @@ const PLAYERS: Player[] = [
 ];
 
 function renderPanel(overrides = {}) {
-  const handlers = { setPlayerBack: vi.fn(), setPlayerJoining: vi.fn(), setPlayerLeaving: vi.fn(), togglePlayerSuspended: vi.fn() };
+  const handlers = { setPlayerBack: vi.fn(), setPlayerJoining: vi.fn(), setPlayerLeaving: vi.fn(), togglePlayerQuarantined: vi.fn() };
   render(
     <SessionStatusPanel players={PLAYERS} fromSlot={3} totalSlots={12} staggerMode="custom" {...handlers} {...overrides} />
   );
@@ -55,11 +55,11 @@ describe('SessionStatusPanel', () => {
     expect(handlers.setPlayerLeaving).not.toHaveBeenCalled();
   });
 
-  it('a currently-available player shows skip-next and leaving controls', async () => {
+  it('a currently-available player shows quarantine and leaving controls', async () => {
     renderPanel();
     const row = rowFor('Here');
     expect(within(row).getByTitle('Player is done for today')).toBeInTheDocument();
-    expect(within(row).getByTitle('Skip this player for the next generated game only')).toBeInTheDocument();
+    expect(within(row).getByTitle('Move player to quarantine until explicitly returned')).toBeInTheDocument();
     expect(within(row).queryByTitle('Restore player to session')).not.toBeInTheDocument();
     expect(within(row).queryByTitle(/here — add to upcoming round/)).not.toBeInTheDocument();
   });
@@ -96,8 +96,8 @@ describe('SessionStatusPanel', () => {
     const user = userEvent.setup();
     const handlers = renderPanel();
 
-    await user.click(within(rowFor('Here')).getByTitle('Skip this player for the next generated game only'));
-    expect(handlers.togglePlayerSuspended).toHaveBeenCalledWith(0);
+    await user.click(within(rowFor('Here')).getByTitle('Move player to quarantine until explicitly returned'));
+    expect(handlers.togglePlayerQuarantined).toHaveBeenCalledWith(0);
 
     await user.click(within(rowFor('Here')).getByTitle('Player is done for today'));
     expect(handlers.setPlayerLeaving).toHaveBeenCalledWith(0);
@@ -109,13 +109,13 @@ describe('SessionStatusPanel', () => {
     expect(handlers.setPlayerJoining).toHaveBeenCalledWith(3);
   });
 
-  it('shows an undo state for a player already skipping next', async () => {
+  it('offers a return action for a quarantined player', async () => {
     const user = userEvent.setup();
-    const handlers = renderPanel({ suspendedPlayerNames: ['Here'] });
-    const row = rowFor('Here');
-    expect(within(row).getByText('Skipping next')).toBeInTheDocument();
-    await user.click(within(row).getByTitle('Undo skip-next for this player'));
-    expect(handlers.togglePlayerSuspended).toHaveBeenCalledWith(0);
+    const handlers = renderPanel({ players: PLAYERS.map(p => p.name === 'Here' ? { ...p, quarantined: true } : p) });
+    const row = screen.getByRole('region', { name: 'Quarantine' });
+    expect(within(row).getByText('Here')).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: 'Return Here to available' }));
+    expect(handlers.togglePlayerQuarantined).toHaveBeenCalledWith(0);
   });
 
   it('labels player availability directly', () => {
@@ -152,4 +152,15 @@ describe('SessionStatusPanel', () => {
     renderPanel({ players: groupPlayers, fromSlot: 1, totalSlots: 10, staggerMode: 'group' });
     expect(within(rowFor('Late')).queryByRole('button', { name: 'Here now' })).not.toBeInTheDocument();
   });
+});
+
+it('separates quarantined players and offers explicit return even after the final slot', async () => {
+  const user = userEvent.setup();
+  const handlers = renderPanel({ fromSlot: 13, players: PLAYERS.map((p, i) => ({ ...p, quarantined: i === 0 })) });
+  const box = screen.getByRole('region', { name: 'Quarantine' });
+  expect(within(box).getByText('Here')).toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: 'Availability for Here' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Skip next')).not.toBeInTheDocument();
+  await user.click(within(box).getByRole('button', { name: 'Return Here to available' }));
+  expect(handlers.togglePlayerQuarantined).toHaveBeenCalledWith(0);
 });

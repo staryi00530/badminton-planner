@@ -1,32 +1,33 @@
-import { Fragment, useState } from 'react';
+import { newPlayerId, resolvePlayerIdentity } from '../utils/playerIdentity';
+import { Fragment, useRef, useState } from 'react';
 import { C, DEFAULT_PLAYERS, FONT } from '../constants';
 import type { Player, StaggerMode, WinLossMap } from '../types';
 import type { Gender } from '../algorithm/types';
 import { sortPlayerIndicesForDisplay } from '../utils/sortPlayers';
-import { parseRosterPaste, type ParsedRosterEntry } from '../utils/rosterPaste';
+import { ignoredRosterLines, parseRosterPaste, type ParsedRosterEntry } from '../utils/rosterPaste';
 
-type PlayerField = 'name' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
+type PlayerField = 'name' | 'gender' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
 type PlayerFieldValue = string | number | null;
 
 interface PlayerListProps {
   visible?: boolean;
   players: Player[];
-  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>;
+  playerHistory: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level'>>;
   winLoss: WinLossMap;
   staggerMode: StaggerMode;
   totalSlots: number;
   nameInput: string;
   genderInput: 'M' | 'F';
-  levelInput?: 1 | 2 | 3;
+  levelInput?: 1 | 2 | 3 | 4 | 5;
   allDefaultsLoaded: boolean;
   scheduleActive?: boolean;
   showPrivateFields?: boolean;
   setNameInput: (value: string) => void;
   setGenderInput: (value: 'M' | 'F') => void;
-  setLevelInput?: (value: 1 | 2 | 3) => void;
+  setLevelInput?: (value: 1 | 2 | 3 | 4 | 5) => void;
   addPlayer: () => void;
-  addImportedPlayers: (entries: Array<Pick<Player, 'name' | 'gender' | 'level'>>) => void;
-  addSelectedFromBank: (entries: Array<Pick<Player, 'name' | 'gender' | 'level'>>) => void;
+  addImportedPlayers: (entries: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level'>>) => void;
+  addSelectedFromBank: (entries: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level'>>) => void;
   addToBank: (name: string, gender: 'M' | 'F') => void;
   removeFromHistory: (name: string) => void;
   loadDefaults: () => void;
@@ -35,6 +36,7 @@ interface PlayerListProps {
   clearWinLoss: () => void;
   updatePlayer: (index: number, field: PlayerField, value: PlayerFieldValue) => void;
   removePlayer: (index: number) => void;
+  togglePlayerQuarantined?: (index: number) => void;
 }
 
 function SkillDot({ name, winLoss }: { name: string; winLoss: WinLossMap }) {
@@ -57,10 +59,12 @@ function SkillDot({ name, winLoss }: { name: string; winLoss: WinLossMap }) {
 
 interface ImportPreviewRow {
   id: number;
+  mapping: string;
+  newId?: string;
   parsed: ParsedRosterEntry;
   name: string;
   gender: Gender;
-  level: 1 | 2 | 3;
+  level: NonNullable<Player['level']>;
   knownPlayer: boolean;
   alreadyActive: boolean;
   useNamedGuest: boolean;
@@ -79,7 +83,7 @@ export default function PlayerList({
   totalSlots,
   nameInput,
   genderInput,
-  levelInput = 2,
+  levelInput = 3,
   allDefaultsLoaded,
   scheduleActive = false,
   showPrivateFields = true,
@@ -97,8 +101,21 @@ export default function PlayerList({
   clearWinLoss,
   updatePlayer,
   removePlayer,
+  togglePlayerQuarantined,
 }: PlayerListProps) {
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
+  const [nameDraft,setNameDraft]=useState('');
+  const [nameError,setNameError]=useState('');
+  const nameEditFinished=useRef(false);
+  const commitNameEdit=(index:number)=>{
+    if(nameEditFinished.current) return;
+    const name=nameDraft.trim();
+    if(!name){setNameError('Enter a player name.');return;}
+    if(players.some((player,i)=>i!==index&&rosterNameKey(player.name)===rosterNameKey(name))){setNameError('A player with this name is already on the roster.');return;}
+    nameEditFinished.current=true;
+    if(name!==players[index]?.name)updatePlayer(index,'name',name);
+    setNameError('');setEditingNameIdx(null);
+  };
   const [selectedBank, setSelectedBank] = useState<Set<string>>(() => new Set());
   const [bankNameInput, setBankNameInput] = useState('');
   const [bankGenderInput, setBankGenderInput] = useState<'M' | 'F'>('M');
@@ -110,7 +127,7 @@ export default function PlayerList({
   const currentNames = new Set(players.map(p => p.name.toLowerCase()));
   const bankUnsorted = (playerHistory || []).filter(p => !currentNames.has(p.name.toLowerCase()));
   const bankPlayers = sortPlayerIndicesForDisplay(bankUnsorted).map(index => bankUnsorted[index]!);
-  const sortedIndices = sortPlayerIndicesForDisplay(players);
+  const sortedIndices = sortPlayerIndicesForDisplay(players).filter(i => !players[i]!.quarantined);
 
   const toggleSelected = (name: string) => {
     setSelectedBank(prev => {
@@ -133,14 +150,9 @@ export default function PlayerList({
   };
 
   const findKnownPlayer = (name: string, genderHint: Gender | null) => {
-    const direct = [...players, ...playerHistory].find(player =>
-      rosterNameKey(player.name) === rosterNameKey(name) && (!genderHint || player.gender === genderHint),
-    );
-    if (direct || !genderHint) return direct;
-    const baseName = name.replace(/ \([MF]\)$/, '');
-    return [...players, ...playerHistory].find(player =>
-      rosterNameKey(player.name) === rosterNameKey(baseName) && player.gender === genderHint,
-    );
+    const candidates=[...players,...playerHistory].filter(p=>!genderHint||p.gender===genderHint);
+    // Prefer bank records carrying persistent identity over unmigrated UI inputs.
+    return resolvePlayerIdentity(name, [...new Map(candidates.map(p=>[p.id??p.name,p])).values()]);
   };
 
   const makePreviewRow = (parsed: ParsedRosterEntry, id: number, useNamedGuest = true): ImportPreviewRow => {
@@ -148,12 +160,16 @@ export default function PlayerList({
     const genderHint = useNamedGuest ? parsed.genderHint : parsed.fallbackGenderHint ?? null;
     const known = findKnownPlayer(rawName, genderHint);
     const name = known?.name ?? rawName;
+    const matches=[...players,...playerHistory].filter(player=>
+      (!genderHint || player.gender===genderHint) && [player.name,...(player.aliases??[])].some(alias=>rosterNameKey(alias)===rosterNameKey(rawName)));
+    const ambiguous=new Set(matches.map(player=>player.id??`${rosterNameKey(player.name)}:${player.gender}`)).size>1;
     return {
       id,
+      mapping: ambiguous ? 'unresolved' : known ? `existing:${known.id ?? known.name}` : 'new',
       parsed,
       name,
       gender: known?.gender ?? genderHint ?? defaultImportGender,
-      level: known?.level ?? 2,
+      level: known?.level ?? 3,
       knownPlayer: Boolean(known),
       alreadyActive: players.some(player => rosterNameKey(player.name) === rosterNameKey(name)),
       useNamedGuest,
@@ -163,14 +179,21 @@ export default function PlayerList({
   const previewRosterPaste = () => {
     const parsed = parseRosterPaste(rosterPaste);
     setImportMessage(parsed.length ? '' : 'No player names found.');
-    setImportPreview(parsed.map((entry, index) => makePreviewRow(entry, index)));
+    setImportPreview([...parsed.map((entry,index)=>makePreviewRow(entry,index)), ...ignoredRosterLines(rosterPaste).map((name,index)=>({...makePreviewRow({name,genderHint:null,isGuest:false},parsed.length+index),mapping:'ignore'}))]);
   };
 
   const applyRosterPaste = () => {
+    if (!importPreview.some(row=>row.mapping!=='ignore') || importPreview.some(row=>row.mapping==='unresolved')) return;
     const entries = importPreview
-      .map(({ name, gender, level }) => ({ name, gender, level }));
-    addImportedPlayers(entries);
-    setImportMessage(`Roster replaced with ${entries.length} player${entries.length === 1 ? '' : 's'}.`);
+      .filter(row=>row.mapping!=='ignore')
+      .map(row => {
+        const {name,gender,level,mapping}=row;
+        const saved=mapping.startsWith('existing:') ? [...playerHistory,...players].find(p=>(p.id??p.name)===mapping.slice(9)) : undefined;
+        return saved ? { ...(saved.id?{id:saved.id}:{}), ...(saved.statsKey?{statsKey:saved.statsKey}:{}), ...(saved.aliases?{aliases:saved.aliases}:{}), name:saved.name, gender:saved.gender, level:saved.level??3, ...(row.parsed.name!==saved.name?{aliases:[...new Set([...(saved.aliases??[]),row.parsed.name])]}:{}) } : {name,gender,level,...(row.newId?{id:row.newId}:{})};
+      });
+    const uniqueEntries=[...new Map(entries.map(entry=>[entry.id??rosterNameKey(entry.name),entry])).values()];
+    addImportedPlayers(uniqueEntries);
+    setImportMessage(`Roster replaced with ${uniqueEntries.length} player${uniqueEntries.length === 1 ? '' : 's'}.`);
     setImportPreview([]);
     setRosterPaste('');
   };
@@ -178,6 +201,8 @@ export default function PlayerList({
   const updatePreviewRow = (id: number, update: Partial<ImportPreviewRow>) => {
     setImportPreview(rows => rows.map(row => row.id === id ? { ...row, ...update } : row));
   };
+  const importCount=new Set(importPreview.filter(row=>row.mapping!=='ignore').map(row=>row.mapping.startsWith('existing:')?row.mapping:rosterNameKey(row.name))).size;
+  const mappingOptions=[...new Map([...playerHistory,...players].map(p=>[p.id??p.name,p])).values()];
   return (
     <details open={!scheduleActive} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
       <summary style={{ fontSize: 14, color: C.text, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>Players ({players.length})</summary>
@@ -233,7 +258,7 @@ export default function PlayerList({
         </div>
         {showPrivateFields && <div title="Private level used for balancing" style={{ display: 'flex', alignItems: 'center', gap: 3, border: `1px solid ${C.border}`, borderRadius: 6, padding: '3px 4px' }}>
           <span style={{ fontSize: 10, color: C.textMuted, padding: '0 3px' }}>Level</span>
-          {([1, 2, 3] as const).map(level => (
+          {([1, 2, 3, 4, 5] as const).map(level => (
             <button key={level} onClick={() => setLevelInput(level)} style={{ background: levelInput === level ? C.accentDim : 'transparent', color: levelInput === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 4, padding: '5px 7px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>{level}</button>
           ))}
         </div>}
@@ -276,6 +301,18 @@ export default function PlayerList({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '0 20px', maxHeight: 320, overflowY: 'auto', padding: '0 8px 0 0' }}>
               {importPreview.map(row => (
                 <div key={row.id} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderTop: `1px solid ${C.border}`, padding: '8px 0' }}>
+                  <label style={{fontSize:11}}>Original: {row.parsed.name}
+                    <select aria-label={`Map ${row.parsed.name}`} value={row.mapping} onChange={event=>{
+                      const mapping=event.target.value;
+                      const saved=mappingOptions.find(p=>(p.id??p.name)===mapping.slice(9));
+                      updatePreviewRow(row.id,{mapping,...(mapping==='new'?{newId:newPlayerId()}:{}),...(saved?{name:saved.name,gender:saved.gender,level:saved.level??3,knownPlayer:true}:{name:row.parsed.name,knownPlayer:false})});
+                    }}>
+                      {row.mapping==='unresolved' && <option value="unresolved" disabled>Choose a player or New</option>}
+                      <option value="new">New player</option><option value="ignore">Ignore</option>
+                      {mappingOptions.map(p=><option key={p.id??p.name} value={`existing:${p.id??p.name}`}>Existing: {p.name} ({p.gender})</option>)}
+                    </select>
+                    {row.mapping==='unresolved' && <span role="alert" style={{display:'block',color:C.amber}}>Multiple saved players match. Choose Existing, New player, or Ignore.</span>}
+                  </label>
                   <div style={{ minWidth: 0, flex: '1 1 130px' }}>
                     <div style={{ color: row.gender === 'F' ? C.pink : C.text, fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere' }}>{row.name}</div>
                     {row.parsed.isGuest && row.parsed.fallbackName && (
@@ -305,8 +342,9 @@ export default function PlayerList({
                 </div>
               ))}
             </div>
-            <button onClick={applyRosterPaste} style={{ marginTop: 10, background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>
-              Replace roster with {importPreview.length} player{importPreview.length === 1 ? '' : 's'}
+            {importCount===0 && <p role="status" style={{fontSize:12,color:C.textDim}}>No players selected. The existing roster will be kept.</p>}
+            <button disabled={importCount===0 || importPreview.some(row=>row.mapping==='unresolved')} onClick={applyRosterPaste} style={{ marginTop: 10, background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>
+              Replace roster with {importCount} player{importCount === 1 ? '' : 's'}
             </button>
           </div>
         )}
@@ -413,39 +451,40 @@ export default function PlayerList({
             const prevGender = previous?.gender ?? null;
             if (!p) return null;
             return (
-            <Fragment key={`${p.name}-${i}`}>
+            <Fragment key={p.id ?? `${p.name}-${i}`}>
               {p.gender !== prevGender && (
                 <p style={{ fontSize: 11, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.5px', margin: idx === 0 ? '0 0 -2px' : '10px 0 -2px' }}>
                   {p.gender === 'F' ? 'F' : 'M'}
                 </p>
               )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', boxShadow: C.shadow }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', boxShadow: C.shadow }}>
               {editingNameIdx === i ? (
-                <input autoFocus value={p.name}
-                  onChange={e => updatePlayer(i, 'name', e.target.value)}
-                  onBlur={() => setEditingNameIdx(null)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingNameIdx(null); }}
+                <input autoFocus aria-label={`Edit name for ${p.name}`} value={nameDraft}
+                  onChange={e => {setNameDraft(e.target.value);setNameError('');}}
+                  onBlur={() => commitNameEdit(i)}
+                  onKeyDown={e => { if(e.key==='Enter'){e.preventDefault();commitNameEdit(i);}else if(e.key==='Escape'){nameEditFinished.current=true;setNameError('');setEditingNameIdx(null);} }}
                   style={{ color: p.gender === 'F' ? C.pink : C.accent, fontWeight: 700, fontSize: 14, width: 90, background: C.bg, border: `1px solid ${p.gender === 'F' ? C.pinkDim : C.accentDim}`, borderRadius: 4, padding: '2px 6px', fontFamily: FONT, outline: 'none' }} />
               ) : (
-                <span onClick={() => setEditingNameIdx(i)} title="Click to edit name"
+                <span onClick={() => {nameEditFinished.current=false;setNameDraft(p.name);setNameError('');setEditingNameIdx(i);}} title="Click to edit name"
                   style={{ color: p.gender === 'F' ? C.pink : C.accent, fontWeight: 700, fontSize: 14, minWidth: 70, cursor: 'text' }}>{p.name}</span>
               )}
-              <span style={{ fontSize: 11, color: C.textDim }}>{p.gender === 'F' ? '♀' : '♂'}</span>
+              {editingNameIdx===i && nameError && <span role="alert" style={{fontSize:12,color:C.amber}}>{nameError}</span>}
+              <select aria-label={`Gender for roster ${p.name}`} value={p.gender} onChange={e=>updatePlayer(i,'gender',e.target.value)}><option value="M">♂</option><option value="F">♀</option></select>
               {showPrivateFields && <div title="Private balancing level" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <span style={{ fontSize: 10, color: C.textMuted }}>L</span>
-                {([1, 2, 3] as const).map(level => (
-                  <button key={level} onClick={() => updatePlayer(i, 'level', level)} style={{ background: (p.level ?? 2) === level ? C.accentDim : 'transparent', color: (p.level ?? 2) === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 3, padding: '2px 4px', fontSize: 10, fontWeight: 700, fontFamily: FONT }}>{level}</button>
+                {([1, 2, 3, 4, 5] as const).map(level => (
+                  <button key={level} onClick={() => updatePlayer(i, 'level', level)} style={{ background: (p.level ?? 3) === level ? C.accentDim : 'transparent', color: (p.level ?? 3) === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 3, padding: '2px 4px', fontSize: 10, fontWeight: 700, fontFamily: FONT }}>{level}</button>
                 ))}
               </div>}
-              {winLoss[p.name] && (() => {
-                const record = winLoss[p.name];
+              {winLoss[p.statsKey ?? p.name] && (() => {
+                const record = winLoss[p.statsKey ?? p.name];
                 return !!record && record.wins + record.losses > 0;
               })() && (
                 <span style={{ fontSize: 11, color: C.textMuted }}>
-                  {winLoss[p.name]?.wins}W–{winLoss[p.name]?.losses}L
+                  {winLoss[p.statsKey ?? p.name]?.wins}W–{winLoss[p.statsKey ?? p.name]?.losses}L
                 </span>
               )}
-              <SkillDot name={p.name} winLoss={winLoss} />
+              <SkillDot name={p.statsKey ?? p.name} winLoss={winLoss} />
 
               {staggerMode === 'group' && (
                 <div style={{ display: 'flex', gap: 3, marginLeft: 'auto' }}>
@@ -516,6 +555,7 @@ export default function PlayerList({
                 </div>
               )}
 
+              {togglePlayerQuarantined && <button aria-label={`Quarantine ${p.name}`} onClick={() => togglePlayerQuarantined(i)} style={{ background: 'none', color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 4, padding: '4px 6px', fontSize: 11, fontFamily: FONT }}>Quarantine</button>}
               <button onClick={() => removePlayer(i)} style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 16, padding: 0 }}>×</button>
             </div>
             </Fragment>

@@ -3,9 +3,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BadmintonPlanner from './BadmintonPlanner';
-import { createShare, fetchShare, isFirebaseConfigured } from './firebase';
+import { createShare, fetchShare, isFirebaseConfigured, commitShare, subscribeShare, performShareAction } from './firebase';
+import { buildSharePayload } from './utils/sharePayload';
+import { applySharedAction, commitSharedSnapshot } from './utils/sharedSession';
 import { exportLiveQueueLogs } from './utils/liveQueue';
-import type { SharePayload } from './types';
+import type { PlannerResult, SharePayload } from './types';
 import { generateSchedule } from './algorithm/scheduler';
 import * as scheduler from './algorithm/scheduler';
 import type { Player } from './algorithm/types';
@@ -15,6 +17,9 @@ vi.mock('./firebase', () => ({
   createShare: vi.fn(),
   updateShare: vi.fn(),
   fetchShare: vi.fn(),
+  subscribeShare: vi.fn(() => () => {}),
+  commitShare: vi.fn(),
+  performShareAction: vi.fn(),
   loadWinLoss: vi.fn(async () => ({})),
   saveWinLoss: vi.fn(async () => {}),
 }));
@@ -48,10 +53,10 @@ function sectionFor(title: string) {
 async function startNextVisibleGame(user: ReturnType<typeof userEvent.setup>) {
   const currentStarts = within(sectionFor('Current game')).queryAllByText('Start game');
   if (currentStarts.length > 0) {
-    await user.click(currentStarts[0]);
+    await user.click(required(currentStarts[0]));
     return;
   }
-  await user.click(within(sectionFor('Next game')).getAllByText('Start game')[0]);
+  await user.click(required(within(sectionFor('Next game')).getAllByText('Start game')[0]));
 }
 
 describe('BadmintonPlanner live game flow', () => {
@@ -148,7 +153,7 @@ describe('BadmintonPlanner live game flow', () => {
       const tag = screen.getByPlaceholderText(/e.g. Wed/);
       await user.clear(tag);
       await user.type(tag, 'Keep this plan');
-      await user.click(within(tag.parentElement!).getByRole('button', { name: mode === 'update' ? 'Update' : 'Save', exact: true }));
+      await user.click(within(tag.parentElement!).getByRole('button', { name: mode === 'update' ? 'Update' : 'Save' }));
       const saved = stored('bp-saved-plans');
       const loadedId = stored('bp-loaded-plan-id');
       expect(saved).toHaveLength(1);
@@ -184,7 +189,7 @@ describe('BadmintonPlanner live game flow', () => {
       await user.click(screen.getByRole('button', { name: 'Setup' }));
       await user.click(screen.getByText('Players (12)'));
       await user.type(screen.getByPlaceholderText('Player name'), 'Keep guest');
-      await user.click(screen.getByRole('button', { name: 'ADD', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'ADD' }));
       expect(stored('bp-players')).toHaveLength(13);
       expect(undo()).toBeDisabled();
       await user.click(undo());
@@ -272,7 +277,7 @@ describe('BadmintonPlanner live game flow', () => {
       await startNextVisibleGame(user);
       await startNextVisibleGame(user);
 
-      const firstLane = within(sectionFor('Current game')).getByRole('region', { name: 'Court 1', exact: true });
+      const firstLane = within(sectionFor('Current game')).getByRole('region', { name: /^Court 1$/ });
       await user.click(within(firstLane).getByTitle('Edit who plays in this slot'));
       await user.selectOptions(within(firstLane).getAllByRole('combobox')[0]!, 'P9');
       await user.click(within(firstLane).getByRole('button', { name: 'This game only' }));
@@ -306,7 +311,7 @@ describe('BadmintonPlanner live game flow', () => {
       await user.click(screen.getByRole('button', { name: 'Setup' }));
       const pastSchedule = screen.getByText(/Past games played \(1\)/).parentElement!;
       await user.click(pastSchedule.querySelector('summary')!);
-      const historicalCourt = pastSchedule.querySelector('.schedule-grid > div')!;
+      const historicalCourt = pastSchedule.querySelector<HTMLElement>('.schedule-grid > div')!;
       await user.click(within(historicalCourt).getByTitle('Edit who plays in this slot'));
       await user.selectOptions(within(historicalCourt).getAllByRole('combobox')[0]!, 'P9');
       await user.click(within(historicalCourt).getByRole('button', { name: 'This game only' }));
@@ -331,7 +336,7 @@ describe('BadmintonPlanner live game flow', () => {
       await startNextVisibleGame(user);
 
       const before = stored('bp-result');
-      const firstLane = screen.getByRole('region', { name: 'Court 1', exact: true });
+      const firstLane = screen.getByRole('region', { name: /^Court 1$/ });
       await user.click(within(firstLane).getByTitle('Edit who plays in this slot'));
       await user.selectOptions(within(firstLane).getAllByRole('combobox')[0]!, 'P9');
       await user.click(within(firstLane).getByRole('button', { name: 'This game only' }));
@@ -386,7 +391,7 @@ describe('BadmintonPlanner live game flow', () => {
       await start(user, 2);
       const current = [lane(1).textContent, lane(2).textContent];
       const firstSlot = stored('bp-result').schedule[0];
-      await user.click(screen.getByRole('button', { name: 'Add court', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'Add court' }));
       await user.click(availability('P24').getByRole('button', { name: 'Here now' }));
       const beforeDeparture = stored('bp-result');
       const arrivedPlayers = stored('bp-players');
@@ -394,15 +399,15 @@ describe('BadmintonPlanner live game flow', () => {
       await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
       expect(stored('bp-result').schedule.slice(1).every((s: { courts: { teamA: Player[]; teamB: Player[] }[] }) =>
         s.courts.every(c => [...c.teamA, ...c.teamB].every(p => p.name !== 'P1')))).toBe(true);
-      await user.click(screen.getByRole('button', { name: 'Setup', exact: true }));
-      expect(screen.getByRole('button', { name: 'Setup', exact: true })).toHaveAttribute('aria-current', 'page');
-      expect(screen.getByRole('button', { name: 'Re-roll', exact: true })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Setup' }));
+      expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('button', { name: 'Re-roll' })).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Undo last action' }));
       expect(screen.getByRole('button', { name: 'Undo last action' })).toBeDisabled();
       expect(stored('bp-result')).toEqual(beforeDeparture);
       expect(stored('bp-players')).toEqual(arrivedPlayers);
       expect(stored('bp-courtOverrides')).toEqual({ 2: 3 });
-      await user.click(screen.getByRole('button', { name: 'Live session', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'Live session' }));
       expect([lane(1).textContent, lane(2).textContent]).toEqual(current);
       expect(stored('bp-result').schedule[0]).toEqual(firstSlot);
       expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(3);
@@ -681,6 +686,7 @@ describe('BadmintonPlanner live game flow', () => {
       const user = userEvent.setup();
       const plan = seed();
       localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
+      localStorage.setItem('bp-player-level-scale', '5');
       localStorage.setItem('bp-saved-plans', JSON.stringify([{ id: 7, tag: 'Replacement', result: plan, savedAt: new Date().toISOString() }]));
       render(<BadmintonPlanner />);
       await user.click(screen.getByRole('button', { name: 'Remove court' }));
@@ -710,6 +716,7 @@ describe('BadmintonPlanner live game flow', () => {
       };
       localStorage.setItem('bp-active-tab', JSON.stringify(activeTab));
       localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
+      localStorage.setItem('bp-player-level-scale', '5');
       localStorage.setItem('bp-players', JSON.stringify(Array.from({ length: 12 }, (_, i) => ({ ...makePlayer(`P${i + 1}`), level: 2 }))));
       const personalResult = localStorage.getItem('bp-result');
       const personalPlayers = localStorage.getItem('bp-players');
@@ -745,6 +752,87 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  describe('shared session autosave and controls', () => {
+    function sharedCloud() {
+      const players: Player[] = Array.from({ length: 12 }, (_, i) => ({ id: `shared-${i}`, name: `Shared ${i + 1}`, gender: 'M', availFrom: 0, availTo: 5 }));
+      const plan = generateSchedule(players, 6, Array(6).fill(2), 0, null, null, {})!;
+      let current: SharePayload = { ...buildSharePayload({ result: plan, playersWithAvailability: players, gameMinutes: 10, numCourts: 2, scores: {}, isConfirmed: false,
+        settings: { totalMinutes: 60, sessionStart: '19:30', staggerMode: 'none' },
+        runtime: { live: [{ slot: 1, court: 0 }, { slot: 1, court: 1 }], completed: [] },
+      })!, revision: 0 };
+      let listener: ((data: SharePayload | null) => void) | undefined;
+      vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+      vi.mocked(fetchShare).mockImplementation(async () => ({ status: 'ok', data: structuredClone(current) }));
+      vi.mocked(subscribeShare).mockImplementation((_id, next) => { listener = next; return () => { listener = undefined; }; });
+      vi.mocked(commitShare).mockImplementation(async (_id, revision, payload) => {
+        const next = commitSharedSnapshot(current, revision, payload);
+        if (!next) throw Object.assign(new Error('conflict'), { code: 'share/conflict' });
+        current = next; listener?.(current); return structuredClone(current);
+      });
+      vi.mocked(performShareAction).mockImplementation(async (_id, action) => {
+        const next = applySharedAction(current, action);
+        if (!next) throw Object.assign(new Error('blocked'), { code: 'share/action-blocked' });
+        current = next; listener?.(current); return structuredClone(current);
+      });
+      window.history.replaceState(null, '', '/?share=test-session');
+      return { read: () => current };
+    }
+    it('opens the explicit URL share instead of a different share remembered in the same tab', async () => {
+      sessionStorage.setItem('bp-share-id', JSON.stringify('previous-share'));
+      sessionStorage.setItem('bp-is-shared-session', 'true');
+      sharedCloud();
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      expect(fetchShare).toHaveBeenLastCalledWith('test-session');
+      expect(sessionStorage.getItem('bp-share-id')).toBe(JSON.stringify('test-session'));
+    });
+    it('autosaves a metadata edit and restores the shared settings and edit after remount', async () => {
+      const cloud = sharedCloud();
+      const { unmount } = render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      expect(sectionFor('Current game')).toHaveTextContent('Shared');
+      fireEvent.click(screen.getByRole('button', { name: 'Setup' }));
+      fireEvent.change(screen.getByLabelText('Gender for roster Shared 1'), { target: { value: 'F' } });
+      await waitFor(() => expect(cloud.read().p[0]?.[1]).toBe('F'));
+      const lineups = cloud.read().slots;
+      expect(cloud.read().cfg).toMatchObject({ totalMinutes: 60, g: 10, sessionStart: '19:30' });
+      unmount();
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      expect(cloud.read().slots).toEqual(lineups);
+      fireEvent.click(screen.getByRole('button', { name: 'Setup' }));
+      expect(screen.getByLabelText('Gender for roster Shared 1')).toHaveValue('F');
+    });
+    it('autosaves clearing the shared plan instead of restoring the old schedule on refresh', async () => {
+      const cloud = sharedCloud();
+      const { unmount } = render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: 'Setup' }));
+      fireEvent.click(screen.getByTitle('Clear schedule'));
+      await waitFor(() => expect(cloud.read().slots).toHaveLength(0));
+      unmount();
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      expect(screen.getByRole('button', { name: 'Live session' })).toBeDisabled();
+    });
+    it('finishes a shared game and confirms before undoing its promoted replacement', async () => {
+      const cloud = sharedCloud();
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      fireEvent.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Finish game' })[0]!);
+      await waitFor(() => expect(cloud.read().runtime?.completed).toHaveLength(1));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Undo last Finish' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Undo last Finish' }));
+      if (cloud.read().actions?.at(-1)?.promoted?.length) {
+        expect(screen.getByRole('alertdialog', { name: 'Undo Finish' })).toBeInTheDocument();
+        expect(cloud.read().runtime?.completed).toHaveLength(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Undo Finish and stop replacement' }));
+      }
+      await waitFor(() => expect(cloud.read().runtime?.completed ?? []).toHaveLength(0));
+      expect(cloud.read().runtime?.live).toHaveLength(2);
+    });
+  });
+
   describe('share load failures', () => {
     it('detaches a missing remembered share so a personal plan cannot be saved into it', async () => {
       vi.mocked(isFirebaseConfigured).mockReturnValue(true);
@@ -754,7 +842,7 @@ describe('BadmintonPlanner live game flow', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       render(<BadmintonPlanner />);
       await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('expired'));
-      expect(sessionStorage.getItem('bp-share-id')).toBeNull();
+      await waitFor(() => expect(sessionStorage.getItem('bp-share-id')).toBeNull());
       expect(sessionStorage.getItem('bp-is-shared-session')).toBe('false');
       expect(window.location.search).toBe('?share=old-share');
     });
@@ -783,7 +871,7 @@ describe('BadmintonPlanner live game flow', () => {
     vi.mocked(createShare).mockReturnValue(new Promise(resolve => { acknowledge = resolve; }));
     Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) });
     render(<BadmintonPlanner />);
-    await user.click(screen.getByRole('button', { name: 'Share', exact: true }));
+    await user.click(screen.getByRole('button', { name: /^Share$/ }));
     expect(screen.queryByText(/\?share=/)).not.toBeInTheDocument();
     acknowledge('acknowledged-share');
     await waitFor(() => expect(screen.getByDisplayValue(/\?share=acknowledged-share/)).toBeInTheDocument());
@@ -795,7 +883,7 @@ describe('BadmintonPlanner live game flow', () => {
     vi.mocked(createShare).mockRejectedValue(Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' }));
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     render(<BadmintonPlanner />);
-    await user.click(screen.getByRole('button', { name: 'Share', exact: true }));
+    await user.click(screen.getByRole('button', { name: /^Share$/ }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not publish'));
     expect(sessionStorage.getItem('bp-share-id')).toBeNull();
     expect(exportLiveQueueLogs()).toContain('PERMISSION_DENIED');
@@ -805,6 +893,7 @@ describe('BadmintonPlanner live game flow', () => {
     const user = userEvent.setup();
     localStorage.removeItem('bp-result');
     localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
+      localStorage.setItem('bp-player-level-scale', '5');
     render(<BadmintonPlanner />);
 
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
@@ -824,6 +913,7 @@ describe('BadmintonPlanner live game flow', () => {
   it('re-rolls from Setup into Live session with all initial courts live', async () => {
     const user = userEvent.setup();
     localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
+      localStorage.setItem('bp-player-level-scale', '5');
     render(<BadmintonPlanner />);
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     await user.click(screen.getByRole('button', { name: 'Re-roll' }));
@@ -851,6 +941,7 @@ describe('BadmintonPlanner live game flow', () => {
   it('returns to Setup when the active schedule is cleared', async () => {
     const user = userEvent.setup();
     localStorage.setItem('bp-courtOverrides', JSON.stringify({ 1: 5 }));
+      localStorage.setItem('bp-player-level-scale', '5');
     render(<BadmintonPlanner />);
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     await user.click(screen.getByRole('button', { name: 'Clear' }));
@@ -871,7 +962,7 @@ describe('BadmintonPlanner live game flow', () => {
     expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Preferred pairing first player')).not.toBeInTheDocument();
     for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view']) {
-      expect(screen.queryByRole('button', { name, exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: new RegExp('^' + name + '$') })).not.toBeInTheDocument();
     }
     expect(screen.queryByText('Re-generate from slot')).not.toBeInTheDocument();
     expect(screen.getAllByTitle('Player is done for today').length).toBeGreaterThan(0);
@@ -879,18 +970,18 @@ describe('BadmintonPlanner live game flow', () => {
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
     for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view']) {
-      expect(screen.getByRole('button', { name, exact: true })).toBeVisible();
+      expect(screen.getByRole('button', { name: new RegExp('^' + name + '$') })).toBeVisible();
     }
     expect(screen.getByText('Re-generate from slot')).toBeVisible();
     await user.click(screen.getByText('Session settings'));
     expect(screen.getByLabelText('Preferred pairing first player')).toBeVisible();
     await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'P1');
     await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'P2');
-    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
     await user.click(screen.getByText('Players (12)'));
     expect(screen.getByPlaceholderText('Player name')).toBeVisible();
     expect(screen.queryByTitle('Private level used for balancing')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Admin view', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Admin view' }));
     expect(screen.getByTitle('Private level used for balancing')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Live session' }));
@@ -939,10 +1030,10 @@ describe('BadmintonPlanner live game flow', () => {
   it.each(['Past games', 'Saved plans', 'How it works'])('does not expose setup controls on %s', async name => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
-    await user.click(screen.getByRole('button', { name, exact: true }));
+    await user.click(screen.getByRole('button', { name }));
     expect(screen.queryByPlaceholderText('Player name')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Re-roll' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Admin view', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Admin view$/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download debug logs' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     expect(screen.getByRole('button', { name: 'Re-roll' })).toBeVisible();
@@ -954,7 +1045,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]);
+    await user.click(required(within(sectionFor('Current game')).getAllByText('Finish game')[0]));
     await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
 
     await waitFor(() => {
@@ -991,7 +1082,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]);
+    await user.click(required(within(sectionFor('Current game')).getAllByText('Finish game')[0]));
 
     expect(screen.getByRole('heading', { name: 'Court 1 is ready' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use next playable game' })).toBeInTheDocument();
@@ -1027,7 +1118,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[0]);
+    await user.click(required(within(sectionFor('Current game')).getAllByText('Finish game')[0]));
     await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
     await waitFor(() => {
       const current = sectionFor('Current game');
@@ -1039,7 +1130,7 @@ describe('BadmintonPlanner live game flow', () => {
     });
 
     // Court 1 is now the promoted game, so finish the unchanged court 2 lane.
-    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[1]);
+    await user.click(required(within(sectionFor('Current game')).getAllByText('Finish game')[1]));
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(3);
       expect(within(sectionFor('Current game')).getAllByText(/SLOT 2/).length).toBeGreaterThan(0);
@@ -1079,7 +1170,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
-    await user.click(within(sectionFor('Current game')).getAllByText('Finish game')[1]);
+    await user.click(required(within(sectionFor('Current game')).getAllByText('Finish game')[1]));
     await user.click(screen.getByRole('button', { name: 'Substitute unavailable players' }));
 
     await waitFor(() => {
@@ -1101,7 +1192,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     const currentBefore = sectionFor('Current game').textContent;
 
-    await user.click(screen.getAllByTitle('Player is done for today')[0]);
+    await user.click(required(screen.getAllByTitle('Player is done for today')[0]));
 
     await waitFor(() => {
       const current = sectionFor('Current game');
@@ -1119,7 +1210,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     const current = sectionFor('Current game');
-    await user.click(within(current).getAllByTitle('Edit who plays in this slot')[0]);
+    await user.click(required(within(current).getAllByTitle('Edit who plays in this slot')[0]));
     const editors = screen.getAllByRole('combobox');
     await user.selectOptions(editors[0]!, 'P9');
     await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
@@ -1158,7 +1249,7 @@ describe('BadmintonPlanner live game flow', () => {
     await startNextVisibleGame(user);
     await startNextVisibleGame(user);
     const current = sectionFor('Current game');
-    await user.click(within(current).getAllByTitle('Edit who plays in this slot')[0]);
+    await user.click(required(within(current).getAllByTitle('Edit who plays in this slot')[0]));
     const editors = screen.getAllByRole('combobox');
     await user.selectOptions(editors[0]!, 'P13');
     await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
@@ -1223,19 +1314,20 @@ describe('BadmintonPlanner live game flow', () => {
     const regenerateAfterLastRuntimeSlot = generateSpy.mock.calls.find(call => call[3] === 6);
     expect(regenerateAfterLastRuntimeSlot).toBeDefined();
     const state = regenerateAfterLastRuntimeSlot![4]!;
-    const rowLineup = (slot: typeof schedule[number]) => slot.courts.map(court => [
+    const rowLineup = (slot: { courts: Array<{ teamA: Array<{ name: string }>; teamB: Array<{ name: string }> }> }) => slot.courts.map(court => [
       ...court.teamA.map(player => player.name),
       ...court.teamB.map(player => player.name),
     ]);
     expect(rowLineup(state.keptSlots[4]!)).toEqual(rowLineup(schedule[4]!));
     expect(rowLineup(state.keptSlots[5]!)).toEqual(rowLineup(schedule[5]!));
-    expect(state.gamesPlayed[8]).toBe(state.keptSlots.filter(slot => slot.courts.some(court =>
-      [...court.teamA, ...court.teamB].some(player => player.name === 'P9'),
-    )).length);
+    // Only the three live references count as played history; abandoned plan rows do not.
+    expect(state.gamesPlayed[8]).toBe(1);
+    expect(state.gamesPlayed[0]).toBe(1);
+    expect(state.gamesPlayed[12]).toBe(0);
     generateSpy.mockRestore();
   });
 
-  it('skips a player from the immediate next selection and clears the skip after regeneration', async () => {
+  it('quarantines a player from all upcoming games until explicitly returned', async () => {
     const user = userEvent.setup();
     const players = ['SkipMe', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11', 'P12'].map(makePlayer);
     const result = {
@@ -1252,11 +1344,35 @@ describe('BadmintonPlanner live game flow', () => {
     render(<BadmintonPlanner />);
 
     expect(sectionFor('Current game')).toHaveTextContent('SkipMe');
-    await user.click(screen.getAllByTitle('Skip this player for the next generated game only')[0]);
+    await user.click(screen.getByRole('button', { name: 'Quarantine SkipMe' }));
 
     await waitFor(() => {
       expect(sectionFor('Current game')).not.toHaveTextContent('SkipMe');
-      expect(screen.queryByText('Skipping next')).not.toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Quarantine' })).toHaveTextContent('SkipMe');
+      const stored = JSON.parse(localStorage.getItem('bp-result')!) as PlannerResult;
+      expect(stored.schedule.flatMap(s => s.courts.flatMap(c => [...c.teamA, ...c.teamB])).some(p => p.name === 'SkipMe')).toBe(false);
     });
   });
+  it('cannot swap a quarantined player out of a live court into an upcoming court', async () => {
+    const user = userEvent.setup();
+    render(<BadmintonPlanner />);
+    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Start game' })[0]!);
+    await user.click(screen.getByRole('button', { name: 'Quarantine P1' }));
+    const before = JSON.parse(localStorage.getItem('bp-result')!) as PlannerResult;
+    await user.click(within(sectionFor('Current game')).getAllByTitle('Edit who plays in this slot')[0]!);
+    const selectors = within(sectionFor('Current game')).getAllByRole('combobox');
+    const quarantinedSelector = selectors.find(select => (select as HTMLSelectElement).value === 'P1')!;
+    await user.selectOptions(quarantinedSelector, 'P5');
+    expect(quarantinedSelector).toHaveValue('P1');
+    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'This game only' })[0]!);
+    const after = JSON.parse(localStorage.getItem('bp-result')!) as PlannerResult;
+    expect(after.schedule[0]!.courts[0]!.teamA).toEqual(before.schedule[0]!.courts[0]!.teamA);
+    expect(after.schedule.slice(1).flatMap(slot => slot.courts.flatMap(c => [...c.teamA, ...c.teamB])).some(p => p.name === 'P1')).toBe(false);
+  });
+
 });
+
+function required<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error('Expected test element to exist');
+  return value;
+}

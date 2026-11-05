@@ -24,6 +24,10 @@ describe('computeSkill', () => {
 
   it('uses the private level as the starting rating when no results exist', () => {
     expect(computeSkill('Beginner', {}, 1)).toBe(0);
-    expect(computeSkill('Advanced', {}, 3)).toBe(1);
+    expect(computeSkill('Advanced', {}, 5)).toBe(1);
   });
+});
+
+it('normalizes all five levels onto the same rating scale', () => {
+  expect([1, 2, 3, 4, 5].map(level => computeSkill('A', {}, level as 1 | 2 | 3 | 4 | 5))).toEqual([0, 0.25, 0.5, 0.75, 1]);
 });

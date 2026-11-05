@@ -1,4 +1,5 @@
 export interface GameRef {
+  id?: string;
   slot: number;
   court: number;
   players?: string[];

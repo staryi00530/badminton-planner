@@ -3,10 +3,10 @@
  * stagger mode ('none' | 'group' | 'custom') and any per-player `leavesAt` cutoff.
  * In 'custom' mode a player's own availFrom/availTo are used as-is.
  */
-export function applyAvailability<T extends { group?: string; leavesAt?: number | null; availFrom?: number; availTo?: number }>(
+export function applyAvailability<T extends { name: string; quarantined?: boolean; group?: string; leavesAt?: number | null; availFrom?: number; availTo?: number }>(
   basePlayers: T[],
   { staggerMode, totalSlots }: { staggerMode: string; totalSlots: number }
-): T[] {
+): Array<T & { availFrom?: number; availTo?: number }> {
   const midSlot = Math.floor(totalSlots / 2);
   const overlap = Math.max(1, Math.floor(totalSlots * 0.2));
   return basePlayers.map(p => {
@@ -20,6 +20,7 @@ export function applyAvailability<T extends { group?: string; leavesAt?: number 
       next = p;
     }
     if (p.leavesAt != null) next = { ...next, availTo: Math.min(next.availTo!, p.leavesAt) };
+    if (p.quarantined) next = { ...next, availTo: -1 };
     return next;
   });
 }

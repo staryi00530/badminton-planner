@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { SlotResult } from '../algorithm/types';
 import { C, FONT } from '../constants';
 import { liveQueueDebug } from '../utils/liveQueue';
@@ -6,16 +6,23 @@ import type { StaggerMode } from '../types';
 import { LucideIcon } from './PlannerModals';
 import { SessionSummary } from './SessionStatusPanel';
 import ScheduleGrid, { ScheduleGame, type ScheduledGame, type ScheduleGridProps } from './ScheduleGrid';
+import { DEFAULT_QUALITY_WEIGHTS, scoreGameQuality, type QualityWeights } from '../utils/gameQuality';
+import { actualGamesWaited } from '../utils/gamesWaited';
 
 interface LiveSessionBoardProps extends ScheduleGridProps {
   staggerMode?: StaggerMode;
   changeSlot?: number;
   changeCapacity?: number;
+  preferredQualityPairs?: Array<[string, string]>;
+  qualityWeights?: QualityWeights;
+  onQualityWeightsChange?: (weights: QualityWeights) => void;
 }
 
 const key = (slot: number, court: number) => `${slot}:${court}`;
 
 export default function LiveSessionBoard(props: LiveSessionBoardProps) {
+  const [localQualityWeights, setQualityWeights] = useState(DEFAULT_QUALITY_WEIGHTS);
+  const qualityWeights = props.qualityWeights ?? localQualityWeights;
   const { result, liveGames = [], completedGames = [], fromSlot, queueAdjustment } = props;
   const allGames = result.schedule.flatMap(slot => slot.courts.map((_, court) => ({ slot, court })));
   const completed = new Set(completedGames.map(game => key(game.slot, game.court)));
@@ -122,8 +129,30 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
     });
   }, [capacity, changeSlot, completedGames, fromSlot, liveGames, queueAdjustment, result.schedule]);
   const gameProps = { ...props, blockedPlayerNames };
+  const actualHistory = [...completedGames, ...liveGames].flatMap(ref => {
+    const court = result.schedule.find(slot => slot.slot === ref.slot)?.courts[ref.court];
+    return court ? [court] : [];
+  });
+  const waited = actualGamesWaited(result.schedule, props.players, completedGames, liveGames);
+  const qualityLabels: Record<keyof QualityWeights, string> = { waiting: 'Waiting fairness', gender: 'MF/MM/FF', levels: 'Level balance', partners: 'Repeated partners', opponents: 'Repeated opponents', preferred: 'Preferred pairings' };
   return <div ref={props.scheduleRef} role="region" aria-label="Live session board" style={{ minWidth: 0, marginBottom: 24 }}>
     <SessionSummary players={props.players} liveGames={liveGames} completedGames={completedGames} result={result} fromSlot={fromSlot} staggerMode={props.staggerMode ?? 'none'} />
+    {props.isAdmin && <section aria-label="Game quality" style={{ marginBottom: 16 }}><details>
+      <summary>Game quality and weights</summary>
+      <p style={{ fontSize: 12 }}>Higher points mean a better fit among eligible games. Eligibility and live conflicts always block play. {props.onQualityWeightsChange ? 'Weights apply to future generated team splits and compare planned games; current lineups remain unchanged.' : 'These local weights compare planned games; they do not change lineups.'} Waiting counts completed games since last play; unknown levels use 3.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        {(Object.keys(qualityLabels) as Array<keyof QualityWeights>).map(name => <label key={name} style={{ fontSize: 12 }}>{qualityLabels[name]} weight <input aria-label={`${qualityLabels[name]} weight`} type="number" min={0} max={100} value={qualityWeights[name]} onChange={event => { const next = { ...qualityWeights, [name]: Math.max(0, Math.min(100, Number(event.target.value) || 0)) }; setQualityWeights(next); props.onQualityWeightsChange?.(next); }} style={{ width: 56 }} /></label>)}
+      </div>
+      {pending.slice(0, capacity * 2).map(game => {
+        const court = game.slot.courts[game.court]!;
+        const quality = scoreGameQuality(court, { players: props.players, slot: game.slot.slot, busyNames: blockedPlayerNames, waited, history: actualHistory, preferredPairs: props.preferredQualityPairs }, qualityWeights);
+        return <details key={key(game.slot.slot, game.court)} style={{ marginTop: 8 }}><summary>Slot {game.slot.slot} · Court {court.court}: {quality.score == null ? 'Ineligible' : `${quality.score} points`} · {quality.format}</summary>
+          {quality.reasons.length > 0 && <p>{quality.reasons.join('; ')}</p>}
+          <p>{[...court.teamA, ...court.teamB].map(p => `${p.name}: ${waited[p.name] ?? 0} games waited`).join(' · ')}</p>
+          <ul>{(Object.keys(qualityLabels) as Array<keyof QualityWeights>).map(name => <li key={name}>{qualityLabels[name]}: {quality.breakdown[name].raw} × {quality.breakdown[name].weight} = {quality.breakdown[name].points}</li>)}</ul>
+        </details>;
+      })}
+    </details></section>}
     {props.onAdjustCourts && <section aria-label="Court capacity" style={{ marginBottom: 16 }}>
       <p style={{ margin: '0 0 8px', color: C.textDim, fontSize: 12 }}>
         {canChange ? `Court changes from slot ${changeSlot}: ${changeCapacity} court${changeCapacity === 1 ? '' : 's'} planned.` : 'No upcoming slot can be changed.'}

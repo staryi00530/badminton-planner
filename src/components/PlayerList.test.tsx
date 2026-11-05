@@ -1,17 +1,19 @@
+import { usePlayerRoster } from '../hooks/usePlayerRoster';
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { Player } from '../algorithm/types';
 import PlayerList from './PlayerList';
 
 // Deliberately out of alphabetical/gender order, and with the original array
 // index (used by every handler below) different from the eventual display
 // position — this is the exact regression the sorted-index refactor risks.
-const PLAYERS = [
-  { name: 'Zoe', gender: 'F' },   // index 0
-  { name: 'Bob', gender: 'M' },   // index 1
-  { name: 'Alice', gender: 'F' }, // index 2
-  { name: 'Tom', gender: 'M' },   // index 3
+const PLAYERS: Player[] = [
+  { name: 'Zoe', gender: 'F', availFrom: 0, availTo: 12 },   // index 0
+  { name: 'Bob', gender: 'M', availFrom: 0, availTo: 12 },   // index 1
+  { name: 'Alice', gender: 'F', availFrom: 0, availTo: 12 }, // index 2
+  { name: 'Tom', gender: 'M', availFrom: 0, availTo: 12 },   // index 3
 ];
 
 function renderPlayerList(overrides = {}) {
@@ -63,9 +65,9 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
     await user.click(screen.getByRole('button', { name: 'Replace roster with 3 players' }));
 
     expect(handlers.addImportedPlayers).toHaveBeenCalledWith([
-      { name: 'New man', gender: 'M', level: 2 },
-      { name: 'Alice', gender: 'F', level: 2 },
-      { name: 'Yiwei +1', gender: 'F', level: 2 },
+      { name: 'New man', gender: 'M', level: 3 },
+      { name: 'Alice', gender: 'F', level: 3 },
+      { name: 'Yiwei +1', gender: 'F', level: 3 },
     ]);
     expect(screen.getByRole('status')).toHaveTextContent('Roster replaced with 3 players.');
   });
@@ -76,8 +78,8 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
     await user.click(screen.getByText('Paste roster'));
     await user.type(screen.getByLabelText('Paste attendee list'), '1. Alice');
     await user.click(screen.getByRole('button', { name: 'Preview names' }));
-    await user.click(screen.getByRole('button', { name: 'Replace roster with 1 player', exact: true }));
-    expect(handlers.addImportedPlayers).toHaveBeenCalledWith([{ name: 'Alice', gender: 'F', level: 2 }]);
+    await user.click(screen.getByRole('button', { name: /^Replace roster with 1 player$/ }));
+    expect(handlers.addImportedPlayers).toHaveBeenCalledWith([{ name: 'Alice', gender: 'F', level: 3 }]);
   });
 
   it('keeps an active roster compact while preserving bank and original-index actions', async () => {
@@ -141,7 +143,7 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
     // "Zoe" displays last (position 3) but is players[0] — the classic
     // index-mismatch bug this component's sort refactor could reintroduce.
     const zoeRow = screen.getByText('Zoe').closest('div');
-    const removeBtn = within(zoeRow).getByRole('button', { name: '×' });
+    const removeBtn = within(required(zoeRow)).getByRole('button', { name: '×' });
     await user.click(removeBtn);
 
     expect(handlers.removePlayer).toHaveBeenCalledWith(0);
@@ -158,6 +160,78 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
     const input = screen.getByDisplayValue('Tom');
     await user.type(input, '!');
 
-    expect(handlers.updatePlayer).toHaveBeenCalledWith(3, 'name', expect.any(String));
+    expect(handlers.updatePlayer).not.toHaveBeenCalled();
+    await user.keyboard('{Enter}');
+    expect(handlers.updatePlayer).toHaveBeenCalledTimes(1);
+    expect(handlers.updatePlayer).toHaveBeenCalledWith(3, 'name', 'Tom!');
   });
+});
+
+it('offers five private levels and moves a roster player to quarantine by original index', async () => {
+  const user = userEvent.setup();
+  const togglePlayerQuarantined = vi.fn();
+  renderPlayerList({ showPrivateFields: true, togglePlayerQuarantined });
+  const row = screen.getByText('Zoe').closest('div')!;
+  expect(within(row).getByRole('button', { name: '5' })).toBeInTheDocument();
+  await user.click(within(row).getByRole('button', { name: 'Quarantine Zoe' }));
+  expect(togglePlayerQuarantined).toHaveBeenCalledWith(0);
+});
+
+function required<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error('Expected test element to exist');
+  return value;
+}
+
+it('reviews ignored scheduling notes and supports explicit identity mapping', async () => {
+ const user=userEvent.setup(); const h=renderPlayerList({playerHistory:[{id:'alice',name:'Alice',gender:'F',aliases:['Al']}]});
+ await user.click(screen.getByText('Paste roster'));
+ await user.type(screen.getByLabelText('Paste attendee list'),'Al\n4th court at 9:30');
+ await user.click(screen.getByRole('button',{name:'Preview names'}));
+ expect(screen.getByLabelText('Map Al')).toBeInTheDocument();
+ expect(screen.getByLabelText('Map 4th court at 9:30')).toHaveValue('ignore');
+ await user.click(screen.getByRole('button',{name:'Replace roster with 1 player'}));
+ expect(h.addImportedPlayers.mock.calls[0]![0][0]).toMatchObject({id:'alice',name:'Alice',aliases:['Al']});
+});
+
+it('keeps the existing roster when every preview line is ignored',async()=>{
+ const user=userEvent.setup();const h=renderPlayerList();
+ await user.click(screen.getByText('Paste roster'));await user.type(screen.getByLabelText('Paste attendee list'),'4th court at 9:30');
+ await user.click(screen.getByRole('button',{name:'Preview names'}));
+ expect(screen.getByRole('button',{name:'Replace roster with 0 players'})).toBeDisabled();
+ expect(screen.getByText('No players selected. The existing roster will be kept.')).toBeInTheDocument();
+ expect(h.addImportedPlayers).not.toHaveBeenCalled();
+});
+it('requires an explicit choice for an ambiguous alias',async()=>{
+ const user=userEvent.setup();const h=renderPlayerList({players:[],playerHistory:[{id:'a',name:'Alice',gender:'F',aliases:['Al']},{id:'b',name:'Alan',gender:'M',aliases:['Al']}]});
+ await user.click(screen.getByText('Paste roster'));await user.type(screen.getByLabelText('Paste attendee list'),'Al');await user.click(screen.getByRole('button',{name:'Preview names'}));
+ expect(screen.getByLabelText('Map Al')).toHaveValue('unresolved');
+ expect(screen.getByText(/Multiple saved players match/)).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Replace roster with 1 player'})).toBeDisabled();
+ await user.selectOptions(screen.getByLabelText('Map Al'),'new');
+ expect(screen.getByRole('button',{name:'Replace roster with 1 player'})).toBeEnabled();
+ await user.click(screen.getByRole('button',{name:'Replace roster with 1 player'}));
+ expect(h.addImportedPlayers.mock.calls[0]![0][0]).toMatchObject({name:'Al',id:expect.any(String)});
+});
+
+it('cancels name edits with Escape and validates empty or duplicate names before committing',async()=>{
+ const user=userEvent.setup();const h=renderPlayerList();
+ await user.click(screen.getByText('Alice'));let input=screen.getByDisplayValue('Alice');
+ await user.clear(input);await user.type(input,'Alicia');await user.keyboard('{Escape}');
+ expect(h.updatePlayer).not.toHaveBeenCalled();expect(screen.getByText('Alice')).toBeInTheDocument();
+ await user.click(screen.getByText('Alice'));input=screen.getByDisplayValue('Alice');await user.clear(input);await user.keyboard('{Enter}');
+ expect(screen.getByRole('alert')).toHaveTextContent('Enter a player name.');expect(h.updatePlayer).not.toHaveBeenCalled();
+ await user.type(input,'Bob');await user.keyboard('{Enter}');
+ expect(screen.getByRole('alert')).toHaveTextContent('A player with this name is already on the roster.');expect(h.updatePlayer).not.toHaveBeenCalled();
+ await user.clear(input);await user.type(input,' Alicia ');await user.tab();
+ expect(h.updatePlayer).toHaveBeenCalledTimes(1);expect(h.updatePlayer).toHaveBeenCalledWith(2,'name','Alicia');
+});
+
+it('sends only the final rename through the roster metadata callback',async()=>{
+ const user=userEvent.setup();const onPlayerMetadataChange=vi.fn(()=>({}));const patchState=vi.fn();
+ const {result}=renderHook(()=>usePlayerRoster({players:PLAYERS,playerHistory:[],nameInput:'',genderInput:'M',totalSlots:12,patchState,onPlayerMetadataChange}));
+ renderPlayerList({updatePlayer:result.current.updatePlayer});
+ await user.click(screen.getByText('Alice'));const input=screen.getByDisplayValue('Alice');
+ await user.clear(input);await user.type(input,'Alicia');expect(onPlayerMetadataChange).not.toHaveBeenCalled();
+ await user.keyboard('{Enter}');expect(onPlayerMetadataChange).toHaveBeenCalledTimes(1);
+ expect(onPlayerMetadataChange.mock.calls[0]).toEqual([PLAYERS[2],expect.objectContaining({name:'Alicia',aliases:['Alice'],statsKey:'Alice'})]);
 });

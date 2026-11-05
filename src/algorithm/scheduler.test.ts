@@ -1,6 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { generateSchedule, generateScheduleGen, extractState, recomputeStats, normalizeUnstartedMixedCourts } from './scheduler.js';
-import type { Player, SlotResult } from './types.js';
+import type { Court, Player, SlotResult } from './types.js';
+
+describe('waiting cohorts', () => {
+  it('uses tunable weights to trade preferred teammates against level balance', () => {
+    const players = makePlayers(4).map((p, i) => ({ ...p, level: (i < 2 ? 1 : 5) as 1 | 5 }));
+    const balanced = generateSchedule(players, 1, [1], 0, null, null, { preferredPairs: [[0, 1]], qualityWeights: { levels: 100, preferred: 0 } }, seededRng(4))!;
+    const preferred = generateSchedule(players, 1, [1], 0, null, null, { preferredPairs: [[0, 1]], qualityWeights: { levels: 0, preferred: 100 } }, seededRng(4))!;
+    const together = (court: Court) => [court.teamA, court.teamB].some(team => team.some(p => p.name === 'P1') && team.some(p => p.name === 'P2'));
+    expect(together(balanced.schedule[0]!.courts[0]!)).toBe(false);
+    expect(together(preferred.schedule[0]!.courts[0]!)).toBe(true);
+  });
+  it.each([28, 30, 32])('packs fully waiting groups first for %i players', count => {
+    for (let seed = 1; seed <= 12; seed++) {
+      for (const femaleCount of [0, 2, 7, 8, 14, count]) {
+      const { schedule } = generateSchedule(makePlayers(count, femaleCount), 3, [4, 4, 4], 0, null, null, {}, seededRng(seed))!;
+      const busy = new Set(schedule[0]!.courts.flatMap(c => [...c.teamA, ...c.teamB].map(p => p.name)));
+      expect(schedule[1]!.courts.slice(0, Math.floor((count - 16) / 4)).every(c => [...c.teamA, ...c.teamB].every(p => !busy.has(p.name)))).toBe(true);
+      expect(new Set(schedule[1]!.courts.flatMap(c => [...c.teamA, ...c.teamB].map(p => p.name))).size).toBe(16);
+      }
+    }
+  });
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -32,10 +53,10 @@ function courtsPerSlot(courts: number, totalSlots: number): number[] {
 
 describe('Queued mixed-team normalization', () => {
   it('re-pairs unstarted 2F/2M courts as MF vs MF without changing participants', () => {
-    const court = {
+    const court: Court = {
       court: 1,
-      teamA: [{ name: 'F1', gender: 'F' as const }, { name: 'F2', gender: 'F' as const }] as const,
-      teamB: [{ name: 'M1', gender: 'M' as const }, { name: 'M2', gender: 'M' as const }] as const,
+      teamA: [{ name: 'F1', gender: 'F' as const }, { name: 'F2', gender: 'F' as const }],
+      teamB: [{ name: 'M1', gender: 'M' as const }, { name: 'M2', gender: 'M' as const }],
     };
     const schedule = [{ slot: 1, courts: [court], sitting: [], playerState: [], repeatedCourts: [] }];
     const normalized = normalizeUnstartedMixedCourts(schedule, new Set());
@@ -47,10 +68,10 @@ describe('Queued mixed-team normalization', () => {
   });
 
   it('leaves locked games and courts without an even gender split unchanged', () => {
-    const court = {
+    const court: Court = {
       court: 1,
-      teamA: [{ name: 'F1', gender: 'F' as const }, { name: 'F2', gender: 'F' as const }] as const,
-      teamB: [{ name: 'M1', gender: 'M' as const }, { name: 'M2', gender: 'M' as const }] as const,
+      teamA: [{ name: 'F1', gender: 'F' as const }, { name: 'F2', gender: 'F' as const }],
+      teamB: [{ name: 'M1', gender: 'M' as const }, { name: 'M2', gender: 'M' as const }],
     };
     const schedule = [{ slot: 4, courts: [court], sitting: [], playerState: [], repeatedCourts: [] }];
     const normalized = normalizeUnstartedMixedCourts(schedule, new Set(['4:0']));
@@ -161,10 +182,10 @@ describe('Preferred pairings', () => {
 });
 
 describe('Level balancing', () => {
-  it('avoids putting level-1 and level-3 players on the same team when possible', () => {
+  it('avoids putting level-1 and level-5 players on the same team when possible', () => {
     const players = makePlayers(4).map((player, index) => ({
       ...player,
-      level: (index < 2 ? 1 : 3) as 1 | 3,
+      level: (index < 2 ? 1 : 5) as 1 | 5,
     }));
     for (let seed = 1; seed <= 10; seed++) {
       const result = generateSchedule(players, 1, [1], 0, null, null, {}, seededRng(seed));
@@ -172,22 +193,22 @@ describe('Level balancing', () => {
       const court = result!.schedule[0]!.courts[0]!;
       for (const team of [court.teamA, court.teamB]) {
         const levels = team.map(player => players.find(p => p.name === player.name)!.level!);
-        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(1);
+        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(2);
       }
     }
   });
 
-  it('separates level-1 and level-3 players onto different courts when possible', () => {
+  it('separates level-1 and level-5 players onto different courts when possible', () => {
     const players = makePlayers(8).map((player, index) => ({
       ...player,
-      level: (index < 4 ? 1 : 3) as 1 | 3,
+      level: (index < 4 ? 1 : 5) as 1 | 5,
     }));
     for (let seed = 1; seed <= 10; seed++) {
       const result = generateSchedule(players, 1, [2], 0, null, null, {}, seededRng(seed));
       expect(result).not.toBeNull();
       for (const court of result!.schedule[0]!.courts) {
         const levels = [...court.teamA, ...court.teamB].map(player => players.find(p => p.name === player.name)!.level!);
-        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(1);
+        expect(Math.max(...levels) - Math.min(...levels)).toBeLessThanOrEqual(2);
       }
     }
   });
@@ -715,7 +736,16 @@ describe('recomputeStats — single-slot edit without cascading', () => {
     // relative to the original schedule's final gamesPlayed.
     const idxIn = players.findIndex(p => p.name === sittingName);
     const idxOut = players.findIndex(p => p.name === swappedOutName);
-    expect(gamesPlayed[idxIn]).toBe(result!.gamesPlayed[idxIn] + 1);
-    expect(gamesPlayed[idxOut]).toBe(result!.gamesPlayed[idxOut] - 1);
+    expect(gamesPlayed[idxIn]).toBe(result!.gamesPlayed[idxIn]! + 1);
+    expect(gamesPlayed[idxOut]).toBe(result!.gamesPlayed[idxOut]! - 1);
+  });
+});
+
+describe('quarantine', () => {
+  it('never selects quarantined players even when courts cannot be filled', () => {
+    const players = makePlayers(8, 0, 4).map((p, i) => ({ ...p, quarantined: i < 5 }));
+    const plan = generateSchedule(players, 4, [2, 2, 2, 2])!;
+    expect(plan.schedule.every(s => s.courts.length === 0)).toBe(true);
+    expect(plan.schedule.every(s => s.playerState.slice(0, 5).every(p => !p.available))).toBe(true);
   });
 });

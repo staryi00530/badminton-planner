@@ -2,10 +2,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
+import type { Court, SlotResult } from '../algorithm/types';
 import SlotCard from './SlotCard';
 
-function makeSlot(courtCount, overrides = {}) {
-  const courts = Array.from({ length: courtCount }, (_, ci) => ({
+function makeSlot(courtCount: number, overrides: Partial<SlotResult> = {}): SlotResult {
+  const courts = Array.from({ length: courtCount }, (_, ci): Court => ({
     court: ci + 1,
     teamA: [{ name: `A${ci}1`, gender: 'M' }, { name: `A${ci}2`, gender: 'M' }],
     teamB: [{ name: `B${ci}1`, gender: 'M' }, { name: `B${ci}2`, gender: 'M' }],
@@ -20,7 +22,7 @@ function makeSlot(courtCount, overrides = {}) {
   };
 }
 
-function renderSlotCard(slot, overrides = {}) {
+function renderSlotCard(slot: SlotResult, overrides: Partial<ComponentProps<typeof SlotCard>> = {}) {
   const handlers = {
     startSlotEdit: vi.fn(),
     applySlotEdit: vi.fn(),
@@ -42,6 +44,7 @@ function renderSlotCard(slot, overrides = {}) {
       liveGames={[]}
       completedGames={[]}
       blockedPlayerNames={undefined}
+      canShowReady={false}
       {...handlers}
       {...overrides}
     />
@@ -50,6 +53,10 @@ function renderSlotCard(slot, overrides = {}) {
 }
 
 describe('SlotCard — per-slot court stepper', () => {
+  it('offers a large tablet Finish target', () => {
+    renderSlotCard(makeSlot(1), { liveGames: [{ slot: 1, court: 0 }], sessionActions: true });
+    expect(screen.getByRole('button', { name: 'Finish game' })).toHaveStyle({ minHeight: '48px', fontSize: '16px' });
+  });
   it('shows the current court count', () => {
     renderSlotCard(makeSlot(2));
     expect(screen.getByText('2C')).toBeInTheDocument();
@@ -100,18 +107,18 @@ describe('SlotCard — slot edit picker', () => {
       editing: true,
       editLayout: { courts: [['A01', 'A02', 'B01', 'B02']], sitting: [] },
       editOptions: [
-        { name: 'Zed', gender: 'M' },
-        { name: 'A01', gender: 'M' },
-        { name: 'A02', gender: 'M' },
-        { name: 'B01', gender: 'M' },
-        { name: 'B02', gender: 'M' },
-        { name: 'Sub', gender: 'F' },
+        { name: 'Zed', gender: 'M', availFrom: 0, availTo: 10 },
+        { name: 'A01', gender: 'M', availFrom: 0, availTo: 10 },
+        { name: 'A02', gender: 'M', availFrom: 0, availTo: 10 },
+        { name: 'B01', gender: 'M', availFrom: 0, availTo: 10 },
+        { name: 'B02', gender: 'M', availFrom: 0, availTo: 10 },
+        { name: 'Sub', gender: 'F', availFrom: 0, availTo: 10 },
       ],
     });
 
-    const firstPicker = screen.getAllByRole('combobox')[0];
+    const firstPicker = required(screen.getAllByRole('combobox')[0]);
     expect(screen.getAllByRole('option', { name: 'Sub' })).toHaveLength(4);
-    expect([...firstPicker.querySelectorAll('option')].map(option => option.value)).toEqual(['A01', 'A02', 'B01', 'B02', 'Sub', 'Zed']);
+    expect(Array.from(firstPicker.querySelectorAll('option')).map(option => option.value)).toEqual(['A01', 'A02', 'B01', 'B02', 'Sub', 'Zed']);
     await user.selectOptions(firstPicker, 'Sub');
     expect(handlers.assignToPosition).toHaveBeenCalledWith({ type: 'court', ci: 0, idx: 0 }, 'Sub');
   });
@@ -123,7 +130,7 @@ describe('SlotCard — Live/Done toggle', () => {
     const slot = makeSlot(2);
     const handlers = renderSlotCard(slot);
     const startButtons = screen.getAllByText('Start');
-    await user.click(startButtons[1]); // second court, index 1
+    await user.click(required(startButtons[1])); // second court, index 1
     expect(handlers.onToggleLive).toHaveBeenCalledWith(1, 1);
   });
 
@@ -199,3 +206,8 @@ describe('SlotCard — empty slot', () => {
     expect(screen.getByText('Not enough players')).toBeInTheDocument();
   });
 });
+
+function required<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error('Expected test element to exist');
+  return value;
+}

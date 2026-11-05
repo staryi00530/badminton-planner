@@ -1,3 +1,4 @@
+import QuarantinePanel from './QuarantinePanel';
 import { C, FONT } from '../constants';
 import type { Player } from '../algorithm/types';
 import type { GameRef } from '../utils/liveQueue';
@@ -38,12 +39,11 @@ interface SessionStatusPanelProps {
   totalSlots: number;
   liveGames?: GameRef[];
   completedGames?: GameRef[];
-  suspendedPlayerNames?: string[];
   staggerMode: 'none' | 'group' | 'custom';
   setPlayerBack: (index: number) => void;
   setPlayerJoining: (index: number) => void;
   setPlayerLeaving: (index: number) => void;
-  togglePlayerSuspended?: (index: number) => void;
+  togglePlayerQuarantined?: (index: number) => void;
 }
 
 export default function SessionStatusPanel({
@@ -52,14 +52,12 @@ export default function SessionStatusPanel({
   totalSlots,
   liveGames = [],
   completedGames = [],
-  suspendedPlayerNames = [],
   staggerMode,
   setPlayerBack,
   setPlayerJoining,
   setPlayerLeaving,
-  togglePlayerSuspended,
+  togglePlayerQuarantined,
 }: SessionStatusPanelProps) {
-  const suspendedSet = new Set(suspendedPlayerNames);
   const sessionComplete = fromSlot > totalSlots && liveGames.length === 0;
   const noUpcomingSlot = fromSlot > totalSlots;
   const nextSlotIdx = fromSlot - 1;
@@ -67,6 +65,7 @@ export default function SessionStatusPanel({
   const offCount = resolvedPlayers.filter(player => !(player.availFrom <= nextSlotIdx && player.availTo >= nextSlotIdx)).length;
   const onCount = players.length - offCount;
   return (
+    <>
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
       <div style={{ fontSize: 11, color: C.textDim, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
         {sessionComplete ? `Session Status · complete · ${totalSlots} done` : `Session Status · next: ${Math.min(fromSlot, totalSlots)}${liveGames.length > 0 ? ` · ${liveGames.length} live` : ` · ${fromSlot - 1} done`}`}
@@ -77,25 +76,23 @@ export default function SessionStatusPanel({
       {noUpcomingSlot && <p style={{ color: C.textDim, fontSize: 12 }}>No upcoming slot can be changed. Current games remain on court.</p>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {players.map((p, idx) => {
+          if (p.quarantined) return null;
           // 0-based index of the next upcoming slot.
           const departed = p.leavesAt != null && p.leavesAt < nextSlotIdx;
           const notArrived = staggerMode === 'custom' && p.availFrom != null && p.availFrom > nextSlotIdx;
           const leavingScheduled = p.leavesAt != null && !departed;
           const isHere = !departed && !notArrived;
-          const isSuspended = suspendedSet.has(p.name);
           const availability = resolvedPlayers[idx]!;
           const isAvailable = availability.availFrom <= nextSlotIdx && availability.availTo >= nextSlotIdx;
           const availabilityLabel = availability.availTo < nextSlotIdx ? 'Left'
             : availability.availFrom > nextSlotIdx ? `Arrives slot ${availability.availFrom + 1}`
               : leavingScheduled ? `Leaving after slot ${availability.availTo + 1}` : 'Available';
           return (
-            <div key={p.name} role="group" aria-label={`Availability for ${p.name}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, maxWidth: '100%', overflowWrap: 'anywhere', background: isSuspended ? 'rgba(245,158,11,0.10)' : !isAvailable ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${isSuspended ? C.amber + '88' : !isAvailable ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: !isAvailable ? 0.6 : 1 }}>
+            <div key={p.name} role="group" aria-label={`Availability for ${p.name}`} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, maxWidth: '100%', overflowWrap: 'anywhere', background: !isAvailable ? 'rgba(100,116,139,0.06)' : 'rgba(125,211,252,0.06)', border: `1px solid ${!isAvailable ? C.border : C.accentDim + '55'}`, borderRadius: 6, padding: '3px 8px', opacity: !isAvailable ? 0.6 : 1 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: p.gender === 'F' ? C.pink : (isAvailable ? C.text : C.textMuted) }}>{p.name}</span>
               <span style={{ fontSize: 10, color: C.textMuted }}>{availabilityLabel}</span>
-              {isHere && !leavingScheduled && togglePlayerSuspended && (
-                <button disabled={noUpcomingSlot} onClick={() => togglePlayerSuspended(idx)} title={isSuspended ? 'Undo skip-next for this player' : 'Skip this player for the next generated game only'} style={{ background: isSuspended ? C.amber : 'none', border: `1px solid ${isSuspended ? C.amber : C.border}`, color: isSuspended ? C.bg : C.textMuted, fontSize: 10, padding: '1px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT, fontWeight: 700 }}>
-                  {isSuspended ? 'Skipping next' : 'Skip next'}
-                </button>
+              {togglePlayerQuarantined && (
+                <button onClick={() => togglePlayerQuarantined(idx)} aria-label={`Quarantine ${p.name}`} title="Move player to quarantine until explicitly returned" style={{ background: 'none', border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 10, padding: '3px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: FONT }}>Quarantine</button>
               )}
               {(departed || leavingScheduled) && (
                 <button disabled={noUpcomingSlot} aria-label={`Restore ${p.name} to session`} onClick={() => setPlayerBack(idx)} title="Restore player to session" style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 13, padding: '0 2px', cursor: 'pointer', fontFamily: FONT, lineHeight: 1 }}>↩</button>
@@ -111,5 +108,7 @@ export default function SessionStatusPanel({
         })}
       </div>
     </div>
+    <QuarantinePanel players={players} togglePlayerQuarantined={togglePlayerQuarantined} />
+    </>
   );
 }

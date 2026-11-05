@@ -13,6 +13,7 @@ export interface RegenerateArgs {
   baseResult: PlannerResult;
   forcedFirstSlot?: ForcedFirstSlot | null;
   courtOverrides?: Record<number, number>;
+  actualGames?: GameRef[];
 }
 
 export interface RegeneratedPlan {
@@ -45,6 +46,7 @@ export function reconcileFutureSessionChange(input: {
     baseResult: input.result,
     overridePlayers: input.overridePlayers,
     courtOverrides: input.courtOverrides,
+    actualGames: [...input.completedGames, ...input.liveGames],
   });
   if (!regenerated) return null;
   const scores: ScoresMap = {};

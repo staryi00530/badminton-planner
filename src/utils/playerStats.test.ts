@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { calculatePlayerStats } from './playerStats';
+import type { PlannerResult } from '../types';
 
 const player = (name: string, gender: 'M' | 'F' = 'M') => ({ name, gender, availFrom: 0, availTo: 9 });
 
 describe('calculatePlayerStats', () => {
   it('counts actual games, rotations rested, live games, and recorded results', () => {
-    const result = {
+    const result: PlannerResult = {
       schedule: [
         { slot: 1, courts: [{ court: 1, teamA: [player('A'), player('B')], teamB: [player('C'), player('D')] }], sitting: [player('E')], repeatedCourts: [], playerState: [] },
         { slot: 2, courts: [{ court: 1, teamA: [player('A'), player('E')], teamB: [player('C'), player('D')] }], sitting: [player('B')], repeatedCourts: [], playerState: [] },

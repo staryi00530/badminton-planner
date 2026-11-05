@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { expect } from 'playwright/test';
 
+const storagePrefix = process.env.VITE_BETA === 'true' ? 'beta:' : '';
 const artifacts = process.env.E2E_ARTIFACT_DIR ?? join(tmpdir(), 'badminton-e2e');
 await mkdir(artifacts, { recursive: true });
 // An available strict port prevents attaching to another checkout's server.
@@ -107,10 +108,10 @@ async function verifySessionWorkflows(newContext) {
     }, courts);
     const lane = n => page.getByRole('region', { name: `Court ${n}`, exact: true });
     const next = () => page.getByRole('heading', { name: 'Next game', exact: true }).locator('..');
-    const stored = key => page.evaluate(key => JSON.parse(localStorage.getItem(`bp-${key}`)), key);
-    const snapshot = () => page.evaluate(() => Object.fromEntries(
-      ['result', 'players', 'scores', 'courtOverrides', 'saved-plans', 'is-confirmed'].map(key => [key, JSON.parse(localStorage.getItem(`bp-${key}`))]),
-    ));
+    const stored = key => page.evaluate(({ key, prefix }) => JSON.parse(localStorage.getItem(`${prefix}bp-${key}`)), { key, prefix: storagePrefix });
+    const snapshot = () => page.evaluate(prefix => Object.fromEntries(
+      ['result', 'players', 'scores', 'courtOverrides', 'saved-plans', 'is-confirmed'].map(key => [key, JSON.parse(localStorage.getItem(`${prefix}bp-${key}`))]),
+    ), storagePrefix);
     const nav = name => page.getByRole('button', { name, exact: true });
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await expect(nav('Live session')).toHaveAttribute('aria-current', 'page');
@@ -122,7 +123,7 @@ async function verifySessionWorkflows(newContext) {
         courtOverrides: state.courtOverrides,
         savedPlans: state['saved-plans'],
       };
-    }).toEqual({ levels: Array(24).fill(2), courtOverrides: {}, savedPlans: [] });
+    }).toEqual({ levels: Array(24).fill(3), courtOverrides: {}, savedPlans: [] });
     await assertLayout(page, `${stage}/ready`);
     for (let n = 1; n <= courts; n++) await lane(n).getByRole('button', { name: 'Start game', exact: true }).click();
     const original = await snapshot();
@@ -200,6 +201,60 @@ async function verifySessionWorkflows(newContext) {
   }
 }
 
+async function verifyQuarantine(newContext) {
+  for (const width of [1280, 390]) {
+    stage = `${width}px quarantine workflow`;
+    const context = await newContext(width);
+    const page = await context.newPage();
+    activePage = page;
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(prefix => {
+      localStorage.clear(); sessionStorage.clear();
+      const players = Array.from({ length: 12 }, (_, i) => ({ name: i === 0 ? 'Arm' : i === 1 ? 'Sitan' : i === 2 ? 'Eamon' : `Player ${i + 1}`, gender: 'M', level: i % 3 + 1, availFrom: 0, availTo: 5 }));
+      localStorage.setItem('bp-players', JSON.stringify(players));
+      localStorage.setItem('bp-player-history', JSON.stringify(players));
+      localStorage.setItem('bp-totalMinutes', '90');
+      sessionStorage.setItem(`${prefix}bp-admin`, window.ADMIN_PIN);
+    }, storagePrefix);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const stored = key => page.evaluate(({ key, prefix }) => JSON.parse(localStorage.getItem(`${prefix}bp-${key}`)), { key, prefix: storagePrefix });
+    await expect.poll(async () => (await stored('players')).slice(0, 3).map(p => p.level)).toEqual([1, 3, 5]);
+    await page.getByRole('button', { name: 'Admin view', exact: true }).click();
+    const armRow = page.getByText('Arm', { exact: true }).locator('..');
+    await armRow.getByRole('button', { name: '4', exact: true }).click();
+    for (const name of ['Arm', 'Sitan', 'Eamon']) await page.getByRole('button', { name: `Quarantine ${name}`, exact: true }).click();
+    const box = page.getByRole('region', { name: 'Quarantine', exact: true });
+    await expect(box.getByRole('button', { name: /^Return .* to available$/ })).toHaveCount(3);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    assert.equal((await stored('players')).find(p => p.name === 'Arm').level, 4);
+    await page.getByRole('button', { name: /Generate/ }).click();
+    await expect(page.getByRole('button', { name: 'Live session', exact: true })).toHaveAttribute('aria-current', 'page');
+    const excluded = ['Arm', 'Sitan', 'Eamon'];
+    const generatedNames = async () => (await stored('result')).schedule.flatMap(slot => slot.courts.flatMap(c => [...c.teamA, ...c.teamB])).map(p => p.name);
+    assert.ok((await generatedNames()).every(name => !excluded.includes(name)));
+    await assertLayout(page, stage);
+    assert.equal(await page.getByText('Skip next', { exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Quarantine Player 4', exact: true }).click();
+    await expect(box.getByRole('button', { name: 'Return Player 4 to available' })).toBeVisible();
+    // A current game can finish; remaining games must keep the player excluded.
+    const plan = await stored('result');
+    assert.ok(plan.schedule.slice(1).flatMap(slot => slot.courts.flatMap(c => [...c.teamA, ...c.teamB])).every(p => ![...excluded, 'Player 4'].includes(p.name)));
+    await page.getByRole('button', { name: 'Setup', exact: true }).click();
+    await expect(box.getByRole('button', { name: 'Return Arm to available' })).toBeVisible();
+    await box.getByRole('button', { name: 'Return Arm to available' }).click();
+    await expect.poll(async () => (await stored('players')).find(p => p.name === 'Arm').quarantined).toBe(false);
+    assert.ok((await generatedNames()).includes('Arm'));
+    await page.getByRole('button', { name: 'Live session', exact: true }).click();
+    await assertLayout(page, `${stage}/returned`);
+    await box.screenshot({ path: join(artifacts, `quarantine-${width}.png`) });
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log(`PASS: ${stage}; five-level migration, rating edit, quarantine reload/generation/return`);
+  }
+}
+
 let browser;
 let activePage;
 let stage = 'startup';
@@ -216,7 +271,13 @@ try {
   browser = await chromium.launch({ headless: true, timeout: 10000 });
   async function newContext(width) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
-    // Isolate optional fonts only: local assets and app failures remain visible.
+    // Keep browser fixtures local: optional integrations must not write to cloud data.
+    await context.addInitScript(() => {
+      for (const key of ['FIREBASE_CONFIG', 'RECAPTCHA_SITE_KEY', 'SHARE_API_BASE']) {
+        Object.defineProperty(window, key, { configurable: true, get: () => null, set: () => {} });
+      }
+    });
+    // Local assets and app failures remain visible.
     await context.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.abort());
     return context;
   }
@@ -359,6 +420,7 @@ try {
   await context.close();
   // Session-mode workflows are exercised below at desktop and mobile widths.
   await verifySessionWorkflows(newContext);
+  await verifyQuarantine(newContext);
   assert.equal(timedOut, false, 'E2E deadline exceeded');
   console.log(`E2E smoke passed: ${completed} games, max ${maxLive} live courts; 8 desktop/mobile workflows. Screenshots: ${artifacts}`);
 } catch (error) {

@@ -39,7 +39,7 @@ export interface QueuePromotionPrompt {
   firstGame: { slot: number; court: number; players: string[] };
   blockedPlayers: string[];
   lookaheadGame: { slot: number; court: number; players: string[] } | null;
-  replacements: Array<{ replacee: string; replacer: string }>;
+  replacements: Array<{ replacee: string; replacer: string; gamesWaited?: number }>;
 }
 
 export function QueuePromotionModal({ prompt, onUseLookahead, onSubstitute, onCancel }: {
@@ -61,8 +61,8 @@ export function QueuePromotionModal({ prompt, onUseLookahead, onSubstitute, onCa
         <div style={{ fontSize: 13, fontWeight: 600 }}>{prompt.firstGame.players.join(' · ')}</div>
         {prompt.replacements.length > 0 && (
           <div style={{ fontSize: 12, color: C.amber, marginTop: 6 }}>
-            Suggested: {prompt.replacements.map(({ replacee, replacer }, index) => (
-              <span key={`${replacee}-${replacer}`}>{index > 0 && ', '}<strong>{replacer}</strong> for <strong>{replacee}</strong></span>
+            Suggested: {prompt.replacements.map(({ replacee, replacer, gamesWaited }, index) => (
+              <span key={`${replacee}-${replacer}`}>{index > 0 && ', '}<strong>{replacer}</strong>{gamesWaited != null && ` (${gamesWaited} games waited)`} for <strong>{replacee}</strong></span>
             ))}
           </div>
         )}

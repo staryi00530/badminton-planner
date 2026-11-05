@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import type { Court, Player, SlotResult } from '../algorithm/types';
 import LiveSessionBoard from './LiveSessionBoard';
 import { useLiveQueue } from '../hooks/useLiveQueue';
-import type { PlannerResult, RuntimePatch } from '../types';
+import type { PlannerResult, RuntimePatch, QueueRuntimeState } from '../types';
 import type { GameRef } from '../utils/liveQueue';
 
 const players: Player[] = Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 10 }));
@@ -37,7 +37,7 @@ function lane(n: number) { return screen.getByRole('region', { name: `Court ${n}
 function guidance() { return within(screen.getByRole('region', { name: 'What happens now?' })); }
 
 function InteractiveBoard({ result, completedGames }: { result: PlannerResult; completedGames: GameRef[] }) {
-  const [state, setState] = useState({ result, completedGames, liveGames: [] as GameRef[], fromSlot: 1, sessionChangeNotice: null, pendingSessionChange: null, queueAdjustment: null, queuePromotionPrompt: null });
+  const [state, setState] = useState<QueueRuntimeState & { result: PlannerResult; completedGames: GameRef[]; liveGames: GameRef[]; fromSlot: number }>({ result, completedGames, liveGames: [] as GameRef[], fromSlot: 1, sessionChangeNotice: null, pendingSessionChange: null, queueAdjustment: null, queuePromotionPrompt: null });
   const queue = useLiveQueue({
     ...state, players, suspendedPlayerNames: [], scores: {}, courtOverrides: {}, isConfirmed: false, totalSlots: result.schedule.length,
     canPlayerJoin: true, getCourtsPerSlot: () => result.schedule.map(() => 2),
@@ -49,6 +49,24 @@ function InteractiveBoard({ result, completedGames }: { result: PlannerResult; c
 }
 
 describe('LiveSessionBoard', () => {
+  it('counts waiting only during attendance for late arrivals and departed players', () => {
+    const attending = players.map(player => player.name === 'P21' ? { ...player, availFrom: 1 } : player.name === 'P22' ? { ...player, availTo: 0 } : player);
+    render(<LiveSessionBoard {...props({ isAdmin: true, players: attending, fromSlot: 2, completedGames: [{ slot: 1, court: 0 }, { slot: 2, court: 1 }] })} />);
+    const quality = screen.getByRole('region', { name: 'Game quality' });
+    expect(quality).toHaveTextContent('P21: 1 games waited');
+    expect(quality).toHaveTextContent('P22: 1 games waited');
+    expect(quality).toHaveTextContent('P23: 2 games waited');
+  });
+  it('offers organizer quality weights and keeps private quality context out of player view', async () => {
+    const { rerender } = render(<LiveSessionBoard {...props({ isAdmin: true })} />);
+    expect(screen.getByRole('region', { name: 'Game quality' })).toHaveTextContent('MF/MM/FF');
+    const waiting = screen.getByRole('spinbutton', { name: 'Waiting fairness weight' });
+    await userEvent.clear(waiting);
+    await userEvent.type(waiting, '20');
+    expect(waiting).toHaveValue(20);
+    rerender(<LiveSessionBoard {...props({ isAdmin: false })} />);
+    expect(screen.queryByRole('region', { name: 'Game quality' })).not.toBeInTheDocument();
+  });
   it.each([2, 3, 4, 5])('retains all %i live lanes, names and Finish actions when upcoming capacity decreases', courts => {
     const initial = props({
       liveCapacity: courts, changeSlot: 2, changeCapacity: courts,
@@ -64,12 +82,12 @@ describe('LiveSessionBoard', () => {
     }} />);
     for (let i = 0; i < courts; i++) {
       expect(lane(i + 1)).toBe(lanes[i]);
-      expect(within(lane(i + 1)).getByRole('button', { name: 'Finish game', exact: true })).toBeEnabled();
+      expect(within(lane(i + 1)).getByRole('button', { name: 'Finish game' })).toBeEnabled();
       for (const player of players.slice(i * 4, i * 4 + 4)) expect(lane(i + 1)).toHaveTextContent(player.name);
     }
     expect(screen.getByRole('region', { name: 'Session summary' })).toHaveTextContent(new RegExp(`Active courts\\s*${courts}`));
-    if (courts === 2) expect(screen.getByRole('button', { name: 'Remove court', exact: true })).toBeDisabled();
-    else expect(screen.getByRole('button', { name: 'Remove court', exact: true })).toBeEnabled();
+    if (courts === 2) expect(screen.getByRole('button', { name: 'Remove court' })).toBeDisabled();
+    else expect(screen.getByRole('button', { name: 'Remove court' })).toBeEnabled();
   });
 
   it('offers bounded court changes from the first mutable slot and delegates the command', async () => {

@@ -1,3 +1,4 @@
+import { newPlayerId, resolvePlayerIdentity } from './playerIdentity';
 import type { Gender, Player } from '../algorithm/types';
 
 export interface ParsedRosterEntry {
@@ -8,25 +9,31 @@ export interface ParsedRosterEntry {
   fallbackGenderHint?: Gender | null;
 }
 
-export type ImportedPlayer = Pick<Player, 'name' | 'gender'> & { level?: Player['level'] };
+export type ImportedPlayer = Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender'> & { level?: Player['level'] };
 
 export function buildImportedPlayers(
   currentPlayers: Player[],
-  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level'>>,
+  playerHistory: Array<Pick<Player, 'name' | 'gender' | 'level' | 'quarantined' | 'id' | 'aliases' | 'statsKey'>>,
   entries: ImportedPlayer[],
   totalSlots: number,
 ): Player[] {
-  const currentNames = new Set(currentPlayers.map(player => nameKey(player.name)));
+  const currentNames = new Set(currentPlayers.flatMap(player => [nameKey(player.name), ...(player.id ? [player.id] : [])]));
   const addedNames = new Set<string>();
   return entries.flatMap(entry => {
-    const key = nameKey(entry.name);
+    if (!entry.name.trim()) return [];
+    const saved = resolvePlayerIdentity(entry.name, playerHistory, entry.id);
+    const key = saved?.id ?? entry.id ?? nameKey(entry.name);
     if (!key || currentNames.has(key) || addedNames.has(key)) return [];
     addedNames.add(key);
-    const saved = playerHistory.find(player => nameKey(player.name) === key);
+
     return [{
+      id: saved?.id ?? entry.id ?? newPlayerId(),
+      statsKey: saved?.statsKey ?? saved?.name ?? entry.statsKey ?? entry.name.trim(),
+      aliases: [...new Set([...(saved?.aliases ?? []), ...(entry.aliases ?? []), ...(saved && nameKey(saved.name) !== nameKey(entry.name) ? [entry.name.trim()] : [])])],
       name: saved?.name ?? entry.name.trim(),
       gender: saved?.gender ?? entry.gender,
-      level: saved?.level ?? entry.level ?? 2,
+      level: saved?.level ?? entry.level ?? 3,
+      ...(saved?.quarantined ? { quarantined: true } : {}),
       skill: 2,
       availFrom: 0,
       availTo: totalSlots - 1,
@@ -61,7 +68,7 @@ export function parseRosterPaste(text: string): ParsedRosterEntry[] {
     const isListItem = /^(?:\d+\s*[.)]|[-*•])\s*/.test(line);
     if (isListItem) line = line.replace(/^(?:\d+\s*[.)]\s*|[-*•]\s*)/, '');
     else if (/^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b.*\b\d{1,2}\/\d{1,2}\b/i.test(line)) continue;
-    if (!line) continue;
+    if (!line || isRosterInstruction(line)) continue;
 
     const guestMatch = /^(.*?)\s*\+\s*(\d+)\s*\(([^()]*)\)\s*$/.exec(line);
     if (guestMatch && guestMatch[3]!.trim()) {
@@ -103,3 +110,9 @@ export function parseRosterPaste(text: string): ParsedRosterEntry[] {
     return [{ ...entry, name }];
   });
 }
+
+/** Kept separately for the review UI, so exclusions can be corrected. */
+export function isRosterInstruction(line:string):boolean {
+ return /\b(?:court|courts)\b.*(?:\b(?:at|from|until|starts?)\b|\d{1,2}:\d{2})/i.test(line) || /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b.*\d/i.test(line);
+}
+export function ignoredRosterLines(text:string):string[] { return text.split(/\r?\n/).map(s=>s.trim()).filter(isRosterInstruction); }

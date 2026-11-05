@@ -1,3 +1,5 @@
+import { excludeQuarantinedGames } from '../utils/quarantine';
+import { actualGamesWaited } from '../utils/gamesWaited';
 import { useCallback, useMemo } from 'react';
 import type { Player } from '../algorithm/types';
 import type { PlannerResult, QueueRuntimeState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
@@ -76,6 +78,8 @@ function substituteQueuedGame(
   players: Player[],
   activeNames: Set<string>,
   suspendedNames: Set<string>,
+  completedGames: GameRef[] = [],
+  liveGames: GameRef[] = [],
 ) {
   const slot = schedule.schedule.find(item => item.slot === game.slot);
   const court = slot?.courts[game.court];
@@ -87,26 +91,33 @@ function substituteQueuedGame(
   const slotPool = [
     ...slot.sitting.map(player => player.name),
     ...slot.courts.flatMap(item => [...item.teamA, ...item.teamB].map(player => player.name)),
+    ...players.map(player => player.name),
   ];
+  const unavailable = (name: string) => activeNames.has(name) || suspendedNames.has(name) || !!playerInfo.get(name)?.quarantined;
   const used = new Set(originalPlayers);
-  const replacements: Array<{ replacee: string; replacer: string }> = [];
+  const waited = actualGamesWaited(schedule.schedule, players, completedGames, liveGames);
+  const replacements: Array<{ replacee: string; replacer: string; gamesWaited: number }> = [];
   const nextPlayers = originalPlayers.map(name => {
-    if (!activeNames.has(name)) return name;
+    if (!unavailable(name)) return name;
     const gender = playerInfo.get(name)?.gender ?? [...court.teamA, ...court.teamB].find(player => player.name === name)?.gender;
     const candidates = [...new Set(slotPool)].filter(candidate => {
-      if (used.has(candidate) || activeNames.has(candidate) || suspendedNames.has(candidate)) return false;
+      if (used.has(candidate) || unavailable(candidate) || !playerInfo.has(candidate) || playerInfo.get(candidate)!.availFrom > game.slot - 1 || playerInfo.get(candidate)!.availTo < game.slot - 1) return false;
       return true;
     });
-    const replacer = candidates.find(candidate => playerInfo.get(candidate)?.gender === gender) ?? candidates[0];
+    const level = playerInfo.get(name)?.level ?? 3;
+    candidates.sort((a, b) => (waited[b] ?? 0) - (waited[a] ?? 0)
+      || Number(playerInfo.get(b)?.gender === gender) - Number(playerInfo.get(a)?.gender === gender)
+      || Math.abs((playerInfo.get(a)?.level ?? 3) - level) - Math.abs((playerInfo.get(b)?.level ?? 3) - level));
+    const replacer = candidates[0];
     if (!replacer) return name;
     used.add(replacer);
-    replacements.push({ replacee: name, replacer });
+    replacements.push({ replacee: name, replacer, gamesWaited: waited[replacer] ?? 0 });
     return replacer;
   });
   return {
     game: { ...game, players: nextPlayers },
-    conflictingPlayers: originalPlayers.filter(name => activeNames.has(name)),
-    unavailablePlayers: originalPlayers.filter(name => activeNames.has(name) && !replacements.some(item => item.replacee === name)),
+    conflictingPlayers: originalPlayers.filter(unavailable),
+    unavailablePlayers: originalPlayers.filter(name => unavailable(name) && !replacements.some(item => item.replacee === name)),
     replacements,
   };
 }
@@ -121,7 +132,7 @@ export function useLiveQueue({
   players,
   liveGames,
   completedGames,
-  suspendedPlayerNames,
+  suspendedPlayerNames: transientSuspendedPlayerNames,
   fromSlot,
   totalSlots,
   canPlayerJoin,
@@ -133,6 +144,8 @@ export function useLiveQueue({
   patchState,
   onConfirmedScheduleChange,
 }: LiveQueueOptions) {
+  const quarantinedNames = useMemo(() => players.filter(p => p.quarantined).map(p => p.name), [players]);
+  const suspendedPlayerNames = useMemo(() => [...new Set([...transientSuspendedPlayerNames, ...quarantinedNames])], [transientSuspendedPlayerNames, quarantinedNames]);
   const changeSlot = getFutureChangeBoundary(liveGames, completedGames);
   const liveCapacity = getCourtsPerSlot()[Math.min(totalSlots - 1, changeSlot - 1)] ?? 1;
   const setSessionChangeNotice = (sessionChangeNotice: QueueRuntimeState['sessionChangeNotice']) => patchState({ sessionChangeNotice });
@@ -257,7 +270,7 @@ export function useLiveQueue({
       });
     }
     const queuedSubstitution = queuedPreviewGame && nextResult
-      ? substituteQueuedGame(nextResult, queuedPreviewGame, options.overridePlayers ?? players, livePlayerNamesFor(nextLiveGames, nextResult), new Set(nextSuspendedPlayerNames))
+      ? substituteQueuedGame(nextResult, queuedPreviewGame, options.overridePlayers ?? players, livePlayerNamesFor(nextLiveGames, nextResult), new Set(nextSuspendedPlayerNames), nextCompletedGames, nextLiveGames)
       : null;
     if (shouldPromote && nextResult) {
       liveQueueDebug('queue:substitution-preview', {
@@ -353,6 +366,7 @@ export function useLiveQueue({
         targetCourts: forcedFirstSlot?.targetCourts ?? getCourtsPerSlot()[regenFromSlot - 1] ?? null,
       });
       const regenerated = regenerate({
+        actualGames: [...nextCompletedGames, ...nextLiveGames],
         targetFromSlot: regenFromSlot,
         overridePlayers: options.overridePlayers ?? null,
         blockedForFirstSlot,
@@ -371,16 +385,23 @@ export function useLiveQueue({
       nextResult = regenerated.newResult;
       // Completion is an event, not part of the generated lineup. Keep it when
       // future slots are regenerated so a played game cannot re-enter the queue.
-      nextCompletedGames = nextCompletedGames.filter(game => nextResult.schedule.some(slot => slot.slot === game.slot && slot.courts[game.court]));
+      nextCompletedGames = nextCompletedGames.filter(game => regenerated.newResult.schedule.some(slot => slot.slot === game.slot && slot.courts[game.court]));
       patch.result = nextResult;
-      patch.scores = regenerated.nextScores;
+      // Live/completed score drafts belong to frozen games, including when the
+      // partially played slot itself is regenerated around them.
+      const preservedScores = patch.scores ?? scores;
+      patch.scores = { ...regenerated.nextScores };
+      for (const game of [...nextLiveGames, ...nextCompletedGames]) {
+        const key = `s${game.slot}c${game.court}`;
+        if (preservedScores[key]) patch.scores[key] = preservedScores[key];
+      }
       patch.completedGames = nextCompletedGames;
       patch.copied = false;
       patch.isConfirmed = false;
       patch.loadedPlanId = null;
       if (nextSuspendedPlayerNames.length > 0) {
-        nextSuspendedPlayerNames = [];
-        patch.suspendedPlayerNames = [];
+        nextSuspendedPlayerNames = (options.overridePlayers ?? players).filter(p => p.quarantined).map(p => p.name);
+        patch.suspendedPlayerNames = nextSuspendedPlayerNames;
       }
       liveQueueDebug('regenerate:success', {
         flowId,
@@ -485,7 +506,7 @@ export function useLiveQueue({
             unavailablePlayers: unavailableQueuedPlayers,
             replacements: unavailableQueuedPlayers.flatMap((replacee, index) => {
               const replacer = replacers[index];
-              return replacer ? [{ replacee, replacer, court: displayCourt + 1 }] : [];
+              return replacer ? [{ replacee, replacer, court: displayCourt + 1, gamesWaited: queuedSubstitution.replacements.find(item => item.replacer === replacer)?.gamesWaited }] : [];
             }),
           });
         } else {
@@ -519,11 +540,18 @@ export function useLiveQueue({
       regenerated: Boolean(patch.result),
     });
     patchState(patch);
-  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, fromSlot, getCourtsPerSlot, livePlayerNamesFor, regenerate, result, suspendedPlayerNames, totalSlots, patchState, recordUndo]);
+  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, fromSlot, getCourtsPerSlot, livePlayerNamesFor, regenerate, result, scores, suspendedPlayerNames, totalSlots, patchState, recordUndo]);
 
   const toggleLiveGame = useCallback((slotNum: number, court: number, displayCourt?: number) => {
     const flowId = nextQueueFlowId();
     const isLive = hasGame(liveGames, slotNum, court);
+    if (!isLive && result) {
+      const names = snapshotGame(slotNum, court).players ?? [];
+      if (names.some(name => quarantinedNames.includes(name))) {
+        setSessionChangeNotice('This game includes a quarantined player. Regenerate upcoming games or return the player to available.');
+        return;
+      }
+    }
     const activeCapacity = liveCapacity;
     if (!isLive && liveGames.length >= activeCapacity) {
       liveQueueDebug('toggle:blocked-capacity', {
@@ -573,6 +601,8 @@ export function useLiveQueue({
           players,
           livePlayerNamesFor(nextLiveGames, result),
           new Set(suspendedPlayerNames),
+          nextCompletedGames,
+          nextLiveGames,
         );
         const completedGame = liveGames.find(game => gameMatches(game, slotNum, court));
         const completedCourt = (completedGame?.displayCourt ?? court) + 1;
@@ -603,7 +633,27 @@ export function useLiveQueue({
       }
     }
     applyLiveGamesUpdate(nextLiveGames, slotNum, nextCompletedGames, {}, isLive ? { targetLiveCount, flowId } : { flowId });
-  }, [applyLiveGamesUpdate, completedGames, describeGames, liveCapacity, liveGames, livePlayerNamesFor, players, result, snapshotGame, suspendedPlayerNames, patchState]);
+  }, [applyLiveGamesUpdate, completedGames, describeGames, liveCapacity, liveGames, livePlayerNamesFor, players, result, snapshotGame, suspendedPlayerNames, quarantinedNames, setSessionChangeNotice, patchState]);
+
+  // Opening a proposal after a remote Finish must never finish again, reroll a
+  // lineup, record undo or replace confirmed runtime progress.
+  const prepareQueuePromotionForOpenCourt = useCallback((changedSlot = Math.max(0, fromSlot - 1), displayCourt?: number) => {
+    if (!result || liveGames.length >= liveCapacity) return null;
+    const decision = getQueuePromotionDecision({ schedule: result.schedule, liveGames, completedGames, changedSlot, suspendedPlayerNames });
+    if (!decision.first || decision.firstBlockedPlayers.length === 0) return null;
+    const substitution = substituteQueuedGame(result, decision.first, players, livePlayerNamesFor(liveGames, result), new Set(suspendedPlayerNames), completedGames, liveGames);
+    const usedLanes = new Set(liveGames.map(game => game.displayCourt ?? game.court));
+    const lane = displayCourt ?? Array.from({ length: liveCapacity }, (_, i) => i).find(i => !usedLanes.has(i)) ?? 0;
+    const proposal: NonNullable<QueueRuntimeState['queuePromotionPrompt']> = {
+      flowId: nextQueueFlowId(),
+      prompt: { completedCourt: lane + 1, firstGame: describeGames([decision.first], result)[0]!, blockedPlayers: decision.firstBlockedPlayers, lookaheadGame: decision.lookahead ? describeGames([decision.lookahead], result)[0]! : null, replacements: substitution?.replacements ?? [] },
+      nextLiveGames: liveGames, nextCompletedGames: completedGames,
+      lookaheadGame: decision.lookahead ? { ...decision.lookahead, players: describeGames([decision.lookahead], result)[0]!.players } : null,
+      changedSlot, targetLiveCount: Math.min(liveCapacity, liveGames.length + 1),
+    };
+    patchState({ queuePromotionPrompt: proposal });
+    return proposal;
+  }, [completedGames, describeGames, fromSlot, liveCapacity, liveGames, livePlayerNamesFor, patchState, players, result, suspendedPlayerNames]);
 
   const resolveQueuePromotion = useCallback((choice: 'lookahead' | 'substitute') => {
     if (!queuePromotionPrompt) return;
@@ -726,21 +776,27 @@ export function useLiveQueue({
     });
   }, [changeSlot, courtOverrides, liveCapacity, players, requestSessionChange]);
 
-  const togglePlayerSuspended = useCallback((index: number) => {
+  const togglePlayerQuarantined = useCallback((index: number) => {
     const player = players[index];
     if (!player) return;
-    const nextSuspended = suspendedPlayerNames.includes(player.name)
-      ? suspendedPlayerNames.filter(name => name !== player.name)
-      : [...suspendedPlayerNames, player.name];
+    const nextPlayers = players.map((p, i) => i === index ? { ...p, quarantined: !p.quarantined } : p);
+    const nextSuspended = [...new Set([
+      ...transientSuspendedPlayerNames.filter(name => name !== player.name),
+      ...nextPlayers.filter(p => p.quarantined).map(p => p.name),
+    ])];
     if (!result) {
-      patchState({ suspendedPlayerNames: nextSuspended });
+      recordUndo();
+      patchState({ players: nextPlayers, suspendedPlayerNames: nextSuspended });
       return;
     }
-    const regenStart = Math.max(1, firstIncomplete(completedGames, result));
-    applyLiveGamesUpdate(liveGames, regenStart - 1, completedGames, {}, { suspendedPlayerNames: nextSuspended });
-  }, [applyLiveGamesUpdate, completedGames, firstIncomplete, liveGames, patchState, players, result, suspendedPlayerNames]);
+    const cleaned = excludeQuarantinedGames(result, nextPlayers, liveGames, completedGames, scores);
+    const regenStart = Math.max(1, firstIncomplete(cleaned.completedGames, cleaned.result), getFutureChangeBoundary(cleaned.liveGames, cleaned.completedGames));
+    applyLiveGamesUpdate(cleaned.liveGames, regenStart - 1, cleaned.completedGames,
+      { players: nextPlayers, scores: cleaned.scores, editingSlot: null, editLayout: null, queuePromotionPrompt: null, pendingSessionChange: null },
+      { suspendedPlayerNames: nextSuspended, overridePlayers: nextPlayers, overrideResult: cleaned.result });
+  }, [applyLiveGamesUpdate, completedGames, firstIncomplete, liveGames, patchState, players, result, scores, transientSuspendedPlayerNames, recordUndo]);
 
-  const blockedPlayerNames = useMemo(() => livePlayerNamesFor(liveGames, result), [liveGames, livePlayerNamesFor, result]);
+  const blockedPlayerNames = useMemo(() => new Set([...livePlayerNamesFor(liveGames, result), ...quarantinedNames]), [liveGames, livePlayerNamesFor, result, quarantinedNames]);
 
   return {
     applyLiveGamesUpdate,
@@ -758,11 +814,12 @@ export function useLiveQueue({
     queueAdjustment,
     queuePromotionPrompt,
     resolveQueuePromotion,
+    prepareQueuePromotionForOpenCourt,
     cancelQueuePromotion,
     setPlayerJoining,
     setPlayerLeaving,
     setPlayerBack,
     toggleLiveGame,
-    togglePlayerSuspended,
+    togglePlayerQuarantined,
   };
 }

@@ -31,8 +31,8 @@ describe('live queue helpers', () => {
   });
 
   it('requires every court before folding a slot into completed history', () => {
-    expect(isSlotCompleted(schedule[0], [{ slot: 1, court: 0 }])).toBe(false);
-    expect(isSlotCompleted(schedule[0], [{ slot: 1, court: 0 }, { slot: 1, court: 1 }])).toBe(true);
+    expect(isSlotCompleted(schedule[0]!, [{ slot: 1, court: 0 }])).toBe(false);
+    expect(isSlotCompleted(schedule[0]!, [{ slot: 1, court: 0 }, { slot: 1, court: 1 }])).toBe(true);
   });
 
   it('returns a finished sentinel after the final slot', () => {

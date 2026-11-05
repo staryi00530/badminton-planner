@@ -1,10 +1,15 @@
 export type Gender = 'M' | 'F';
 
 export interface Player {
+  id?: string;
+  aliases?: string[];
+  statsKey?: string;
   name: string;
   gender: Gender;
-  /** Private 1-3 starting level; omitted from share payloads and public schedule text. */
-  level?: 1 | 2 | 3;
+  /** Private 1-5 starting level; omitted from share payloads and public schedule text. */
+  level?: 1 | 2 | 3 | 4 | 5;
+  /** Excluded from future games until explicitly returned to availability. */
+  quarantined?: boolean;
   skill?: number;
   availFrom: number;
   availTo: number;
@@ -13,6 +18,9 @@ export interface Player {
 }
 
 export type PlayerInGame = {
+  id?: string;
+  aliases?: string[];
+  statsKey?: string;
   name: string;
   gender: Gender;
 };

@@ -1,4 +1,11 @@
+import QuarantinePanel from './components/QuarantinePanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSharedSessionSync } from './hooks/useSharedSessionSync';
+import { sharedGameId } from './utils/sharedSession';
+import { DEFAULT_QUALITY_WEIGHTS, type QualityWeights } from './utils/gameQuality';
+import { normalizePlayerIdentities } from './utils/playerIdentity';
+import { playerMetadataPatch } from './utils/playerMetadataPatch';
+import { extractRuntimeScheduleState } from './utils/runtimeScheduleState';
 import type { Player, PlayerInGame } from './algorithm/types';
 import { extractState, generateSchedule, normalizeUnstartedMixedCourts, recomputeStats } from './algorithm/scheduler';
 import { C, DEFAULT_PLAYERS, FONT } from './constants';
@@ -12,7 +19,7 @@ import { computeCourtsPerSlot } from './utils/courtsPerSlot';
 import { applyAvailability as applyAvailabilityUtil } from './utils/availability';
 import { formatSlotTime } from './utils/slotTime';
 import { isValidBadmintonScore } from './utils/scoreValidation';
-import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot } from './utils/liveQueue';
+import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot, liveQueueDebug } from './utils/liveQueue';
 import type { GameRef } from './utils/liveQueue';
 import { useLiveQueue } from './hooks/useLiveQueue';
 import { useScheduleActions } from './hooks/useScheduleActions';
@@ -90,6 +97,10 @@ function BadmintonPlanner() {
   const scheduleRef = useRef<HTMLDivElement | null>(null);
   const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
   const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
+  const [initialShareId, setInitialShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
+  const [qualityWeights, setQualityWeights] = useState<QualityWeights>(DEFAULT_QUALITY_WEIGHTS);
+  const [pendingSharedUndo, setPendingSharedUndo] = useState<string | null>(null);
+  const hydratedShare = useRef<string | null>(null);
 
   const {
     players,
@@ -171,8 +182,10 @@ function BadmintonPlanner() {
     removeFromHistory,
     removePlayer,
     updatePlayer,
-  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, scheduleActive: Boolean(result), patchState });
-  const { dbSynced, computeSkill, updateScore: updateScoreBase, clearWinLoss } = useWinLossSync({ winLoss, scores, isAdmin, patchState });
+  } = usePlayerRoster({ players, playerHistory, nameInput, genderInput, levelInput, totalSlots, scheduleActive: Boolean(result), patchState,
+    onPlayerMetadataChange: (before, after) => playerMetadataPatch(state, before, after),
+  });
+  const { dbSynced, computeSkill, updateScore: updateScoreBase, clearWinLoss } = useWinLossSync({ winLoss, scores, players, isAdmin, patchState });
 
   useEffect(() => {
     if (players.length === 0) return;
@@ -180,7 +193,7 @@ function BadmintonPlanner() {
     const newOnes = players.filter(p => !known.has(p.name.toLowerCase()));
     if (newOnes.length === 0) return;
     patchState({
-      playerHistory: [...playerHistory, ...newOnes.map(p => ({ name: p.name, gender: p.gender, level: p.level }))],
+      playerHistory: [...playerHistory, ...newOnes.map(p => ({ id: p.id, name: p.name, gender: p.gender, level: p.level, aliases: p.aliases, statsKey: p.statsKey }))],
     });
   }, [players]);
 
@@ -190,7 +203,7 @@ function BadmintonPlanner() {
   }, [savedPlans]);
 
   useEffect(() => {
-    if (!result || isSharedSession) return;
+    if (!result || isSharedSession || result.preserveLineups) return;
     const lockedGames = new Set<string>();
     for (const game of [...liveGames, ...completedGames]) {
       lockedGames.add(`${game.slot}:${game.court}`);
@@ -214,40 +227,7 @@ function BadmintonPlanner() {
     const params = new URLSearchParams(window.location.search);
     const urlShareId = params.get('share');
 
-    const loadFirebaseShare = async (id: string) => {
-      patchState({ shareNotice: 'loading' });
-      cloudDiagnostic('share.load', 'started');
-      const fail = (notice: 'not_found' | 'expired' | 'invalid' | 'error') => {
-        patchState({ shareNotice: notice, shareId: null, shareToken: null, isSharedSession: false });
-        if (!urlShareId) window.history.replaceState(null, '', `${window.location.pathname}?share=${encodeURIComponent(id)}`);
-      };
-      try {
-        const response = await fetchShare(id);
-        if (response.status !== 'ok') {
-          cloudDiagnostic('share.load', response.status);
-          fail(response.status);
-          return;
-        }
-        const data = response.data;
-        if (data?.v !== 1 || !Array.isArray(data.p) || !Array.isArray(data.slots)) {
-          cloudDiagnostic('share.load', 'invalid');
-          fail('invalid');
-          return;
-        }
-        applySharePayload(data, id);
-        patchState({ shareId: id, isSharedSession: true, shareNotice: 'loaded' });
-        cloudDiagnostic('share.load', 'ok');
-        if (urlShareId) window.history.replaceState(null, '', window.location.pathname);
-      } catch (error) {
-        cloudDiagnostic('share.load', 'failed', error);
-        fail('error');
-      }
-    };
-
-    if (urlShareId && isFirebaseConfigured()) {
-      void loadFirebaseShare(urlShareId);
-      return;
-    }
+    if (urlShareId && isFirebaseConfigured()) return;
 
     const apiBase = normalizeApiBase(window.SHARE_API_BASE);
     if (urlShareId && apiBase) {
@@ -290,12 +270,6 @@ function BadmintonPlanner() {
       return;
     }
 
-    // No ?share= in the URL this load, but sessionStorage remembers this tab was already
-    // viewing/editing a share (e.g. a page refresh) — re-fetch its content, since that
-    // content is deliberately excluded from localStorage.
-    if (isSharedSession && shareId && isFirebaseConfigured()) {
-      void loadFirebaseShare(shareId);
-    }
   }, []);
 
   const slotTime = useCallback((slotIdx: number) => formatSlotTime(slotIdx, { gameMinutes, sessionStart }), [gameMinutes, sessionStart]);
@@ -315,17 +289,22 @@ function BadmintonPlanner() {
     const indexByName = new Map(schedulePlayers.map((player, index) => [player.name, index]));
     return {
       preferMixedTeams,
+      qualityWeights,
       preferredPairs: preferredPairs.flatMap(([first, second]) => {
         const firstIndex = indexByName.get(first);
         const secondIndex = indexByName.get(second);
         return firstIndex != null && secondIndex != null ? [[firstIndex, secondIndex] as [number, number]] : [];
       }),
     };
-  }, [preferMixedTeams, preferredPairs]);
+  }, [preferMixedTeams, preferredPairs, qualityWeights]);
 
   const buildSharePayload = useCallback(
-    () => buildSharePayloadUtil({ result, playersWithAvailability: getPlayersWithAvailability(), gameMinutes, numCourts, scores, isConfirmed }),
-    [gameMinutes, getPlayersWithAvailability, isConfirmed, numCourts, result, scores]
+    () => buildSharePayloadUtil({ result: result ?? (isSharedSession ? { schedule: [] } : null), playersWithAvailability: getPlayersWithAvailability(), gameMinutes, numCourts, scores, isConfirmed,
+      settings: { totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides },
+      runtime: { live: liveGames, completed: completedGames, suspended: suspendedPlayerNames },
+      includeScoreDrafts: true,
+    }),
+    [gameMinutes, getPlayersWithAvailability, isConfirmed, isSharedSession, numCourts, result, scores, totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides, liveGames, completedGames, suspendedPlayerNames]
   );
 
   const parseScheduleText = useCallback((text: string) => parseScheduleTextUtil(text, players), [players]);
@@ -385,12 +364,13 @@ function BadmintonPlanner() {
     queueAdjustment,
     queuePromotionPrompt,
     resolveQueuePromotion,
+    prepareQueuePromotionForOpenCourt,
     cancelQueuePromotion,
     setPlayerJoining,
     setPlayerLeaving,
     setPlayerBack,
     toggleLiveGame,
-    togglePlayerSuspended,
+    togglePlayerQuarantined,
   } = useLiveQueue({
     recordUndo,
     sessionChangeNotice: state.sessionChangeNotice,
@@ -408,7 +388,7 @@ function BadmintonPlanner() {
     courtOverrides,
     isConfirmed,
     getCourtsPerSlot,
-    regenerate: ({ targetFromSlot, overridePlayers, blockedForFirstSlot, overrideWinLoss, overrideScores, baseResult, forcedFirstSlot, courtOverrides: overrides }) => doRegen(targetFromSlot, overridePlayers ?? null, blockedForFirstSlot ?? new Set(), overrideWinLoss ?? null, overrideScores ?? null, baseResult, forcedFirstSlot ?? null, overrides),
+    regenerate: ({ targetFromSlot, overridePlayers, blockedForFirstSlot, overrideWinLoss, overrideScores, baseResult, forcedFirstSlot, courtOverrides: overrides, actualGames }) => doRegen(targetFromSlot, overridePlayers ?? null, blockedForFirstSlot ?? new Set(), overrideWinLoss ?? null, overrideScores ?? null, baseResult, forcedFirstSlot ?? null, overrides, actualGames),
     patchState,
     canPlayerJoin: staggerMode === 'custom',
     onConfirmedScheduleChange: previousResult => patchState({
@@ -450,14 +430,16 @@ function BadmintonPlanner() {
     patchState({
       editLayout: {
         courts: s.courts.map(c => [...c.teamA.map(p => p.name), ...c.teamB.map(p => p.name)]),
-        sitting: s.sitting.map(p => p.name),
+        sitting: s.sitting.filter(p => !players.some(rosterPlayer => rosterPlayer.name === p.name && rosterPlayer.quarantined)).map(p => p.name),
       },
       editingSlot: slotNum,
     });
-  }, [result]);
+  }, [result, players]);
 
   const assignToPosition = useCallback((pos: { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number }, newName: string) => {
-    if (!editLayout) return;
+    if (!editLayout || players.some(p => p.name === newName && p.quarantined)) return;
+    const oldName = pos.type === 'court' ? editLayout.courts[pos.ci]?.[pos.idx] : editLayout.sitting[pos.idx];
+    if (players.some(p => p.name === oldName && p.quarantined)) return;
     type Position = { type: 'court'; ci: number; idx: number } | { type: 'sit'; idx: number };
     const findPos = (name: string): Position | null => {
       for (let ci = 0; ci < editLayout.courts.length; ci++) {
@@ -494,14 +476,25 @@ function BadmintonPlanner() {
     set(pos, bv);
     set(other, av);
     patchState({ editLayout: { courts, sitting } });
-  }, [editLayout]);
+  }, [editLayout, players]);
 
   const applySlotEdit = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
+    const quarantinedNames = new Set(players.filter(p => p.quarantined).map(p => p.name));
+    if (editLayout.courts.some((court, ci) => {
+      if (!court.some(name => quarantinedNames.has(name))) return false;
+      const protectedGame = [...liveGames, ...completedGames].find(g => g.slot === editingSlot && g.court === ci);
+      const original = result.schedule.find(s => s.slot === editingSlot)?.courts[ci];
+      const originalNames = protectedGame?.players ?? (original ? [...original.teamA, ...original.teamB].map(p => p.name) : []);
+      return !protectedGame || court.some((name, i) => originalNames[i] !== name);
+    })) {
+      patchState({ sessionChangeNotice: 'Return quarantined players to available before adding them to a game.' });
+      return;
+    }
     const slotIdx = editingSlot - 1;
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
     const keptSlots = result.schedule.slice(0, slotIdx);
-    const stateSnapshot = extractState(keptSlots, playersWithSkill);
+    const stateSnapshot = extractRuntimeScheduleState(keptSlots, playersWithSkill, [...completedGames, ...liveGames]);
     const nameToIdx = new Map(playersWithSkill.map((p, i) => [p.name, i]));
     const editedSlotBefore = result.schedule[slotIdx];
     const courtsForced = editLayout.courts.map((court, ci) => {
@@ -516,9 +509,12 @@ function BadmintonPlanner() {
       const names = preserveLiveCourt ? originalNames : court;
       return names.map(name => nameToIdx.get(name)).filter(i => i !== undefined);
     });
-    if (courtsForced.some(c => c.length !== 4)) return;
+    if (courtsForced.some(c => c.length !== 4)) {
+      liveQueueDebug('edit:blocked', { reason: 'roster-lineup-mismatch', editingSlot });
+      patchState({ sessionChangeNotice: 'Some players in this game are no longer in the roster. Update the game lineup or return those players before regenerating.' }); return;
+    }
     let newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, getScheduleOptions(playersWithSkill));
-    if (!newResult) return;
+    if (!newResult) { patchState({ sessionChangeNotice: 'Unable to apply this lineup. Check attendance and court capacity, then retry.' }); return; }
     const runtimeSlots = [...new Set([...liveGames, ...completedGames]
       .map(game => game.slot)
       .filter(slot => slot > editingSlot))].sort((a, b) => a - b);
@@ -532,11 +528,11 @@ function BadmintonPlanner() {
         totalSlots,
         getCourtsPerSlot(),
         slotNum,
-        extractState(stateThroughRuntimeSlot.schedule, playersWithSkill),
+        extractRuntimeScheduleState(stateThroughRuntimeSlot.schedule, playersWithSkill, [...completedGames, ...liveGames]),
         null,
         getScheduleOptions(playersWithSkill),
       );
-      if (!continuedResult) return;
+      if (!continuedResult) { patchState({ sessionChangeNotice: 'Unable to regenerate around current games. Your previous schedule is unchanged.' }); return; }
       newResult = continuedResult;
     }
     newResult = recomputeStats(newResult.schedule, playersWithSkill);
@@ -561,10 +557,21 @@ function BadmintonPlanner() {
       },
       { targetLiveCount: liveGames.length, overrideResult: newResult },
     );
-  }, [applyLiveGamesUpdate, completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, result, scores, totalSlots]);
+  }, [applyLiveGamesUpdate, completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, players, result, scores, totalSlots]);
 
   const applySlotEditOnly = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
+    const quarantinedNames = new Set(players.filter(p => p.quarantined).map(p => p.name));
+    if (editLayout.courts.some((court, ci) => {
+      if (!court.some(name => quarantinedNames.has(name))) return false;
+      const protectedGame = [...liveGames, ...completedGames].find(g => g.slot === editingSlot && g.court === ci);
+      const original = result.schedule.find(s => s.slot === editingSlot)?.courts[ci];
+      const originalNames = protectedGame?.players ?? (original ? [...original.teamA, ...original.teamB].map(p => p.name) : []);
+      return !protectedGame || court.some((name, i) => originalNames[i] !== name);
+    })) {
+      patchState({ sessionChangeNotice: 'Return quarantined players to available before adding them to a game.' });
+      return;
+    }
     const slotIdx = editingSlot - 1;
     const origSlot = result.schedule[slotIdx];
     if (!origSlot) return;
@@ -603,7 +610,7 @@ function BadmintonPlanner() {
     const bNum = parseInt(bVal);
     const valid = !isNaN(aNum) && !isNaN(bNum) && isValidBadmintonScore(aNum, bNum);
     const isLive = liveGames.some(lg => lg.slot === slot && lg.court === courtIdx);
-    if (!isAdmin || !valid || !isLive) {
+    if (isSharedSession || !isAdmin || !valid || !isLive) {
       if (isAdmin) recordUndo();
       updateScoreBase(slot, courtIdx, aVal, bVal, teamA, teamB);
       return;
@@ -611,19 +618,20 @@ function BadmintonPlanner() {
 
     const prevEntry = scores[key];
     const nextWinLoss = JSON.parse(JSON.stringify(winLoss));
+    const statsKey = (name: string) => players.find(player => player.name === name)?.statsKey ?? name;
     if (prevEntry?.applied) {
       const pA = parseInt(prevEntry.a);
       const pB = parseInt(prevEntry.b);
       const winners = pA > pB ? prevEntry.teamA : prevEntry.teamB;
       const losers = pA > pB ? prevEntry.teamB : prevEntry.teamA;
-      winners.forEach(name => { if (nextWinLoss[name]) nextWinLoss[name].wins = Math.max(0, nextWinLoss[name].wins - 1); });
-      losers.forEach(name => { if (nextWinLoss[name]) nextWinLoss[name].losses = Math.max(0, nextWinLoss[name].losses - 1); });
+      winners.map(statsKey).forEach(name => { if (nextWinLoss[name]) nextWinLoss[name].wins = Math.max(0, nextWinLoss[name].wins - 1); });
+      losers.map(statsKey).forEach(name => { if (nextWinLoss[name]) nextWinLoss[name].losses = Math.max(0, nextWinLoss[name].losses - 1); });
     }
 
     const winners = aNum > bNum ? teamA : teamB;
     const losers = aNum > bNum ? teamB : teamA;
-    winners.forEach(name => { nextWinLoss[name] = { wins: (nextWinLoss[name]?.wins ?? 0) + 1, losses: nextWinLoss[name]?.losses ?? 0 }; });
-    losers.forEach(name => { nextWinLoss[name] = { wins: nextWinLoss[name]?.wins ?? 0, losses: (nextWinLoss[name]?.losses ?? 0) + 1 }; });
+    winners.map(statsKey).forEach(name => { nextWinLoss[name] = { wins: (nextWinLoss[name]?.wins ?? 0) + 1, losses: nextWinLoss[name]?.losses ?? 0 }; });
+    losers.map(statsKey).forEach(name => { nextWinLoss[name] = { wins: nextWinLoss[name]?.wins ?? 0, losses: (nextWinLoss[name]?.losses ?? 0) + 1 }; });
 
     const nextScores: ScoresMap = { ...scores, [key]: { a: aVal, b: bVal, applied: true, teamA, teamB } };
     const nextLiveGames = liveGames.filter(lg => !(lg.slot === slot && lg.court === courtIdx));
@@ -639,7 +647,7 @@ function BadmintonPlanner() {
     ];
     const targetLiveCount = Math.max(nextLiveGames.length, Math.min(liveCapacity, liveGames.length));
     applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount });
-  }, [applyLiveGamesUpdate, completedGames, isAdmin, liveCapacity, liveGames, result, scores, updateScoreBase, winLoss, recordUndo]);
+  }, [applyLiveGamesUpdate, completedGames, isAdmin, isSharedSession, liveCapacity, liveGames, players, result, scores, updateScoreBase, winLoss, recordUndo]);
 
   const buildCopyText = useCallback(
     (mode: 'full' | 'games') => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
@@ -719,15 +727,13 @@ function BadmintonPlanner() {
     }
 
     if (isSharedSession && shareId && isFirebaseConfigured()) {
-      const payload = buildSharePayload();
-      if (payload) void updateShare(shareId, payload).then(() => patchState({ shareNotice: 'saved' })).catch(error => {
-        cloudDiagnostic('share.save', 'failed', error);
-        patchState({ shareNotice: 'save_error' });
-      });
+      void sharedSync.saveNow();
     }
   }, [buildSharePayload, isSharedSession, loadedPlanId, result, saveTag, savedPlans, shareId]);
 
   const loadPlan = useCallback((plan: SavedPlan) => {
+    setInitialShareId(null);
+    window.history.replaceState(null, '', window.location.pathname);
     resetSessionChanges();
     patchState({ result: plan.result, scheduleDirty: false, scores: {}, courtOverrides: {}, fromSlot: 1, fromSlotCourts: 0, activeTab: 'live', isConfirmed: false, loadedPlanId: plan.id, shareId: null, shareToken: null, isSharedSession: false, liveGames: [], completedGames: [], suspendedPlayerNames: [] });
   }, [resetSessionChanges]);
@@ -748,8 +754,10 @@ function BadmintonPlanner() {
       try {
       const existingId = !forceNew ? shareId : null;
       const id = existingId || await createShare(data);
-      if (existingId) await updateShare(existingId, data);
+      if (existingId && !await sharedSync.saveNow()) return;
       if (id) {
+        setInitialShareId(id);
+        window.history.replaceState(null, '', `${window.location.pathname}?share=${encodeURIComponent(id)}`);
         patchState({ shareId: id, shareToken: null, isSharedSession: true, shareNotice: null });
         const url = `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(id)}`;
         copyText(url, () => {
@@ -811,29 +819,86 @@ function BadmintonPlanner() {
   }, [sharedUrl]);
 
   const applySharePayload = useCallback((data: SharePayload, sourceShareId?: string) => {
-    const decoded = reconstructScheduleFromSharePayload(data as unknown as { p: [string, string][]; cfg?: { g?: number; c?: number }; slots: any[]; scores?: Record<string, any>; confirmed?: boolean }, { currentGameMinutes: gameMinutes, currentNumCourts: numCourts });
+    const decoded = reconstructScheduleFromSharePayload(data, { currentGameMinutes: gameMinutes, currentNumCourts: numCourts });
+    const firstLoad = hydratedShare.current !== (sourceShareId ?? 'snapshot');
+    hydratedShare.current = sourceShareId ?? 'snapshot';
     const { savedPlans: nextSavedPlans, loadedPlanId: newLoadedPlanId } = upsertSavedPlanFromShare(savedPlans as unknown as { id: number | string; sourceShareId?: string }[], sourceShareId ?? null, decoded.result);
 
-    resetSessionChanges();
+    // Reuse local private metadata by permanent ID. Public shares never contain levels.
+    const nextPlayers = normalizePlayerIdentities(decoded.players.map(player => {
+      const saved = [...players, ...playerHistory].find(p => player.id ? p.id === player.id : p.name === player.name);
+      return { ...player, gender: player.gender === 'F' ? 'F' as const : 'M' as const, ...(saved?.level ? { level: saved.level } : {}), ...(saved?.statsKey ? { statsKey: saved.statsKey } : {}) } as Player;
+    }), playerHistory).players as Player[];
     patchState({
-      players: decoded.players as unknown as Player[],
+      players: nextPlayers,
+      totalMinutes: decoded.totalMinutes,
+      sessionStart: decoded.sessionStart,
+      staggerMode: decoded.staggerMode,
+      extraCourt: decoded.extraCourt,
       gameMinutes: typeof decoded.gameMinutes === 'number' ? decoded.gameMinutes : gameMinutes,
       numCourts: decoded.numCourts,
-      result: decoded.result as PlannerResult,
-      courtOverrides: {},
+      result: decoded.result.schedule.length ? decoded.result as PlannerResult : null,
+      courtOverrides: decoded.courtOverrides,
       fromSlot: 1,
       fromSlotCourts: 0,
-      activeTab: 'live',
+      ...(firstLoad || !decoded.result.schedule.length ? { activeTab: decoded.result.schedule.length ? 'live' as const : 'setup' as const } : {}),
       isSharedSession: true,
       scores: decoded.scores,
       isConfirmed: decoded.isConfirmed,
       loadedPlanId: typeof newLoadedPlanId === 'number' ? newLoadedPlanId : null,
       savedPlans: nextSavedPlans as SavedPlan[],
-      liveGames: [],
-      completedGames: [],
-      suspendedPlayerNames: [],
+      liveGames: decoded.liveGames,
+      completedGames: decoded.completedGames,
+      suspendedPlayerNames: decoded.suspendedPlayerNames,
+      editingSlot: null, editLayout: null, undoSnapshot: null, scheduleDirty: false,
+      queuePromotionPrompt: null, queueAdjustment: null, pendingSessionChange: null,
+      ...(sourceShareId ? { shareId: sourceShareId, shareNotice: null } : {}),
     });
-  }, [gameMinutes, numCourts, resetSessionChanges, savedPlans]);
+    return buildSharePayloadUtil({ result: decoded.result as PlannerResult, playersWithAvailability: nextPlayers, gameMinutes: decoded.gameMinutes, numCourts: decoded.numCourts,
+      scores: decoded.scores, isConfirmed: decoded.isConfirmed,
+      settings: { totalMinutes: decoded.totalMinutes, sessionStart: decoded.sessionStart, staggerMode: decoded.staggerMode, extraCourt: decoded.extraCourt, courtOverrides: decoded.courtOverrides },
+      runtime: { live: decoded.liveGames, completed: decoded.completedGames, suspended: decoded.suspendedPlayerNames },
+      includeScoreDrafts: true,
+    })!;
+  }, [gameMinutes, numCourts, savedPlans, players, playerHistory, isSharedSession]);
+
+  const sharedTarget = isFirebaseConfigured() ? (initialShareId ?? (isSharedSession ? shareId : null)) : null;
+  const sharedSync = useSharedSessionSync({ shareId: sharedTarget, payload: buildSharePayload(), isAdmin,
+    applyRemote: data => applySharePayload(data, sharedTarget ?? undefined),
+  });
+  useEffect(() => {
+    if (!sharedTarget || !['not_found', 'expired', 'error'].includes(sharedSync.status)) return;
+    if (!initialShareId) setInitialShareId(sharedTarget);
+    patchState({ shareId: null, shareToken: null, isSharedSession: false });
+    if (!new URLSearchParams(window.location.search).has('share')) window.history.replaceState(null, '', `${window.location.pathname}?share=${encodeURIComponent(sharedTarget)}`);
+  }, [sharedTarget, sharedSync.status, initialShareId, patchState]);
+  const proposedRevision = useRef<number | null>(null);
+  useEffect(() => {
+    const revision = sharedSync.latest?.revision ?? 0;
+    if (!sharedTarget || !isAdmin || sharedSync.status !== 'saved' || proposedRevision.current === revision || queuePromotionPrompt || liveGames.length >= liveCapacity) return;
+    proposedRevision.current = revision;
+    prepareQueuePromotionForOpenCourt();
+  }, [sharedTarget, sharedSync.status, sharedSync.latest, isAdmin, liveGames.length, liveCapacity, queuePromotionPrompt, prepareQueuePromotionForOpenCourt]);
+  const toggleSessionGame = (slot: number, court: number, displayCourt?: number) => {
+    if (!sharedTarget) { toggleLiveGame(slot, court, displayCourt); return; }
+    const payload = buildSharePayload();
+    if (!payload) return;
+    const type = liveGames.some(game => gameMatches(game, slot, court)) ? 'finish' : 'start';
+    if (sharedSync.status !== 'saved') { patchState({ sessionChangeNotice: 'Wait for the shared session to finish saving, or retry its connection, before changing game progress.' }); return; }
+    // Bind the action to the card actually rendered, never a newer buffered lineup.
+    const rendered = { ...payload, ...(!sharedSync.latest?.ids ? { ids: undefined } : {}) };
+    void sharedSync.performAction({ type, id: crypto.randomUUID(), gameId: sharedGameId(rendered, slot, court), ...(displayCourt != null ? { displayCourt } : {}) });
+  };
+  const resolveSessionPromotion = (choice: 'lookahead' | 'substitute') => {
+    if (!sharedTarget) { resolveQueuePromotion(choice); return; }
+    if (!queuePromotionPrompt || !sharedSync.latest) return;
+    const selected = choice === 'lookahead' ? queuePromotionPrompt.lookaheadGame : queuePromotionPrompt.prompt.firstGame;
+    if (!selected) return;
+    void sharedSync.performAction({ type: 'start', id: crypto.randomUUID(), gameId: sharedGameId(sharedSync.latest, selected.slot, selected.court),
+      displayCourt: queuePromotionPrompt.prompt.completedCourt - 1,
+      ...(choice === 'substitute' ? { replacements: queuePromotionPrompt.prompt.replacements.map(({ replacee, replacer }) => ({ replacee, replacer })) } : {}),
+    }).then(saved => { if (saved) patchState({ queuePromotionPrompt: null }); });
+  };
 
   const selectedTab = activeTab === 'live' && !result ? 'setup' : activeTab;
   const liveBoard = result && <LiveSessionBoard
@@ -855,7 +920,7 @@ function BadmintonPlanner() {
     updateScore={updateScore}
     liveGames={liveGames}
     completedGames={completedGames}
-    onToggleLive={toggleLiveGame}
+    onToggleLive={toggleSessionGame}
     onAdjustCourts={adjustCourtsAtSlot}
     blockedPlayerNames={blockedPlayerNames}
     fromSlot={changeSlot}
@@ -864,6 +929,9 @@ function BadmintonPlanner() {
     changeCapacity={liveCapacity}
     queueAdjustment={queueAdjustment}
     staggerMode={staggerMode}
+    preferredQualityPairs={preferredPairs}
+    qualityWeights={qualityWeights}
+    onQualityWeightsChange={setQualityWeights}
   />;
 
   return (
@@ -873,7 +941,12 @@ function BadmintonPlanner() {
         {showSavePlan && <SavePlanModal needsPin={Boolean(window.ADMIN_PIN && !isAdmin)} pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} saveTag={saveTag} setSaveTag={value => patchState({ saveTag: value })} savePlan={savePlan} canUpdate={loadedPlanId != null && savedPlans.some(p => p.id === loadedPlanId)} savedPlans={savedPlans} isSharedSession={isSharedSession} close={() => patchState({ showSavePlan: false, pinInput: '', pinError: false })} />}
         {showShareModal && <ShareLinkModal copiedShareUrl={copiedShareUrl} sharedUrl={sharedUrl} shareIsUpdate={shareIsUpdate} hasExisting={isFirebaseConfigured() ? !!shareId : !!(shareId && shareToken)} copyShareUrl={copyShareUrl} newShareLink={() => shareLink(true)} close={() => patchState({ showShareModal: false })} />}
         {showImport && <ImportModal importText={importText} importError={importError} setImportText={value => patchState({ importText: value, importError: '' })} importSchedule={importSchedule} close={() => patchState({ showImport: false, importText: '', importError: '' })} />}
-        {queuePromotionPrompt && <QueuePromotionModal prompt={queuePromotionPrompt.prompt} onUseLookahead={() => resolveQueuePromotion('lookahead')} onSubstitute={() => resolveQueuePromotion('substitute')} onCancel={cancelQueuePromotion} />}
+        {queuePromotionPrompt && <QueuePromotionModal prompt={queuePromotionPrompt.prompt} onUseLookahead={() => resolveSessionPromotion('lookahead')} onSubstitute={() => resolveSessionPromotion('substitute')} onCancel={cancelQueuePromotion} />}
+        {pendingSharedUndo && <div role="alertdialog" aria-label="Undo Finish" style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#000b', display: 'grid', placeItems: 'center' }}><div style={{ background: C.card, padding: 24, borderRadius: 12, maxWidth: 420 }}>
+          <h2>Undo Finish?</h2><p>This also stops the replacement game that was started. Confirm only if that replacement game has not actually begun play. If it has already finished or changed, undo will be blocked.</p>
+          <button onClick={() => { void sharedSync.performAction({ type: 'undo', id: crypto.randomUUID(), target: pendingSharedUndo, confirmDependents: true }); setPendingSharedUndo(null); }} style={{ minHeight: 48 }}>Undo Finish and stop replacement</button>
+          <button onClick={() => setPendingSharedUndo(null)} style={{ minHeight: 48, marginLeft: 8 }}>Cancel</button>
+        </div></div>}
         {pendingSessionChange && <SessionChangeModal {...pendingSessionChange} onConfirm={confirmSessionChange} onCancel={cancelSessionChange} />}
 
         <div style={{ marginBottom: 28, borderBottom: `1px solid ${C.border}`, paddingBottom: 16, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
@@ -933,6 +1006,17 @@ function BadmintonPlanner() {
           </div>
         )}
 
+        {sharedTarget && <div role={['conflict', 'error', 'not_found', 'expired'].includes(sharedSync.status) ? 'alert' : 'status'} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12, marginBottom: 16 }}>
+          <strong>{({ loading: 'Loading shared session…', saving: 'Saving shared session…', saved: 'Shared session saved', offline: 'Offline — changes retained on this device', conflict: 'Session changed on another device — your draft is retained', not_found: 'This share link was not found. Ask the organizer to share it again.', expired: 'This share link has expired. Ask for a new link.', error: 'Could not load this shared schedule. Download debug logs for details.' })[sharedSync.status]}</strong>
+          {sharedSync.message && <p>{sharedSync.message}</p>}
+          {sharedSync.hasRecovery && sharedSync.status !== 'conflict' && <button onClick={sharedSync.downloadDraft} style={{ marginLeft: 12, minHeight: 44 }}>Download retained draft</button>}
+          {['offline', 'error'].includes(sharedSync.status) && <button onClick={sharedSync.retry} style={{ marginLeft: 12, minHeight: 44 }}>Retry connection</button>}
+          {sharedSync.status === 'conflict' && <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button onClick={sharedSync.downloadDraft} style={{ minHeight: 44 }}>Download my draft</button>
+            <button onClick={sharedSync.loadLatest} style={{ minHeight: 44 }}>Load latest session</button>
+          </div>}
+        </div>}
+
         <nav aria-label="Session views" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
           {([['live', 'Live session'], ['setup', 'Setup'], ['past', `Past games${completedGames.length ? ` (${completedGames.length})` : ''}`], ['pairings', 'Pairings'], ['archive', `Saved plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How it works']] as const).map(([val, label]) => (
             <button key={val} onClick={() => patchState({ activeTab: val })}
@@ -950,8 +1034,13 @@ function BadmintonPlanner() {
         </nav>
 
         {result && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-          <button onClick={restoreUndo} disabled={!state.undoSnapshot || isGenerating} title="Undo last action" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: state.undoSnapshot ? C.text : C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, fontFamily: FONT, opacity: state.undoSnapshot ? 1 : 0.5 }}>
-            <LucideIcon name="undo" size={16} /> Undo last action
+          <button onClick={() => {
+            if (!sharedTarget) { restoreUndo(); return; }
+            const action = sharedSync.latest?.actions?.at(-1);
+            if (action?.promoted?.length) setPendingSharedUndo(action.id);
+            else if (action) void sharedSync.performAction({ type: 'undo', id: crypto.randomUUID(), target: action.id });
+          }} disabled={isGenerating || (sharedTarget ? !sharedSync.latest?.actions?.length || sharedSync.status !== 'saved' : !state.undoSnapshot)} title={sharedTarget ? 'Undo last Finish' : 'Undo last action'} style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '12px 16px', minHeight: 44, fontSize: 13, fontFamily: FONT }}>
+            <LucideIcon name="undo" size={16} /> {sharedTarget ? 'Undo last Finish' : 'Undo last action'}
           </button>
         </div>}
 
@@ -1011,7 +1100,10 @@ function BadmintonPlanner() {
           clearWinLoss={clearWinLoss}
           updatePlayer={updatePlayer}
           removePlayer={removePlayer}
+          togglePlayerQuarantined={togglePlayerQuarantined}
         />
+
+        {selectedTab === 'setup' && !result && <QuarantinePanel players={players} togglePlayerQuarantined={togglePlayerQuarantined} />}
 
         {selectedTab === 'setup' && players.length >= 4 && (
           <div className="action-buttons" style={{ marginBottom: result ? 8 : 24 }}>
@@ -1071,7 +1163,7 @@ function BadmintonPlanner() {
           </div>
         )}
 
-        {saved && <p style={{ fontSize: 12, color: C.green, textAlign: 'center', marginTop: -16, marginBottom: 16 }}>Schedule saved — will persist on refresh</p>}
+        {saved && !sharedTarget && <p style={{ fontSize: 12, color: C.green, textAlign: 'center', marginTop: -16, marginBottom: 16 }}>Schedule saved — will persist on refresh</p>}
         </>}
 
         {result && (
@@ -1081,12 +1173,11 @@ function BadmintonPlanner() {
             totalSlots={totalSlots}
             liveGames={liveGames}
             completedGames={completedGames}
-            suspendedPlayerNames={suspendedPlayerNames}
             staggerMode={staggerMode}
             setPlayerBack={setPlayerBack}
             setPlayerJoining={setPlayerJoining}
             setPlayerLeaving={setPlayerLeaving}
-            togglePlayerSuspended={togglePlayerSuspended}
+            togglePlayerQuarantined={togglePlayerQuarantined}
           />
         )}
 

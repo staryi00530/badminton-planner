@@ -43,9 +43,30 @@ describe('parseRosterPaste', () => {
       9,
     );
 
-    expect(additions).toEqual([
+    expect(additions).toMatchObject([
       { name: 'Bank player', gender: 'F', level: 3, skill: 2, availFrom: 0, availTo: 8, group: 'full', leavesAt: null },
-      { name: 'New player', gender: 'M', level: 2, skill: 2, availFrom: 0, availTo: 8, group: 'full', leavesAt: null },
+      { name: 'New player', gender: 'M', level: 3, skill: 2, availFrom: 0, availTo: 8, group: 'full', leavesAt: null },
     ]);
   });
+});
+
+describe('identity-aware import', () => {
+ it('ignores scheduling instructions as players', () => { expect(parseRosterPaste('Alice\n4th court at 9:30').map(p=>p.name)).toEqual(['Alice']); });
+ it('deduplicates aliases mapped to one saved identity', () => {
+ const result=buildImportedPlayers([], [{id:'a',name:'Alice',gender:'F',aliases:['Al'],level:5,quarantined:true}], [{name:'Al',gender:'M'},{id:'a',name:'Alice',gender:'M'}],8);
+ expect(result).toHaveLength(1); expect(result[0]).toMatchObject({id:'a',name:'Alice',level:5,quarantined:true,aliases:['Al']});
+ });
+});
+
+it('does not add an alias for an identity already active',()=>{
+ expect(buildImportedPlayers([{id:'a',name:'Alice',gender:'F',availFrom:0,availTo:8}],[{id:'a',name:'Alice',gender:'F',aliases:['Al']}],[{name:'Al',gender:'F'}],8)).toEqual([]);
+});
+
+it('retains explicitly confirmed new aliases on an existing identity',()=>{
+ expect(buildImportedPlayers([],[{id:'a',name:'Alice',gender:'F'}],[{id:'a',name:'Alice',gender:'F',aliases:['Ally']}],8)[0]?.aliases).toContain('Ally');
+});
+
+it('keeps active quarantine and private level when a stale bank copy shares the same ID',()=>{
+ const result=buildImportedPlayers([],[{id:'a',name:'Alice',gender:'F',quarantined:true,level:5},{id:'a',name:'Alice',gender:'F',level:3}],[{name:'Alice',gender:'F'}],8);
+ expect(result[0]).toMatchObject({id:'a',quarantined:true,level:5});
 });

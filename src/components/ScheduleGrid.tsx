@@ -60,7 +60,7 @@ export function ScheduleGame({ props, game, sessionActions = false, waitingReaso
     applySlotEditOnly={props.applySlotEditOnly}
     cancelSlotEdit={props.cancelSlotEdit}
     assignToPosition={props.assignToPosition}
-    editOptions={props.players}
+    editOptions={props.players.filter(p => !p.quarantined)}
     updateScore={props.updateScore}
     liveGames={props.liveGames}
     completedGames={props.completedGames}

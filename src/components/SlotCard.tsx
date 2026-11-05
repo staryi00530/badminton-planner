@@ -194,7 +194,7 @@ export default function SlotCard({
               {isReady && <span style={{ color: C.green }} title="Everyone on this court is free to start">✓ Ready</span>}
               <div style={{ flex: 1 }} />
               {onToggleLive && (
-                <button onClick={() => !isLive && displayCourt != null ? onToggleLive(slot.slot, ci, displayCourt) : onToggleLive(slot.slot, ci)} disabled={isWaiting || isQueued} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting || isQueued ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting || isQueued ? 0.75 : 1 }}>
+                <button onClick={() => !isLive && displayCourt != null ? onToggleLive(slot.slot, ci, displayCourt) : onToggleLive(slot.slot, ci)} disabled={isWaiting || isQueued} title={actionTitle} style={{ background: isLive ? '#ef4444' : 'none', color: actionColor, border: `1px solid ${actionBorder}`, borderRadius: 4, padding: isLive ? '10px 18px' : '2px 8px', minHeight: isLive ? 48 : 32, fontSize: isLive ? 16 : 10, fontWeight: 700, fontFamily: FONT, cursor: isWaiting || isQueued ? 'not-allowed' : 'pointer', lineHeight: 1.4, opacity: isWaiting || isQueued ? 0.75 : 1 }}>
                   {actionLabel}
                 </button>
               )}

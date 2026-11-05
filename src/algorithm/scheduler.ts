@@ -8,6 +8,7 @@ import type {
   GeneratorYield,
   ForcedFirstSlot,
 } from './types.js';
+import { scoreGameQuality, type QualityWeights } from '../utils/gameQuality.js';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ export function normalizeUnstartedMixedCourts(schedule: SlotResult[], lockedGame
 export interface ScheduleOptions {
   preferMixedTeams?: boolean; // pack 2F+2M on one court rather than spreading 1F per court
   preferredPairs?: Array<[number, number]>; // soft teammate preferences, expressed as player indices
+  qualityWeights?: Partial<QualityWeights>;
 }
 
 export function* generateScheduleGen(
@@ -94,7 +96,7 @@ export function* generateScheduleGen(
     const available: number[] = [];
     for (let i = 0; i < n; i++) {
       const p = players[i]!;
-      if (slot >= p.availFrom && slot <= p.availTo) available.push(i);
+      if (!p.quarantined && slot >= p.availFrom && slot <= p.availTo) available.push(i);
     }
 
     // Compute constraints first so courtsThisSlot reflects who can actually play
@@ -110,7 +112,11 @@ export function* generateScheduleGen(
     // Use all available players for court count — mustRest players can play
     // a 3rd consecutive game rather than leaving a court empty.
     const courtsThisSlot = Math.min(courtsPerSlot[slot]!, Math.floor(available.length / 4));
-    if (courtsThisSlot === 0) {
+    // A frozen live court can still finish when fewer than four players remain
+    // eligible for new games (for example after quarantining someone on court).
+    const hasPreservedCourts = forcedFirstSlot != null && slot === startFrom
+      && !Array.isArray(forcedFirstSlot) && forcedFirstSlot.courts.length > 0;
+    if (courtsThisSlot === 0 && !hasPreservedCourts) {
       schedule.push({
         slot: slot + 1,
         courts: [],
@@ -440,7 +446,7 @@ export function* generateScheduleGen(
     // This is deliberately a soft constraint: forced lineups and unavoidable
     // roster shapes must remain valid even when they contain a level gap.
     if (!isForcedSlot && courtGroups.length > 1) {
-      const levelOf = (pid: number) => players[pid]!.level ?? 2;
+      const levelOf = (pid: number) => players[pid]!.level ?? 3;
       const groupSpan = (group: number[]) => {
         const levels = group.map(levelOf);
         return Math.max(...levels) - Math.min(...levels);
@@ -578,8 +584,49 @@ export function* generateScheduleGen(
 
         if (!fixed) repeatedCourts.push(ci);
       }
-      for (const g of courtGroups) courtGroupHistory.add(groupKey(g));
     }
+
+    // A planned next slot is consumed court by court. Keep the resting cohort
+    // together before optimizing soft preferences: distributing returning
+    // players across every court blocks otherwise playable waiting groups.
+    if (!isForcedSlot && slot > 0 && actualCourts >= 4) {
+      const eligibleWaiting = available.filter(i => consecutivePlayed[i] === 0)
+        .sort((a, b) => consecutiveRested[b]! - consecutiveRested[a]! || gamesPlayed[a]! - gamesPlayed[b]!);
+      const readyCount = Math.min(actualCourts, Math.floor(eligibleWaiting.length / 4));
+      // Gender parity and repeat avoidance may have swapped a waiting player
+      // out of selection. Restore the ready cohort before applying preferences.
+      const required = eligibleWaiting.slice(0, readyCount * 4);
+      for (const player of required) {
+        if (selected.includes(player)) continue;
+        const replace = selected.findIndex(i => !required.includes(i));
+        if (replace >= 0) selected[replace] = player;
+      }
+      const waiting = selected.filter(i => consecutivePlayed[i] === 0);
+      const currentReady = courtGroups.slice(0, readyCount).every(group => group.every(i => consecutivePlayed[i] === 0));
+      if (readyCount > 0 && !currentReady) {
+        const pack = (pool: number[], count: number): number[][] => {
+          const women = pool.filter(i => players[i]!.gender === 'F');
+          const men = pool.filter(i => players[i]!.gender === 'M');
+          const groups: number[][] = [];
+          for (let c = 0; c < count; c++) {
+            if (women.length >= 2 && men.length >= 2) groups.push([...women.splice(0, 2), ...men.splice(0, 2)]);
+            else if (women.length >= 4) groups.push(women.splice(0, 4));
+            else if (men.length >= 4) groups.push(men.splice(0, 4));
+            else {
+              const femaleCount = Math.min(women.length, 4);
+              groups.push([...women.splice(0, femaleCount), ...men.splice(0, 4 - femaleCount)]);
+            }
+          }
+          return groups;
+        };
+        const readyGroups = pack(waiting, readyCount);
+        const packed = new Set(readyGroups.flat());
+        courtGroups.splice(0, courtGroups.length, ...readyGroups, ...pack(selected.filter(i => !packed.has(i)), actualCourts - readyCount));
+        repeatedCourts.length = 0;
+        courtGroups.forEach((group, index) => { if (courtGroupHistory.has(groupKey(group))) repeatedCourts.push(index); });
+      }
+    }
+    for (const group of courtGroups) courtGroupHistory.add(groupKey(group));
 
     const courts: Court[] = [];
 
@@ -620,11 +667,20 @@ export function* generateScheduleGen(
         const skillA = (players[tA[0]]!.skill ?? 0.5) + (players[tA[1]]!.skill ?? 0.5);
         const skillB = (players[tB[0]]!.skill ?? 0.5) + (players[tB[1]]!.skill ?? 0.5);
         score += Math.abs(skillA - skillB) * 2;
-        // Keep a level-1 and level-3 player from being teammates where another
-        // pairing is available. A one-level difference is acceptable; larger
+        // Keep a level-1 and level-5 player from being teammates where another
+        // pairing is available. A two-level difference is acceptable; larger
         // gaps are penalized softly so hard availability/format constraints win.
-        const teamLevelGap = (team: [number, number]) => Math.max(0, Math.abs((players[team[0]]!.level ?? 2) - (players[team[1]]!.level ?? 2)) - 1);
+        const teamLevelGap = (team: [number, number]) => Math.max(0, Math.abs((players[team[0]]!.level ?? 3) - (players[team[1]]!.level ?? 3)) - 2) / 2;
         score += (teamLevelGap(tA) + teamLevelGap(tB)) * 12;
+        if (options.qualityWeights) {
+          const quality = scoreGameQuality({ court: c + 1, teamA: [players[tA[0]]!, players[tA[1]]!], teamB: [players[tB[0]]!, players[tB[1]]!] }, {
+            players, slot: slot + 1,
+            waited: Object.fromEntries(players.map((p, i) => [p.name, consecutiveRested[i] ?? 0])),
+            history: schedule.flatMap(previous => previous.courts),
+            preferredPairs: (options.preferredPairs ?? []).map(([a, b]) => [players[a]!.name, players[b]!.name]),
+          }, options.qualityWeights);
+          score = quality.score == null ? Infinity : -quality.score;
+        }
         score += rng() * 1.5;
         if (score < bestScore) {
           bestScore = score;

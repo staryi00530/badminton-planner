@@ -3,10 +3,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { usePlayerRoster } from './usePlayerRoster.js';
 import { DEFAULT_PLAYERS } from '../constants.js';
+import type { Player } from '../types';
 
-function setup(overrides = {}) {
-  const patchState = vi.fn();
-  const props = {
+function setup(overrides: Partial<Parameters<typeof usePlayerRoster>[0]> = {}) {
+  const patchState = vi.fn<Parameters<typeof usePlayerRoster>[0]['patchState']>();
+  const props: Parameters<typeof usePlayerRoster>[0] = {
     players: [],
     playerHistory: [],
     nameInput: '',
@@ -23,7 +24,7 @@ describe('usePlayerRoster — loadDefaults', () => {
   it('adds every default player not already in the roster', () => {
     const { result, patchState } = setup();
     act(() => result.current.loadDefaults());
-    const patch = patchState.mock.calls[0][0];
+    const patch = patchState.mock.calls[0]![0];
     expect(patch.players).toHaveLength(DEFAULT_PLAYERS.length);
     expect(patch.result).toBeNull();
   });
@@ -37,11 +38,11 @@ describe('usePlayerRoster — loadDefaults', () => {
   });
 
   it('merges: only adds the missing defaults, keeps existing players untouched', () => {
-    const existing = { name: 'Custom', gender: 'M', availFrom: 0, availTo: 11 };
+    const existing: Player = { name: 'Custom', gender: 'M', availFrom: 0, availTo: 11 };
     const { result, patchState } = setup({ players: [existing] });
     act(() => result.current.loadDefaults());
-    const patch = patchState.mock.calls[0][0];
-    expect(patch.players[0]).toBe(existing);
+    const patch = patchState.mock.calls[0]![0];
+    expect(patch.players![0]).toBe(existing);
     expect(patch.players).toHaveLength(1 + DEFAULT_PLAYERS.length);
   });
 });
@@ -51,7 +52,7 @@ describe('usePlayerRoster — resetPlayers / clearPlayers', () => {
     const { result, patchState } = setup({ players: [{ name: 'X', gender: 'M', availFrom: 0, availTo: 11 }] });
     act(() => result.current.resetPlayers());
     expect(patchState).toHaveBeenCalledWith(expect.objectContaining({ result: null }));
-    expect(patchState.mock.calls[0][0].players).toHaveLength(DEFAULT_PLAYERS.length);
+    expect(patchState.mock.calls[0]![0].players).toHaveLength(DEFAULT_PLAYERS.length);
   });
 
   it('clearPlayers empties the roster and clears the schedule', () => {
@@ -65,8 +66,8 @@ describe('usePlayerRoster — addPlayer', () => {
   it('adds a trimmed name with the current gender and clears nameInput', () => {
     const { result, patchState } = setup({ nameInput: '  Alice  ', genderInput: 'F' });
     act(() => result.current.addPlayer());
-    const patch = patchState.mock.calls[0][0];
-    expect(patch.players[0]).toMatchObject({ name: 'Alice', gender: 'F' });
+    const patch = patchState.mock.calls[0]![0];
+    expect(patch.players![0]).toMatchObject({ name: 'Alice', gender: 'F', availFrom: 0, availTo: 11 });
     expect(patch.nameInput).toBe('');
   });
 
@@ -87,9 +88,9 @@ describe('usePlayerRoster — addSelectedFromBank', () => {
   it('adds only entries not already on the roster', () => {
     const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F', availFrom: 0, availTo: 11 }] });
     act(() => result.current.addSelectedFromBank([{ name: 'Alice', gender: 'F' }, { name: 'Bob', gender: 'M' }]));
-    const patch = patchState.mock.calls[0][0];
+    const patch = patchState.mock.calls[0]![0];
     expect(patch.players).toHaveLength(2);
-    expect(patch.players[1]).toMatchObject({ name: 'Bob', gender: 'M' });
+    expect(patch.players![1]).toMatchObject({ name: 'Bob', gender: 'M', availFrom: 0, availTo: 11 });
   });
 
   it('is a no-op when every selected entry is already on the roster', () => {
@@ -102,7 +103,7 @@ describe('usePlayerRoster — addSelectedFromBank', () => {
 describe('usePlayerRoster — addImportedPlayers', () => {
   it('replaces the roster, removes absent players, and preserves known player metadata', () => {
     const { result, patchState } = setup({
-      players: [{ name: 'Alice', gender: 'F', level: 1, availFrom: 0, availTo: 11 }, { name: 'Old player', gender: 'M' }],
+      players: [{ name: 'Alice', gender: 'F', level: 1, availFrom: 0, availTo: 11 }, { name: 'Old player', gender: 'M', availFrom: 0, availTo: 11 }],
       playerHistory: [{ name: 'Bank player', gender: 'F', level: 3 }],
       totalSlots: 9,
       scheduleActive: true,
@@ -113,28 +114,34 @@ describe('usePlayerRoster — addImportedPlayers', () => {
       { name: 'New player', gender: 'M' },
     ]));
 
-    const patch = patchState.mock.calls[0][0];
+    const patch = patchState.mock.calls[0]![0];
     expect(patch.players).toHaveLength(3);
-    expect(patch.players.map(player => player.name)).toEqual(['Alice', 'Bank player', 'New player']);
-    expect(patch.players[0]).toMatchObject({ gender: 'F', level: 1 });
-    expect(patch.players[1]).toMatchObject({ name: 'Bank player', gender: 'F', level: 3 });
-    expect(patch.players[2]).toMatchObject({ name: 'New player', gender: 'M', availTo: 8 });
+    expect(patch.players!.map(player => player.name)).toEqual(['Alice', 'Bank player', 'New player']);
+    expect(patch.players![0]).toMatchObject({ gender: 'F', level: 1 });
+    expect(patch.players![1]).toMatchObject({ name: 'Bank player', gender: 'F', level: 3 });
+    expect(patch.players![2]).toMatchObject({ name: 'New player', gender: 'M', availTo: 8 });
     expect(patch).toMatchObject({ scheduleDirty: true, undoSnapshot: null });
     expect(patch).not.toHaveProperty('result');
     expect(patch).not.toHaveProperty('playerHistory');
   });
 
   it('can replace the roster with only existing players and deduplicates pasted names', () => {
-    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F' }, { name: 'Bob', gender: 'M' }] });
+    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F', availFrom: 0, availTo: 11 }, { name: 'Bob', gender: 'M', availFrom: 0, availTo: 11 }] });
     act(() => result.current.addImportedPlayers([{ name: 'alice', gender: 'M' }, { name: ' Alice ', gender: 'M' }]));
-    expect(patchState.mock.calls[0][0].players.map(player => player.name)).toEqual(['Alice']);
-    expect(patchState.mock.calls[0][0].result).toBeNull();
+    expect(patchState.mock.calls[0]![0].players!.map(player => player.name)).toEqual(['Alice']);
+    expect(patchState.mock.calls[0]![0].result).toBeNull();
   });
 
   it('keeps the roster when the pasted selection contains no valid names', () => {
-    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F' }] });
+    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F', availFrom: 0, availTo: 11 }] });
     act(() => result.current.addImportedPlayers([{ name: ' ', gender: 'M' }]));
     expect(patchState).not.toHaveBeenCalled();
+  });
+
+  it('does not silently return a quarantined player when replacing a pasted roster', () => {
+    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F', level: 4, quarantined: true, availFrom: 0, availTo: 11 }] });
+    act(() => result.current.addImportedPlayers([{ name: 'alice', gender: 'M' }]));
+    expect(patchState.mock.calls[0]![0].players![0]).toMatchObject({ name: 'Alice', level: 4, quarantined: true });
   });
 });
 
@@ -142,7 +149,7 @@ describe('usePlayerRoster — bank management', () => {
   it('addToBank adds a trimmed name+gender, rejecting a case-insensitive duplicate', () => {
     const { result, patchState } = setup({ playerHistory: [{ name: 'Bob', gender: 'M' }] });
     act(() => result.current.addToBank('  Carol  ', 'F'));
-    expect(patchState).toHaveBeenCalledWith({ playerHistory: [{ name: 'Bob', gender: 'M' }, { name: 'Carol', gender: 'F', level: 2 }] });
+    expect(patchState.mock.calls[0]![0].playerHistory).toMatchObject([{name:'Bob'}, {name:'Carol', gender:'F', level:3}]);
 
     patchState.mockClear();
     act(() => result.current.addToBank('bob', 'M'));
@@ -158,16 +165,34 @@ describe('usePlayerRoster — bank management', () => {
 
 describe('usePlayerRoster — removePlayer / updatePlayer', () => {
   it('removePlayer removes by index and invalidates the schedule', () => {
-    const players = [{ name: 'A', gender: 'M', availFrom: 0, availTo: 11 }, { name: 'B', gender: 'M', availFrom: 0, availTo: 11 }];
+    const players: Player[] = [{ name: 'A', gender: 'M', availFrom: 0, availTo: 11 }, { name: 'B', gender: 'M', availFrom: 0, availTo: 11 }];
     const { result, patchState } = setup({ players });
     act(() => result.current.removePlayer(0));
     expect(patchState).toHaveBeenCalledWith({ players: [players[1]], result: null, undoSnapshot: null });
   });
 
-  it('updatePlayer updates the given field on the given index and invalidates the schedule', () => {
-    const players = [{ name: 'A', gender: 'M', availFrom: 0, availTo: 11 }];
+  it('updatePlayer changes metadata without invalidating the schedule', () => {
+    const players: Player[] = [{ name: 'A', gender: 'M', availFrom: 0, availTo: 11 }];
     const { result, patchState } = setup({ players });
     act(() => result.current.updatePlayer(0, 'name', 'A2'));
-    expect(patchState).toHaveBeenCalledWith({ players: [{ ...players[0], name: 'A2' }], result: null, undoSnapshot: null });
+    expect(patchState.mock.calls[0]![0].players![0]).toMatchObject({ name: 'A2', statsKey:'A', aliases:['A'] });
+    expect(patchState.mock.calls[0]![0]).not.toHaveProperty('result');
+    expect(patchState.mock.calls[0]![0]).not.toHaveProperty('scheduleDirty');
   });
+});
+
+describe('private level recovery',()=>{
+ it('keeps a shared-session level edit in the local bank without rerolling',()=>{
+ const player:Player={id:'a',name:'Alice',gender:'F',level:3,aliases:['Al'],statsKey:'Alice original',quarantined:true,availFrom:0,availTo:11};
+ const {result,patchState}=setup({players:[player],playerHistory:[{id:'a',name:'Alice',gender:'F',level:2,aliases:['Al'],statsKey:'Alice original',quarantined:true}],scheduleActive:true});
+ act(()=>result.current.updatePlayer(0,'level',5));const patch=patchState.mock.calls[0]![0];
+ expect(patch.players![0]).toMatchObject({...player,level:5});
+ expect(patch.playerHistory![0]).toMatchObject({id:'a',name:'Alice',gender:'F',level:5,aliases:['Al'],statsKey:'Alice original',quarantined:true});
+ expect(patch).not.toHaveProperty('result');expect(patch).not.toHaveProperty('scheduleDirty');
+ });
+ it('adds missing private bank metadata using the active identity',()=>{
+ const {result,patchState}=setup({players:[{id:'a',name:'Alice',gender:'F',aliases:['Al'],statsKey:'Alice original',quarantined:true,availFrom:0,availTo:11}],scheduleActive:true});
+ act(()=>result.current.updatePlayer(0,'level',4));
+ expect(patchState.mock.calls[0]![0].playerHistory).toEqual([{id:'a',name:'Alice',gender:'F',aliases:['Al'],statsKey:'Alice original',quarantined:true,level:4}]);
+ });
 });

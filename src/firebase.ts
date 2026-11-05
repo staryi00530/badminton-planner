@@ -9,8 +9,12 @@ import {
   update,
   remove,
   get,
+  onValue,
+  runTransaction,
   type Database,
 } from 'firebase/database';
+import type { SharePayload } from './types';
+import { applySharedAction, commitSharedSnapshot, type SharedAction } from './utils/sharedSession';
 
 // Shares older than this are deleted the next time anyone opens them, so abandoned/forgotten
 // links don't accumulate in the database forever. Saved Plans already prunes its own local
@@ -83,7 +87,7 @@ export function createShare(payload: unknown): Promise<string | null> {
   return cloudOperation('firebase.share.create', async () => {
     const database = await requireDatabase();
     const newRef = push(ref(database, 'shares'));
-    await set(newRef, { ...(payload as object), createdAt: Date.now() });
+    await set(newRef, { ...(payload as object), revision: 0, createdAt: Date.now() });
     return newRef.key;
   });
 }
@@ -93,6 +97,43 @@ export function updateShare(shareId: string, payload: unknown): Promise<void> {
     const database = await requireDatabase();
     // Partial update (not set) so it never clobbers the original createdAt timestamp.
     await update(ref(database, `shares/${shareId}`), payload as object);
+  });
+}
+
+export function subscribeShare(shareId: string, onData: (data: SharePayload | null) => void, onError: (error: unknown) => void): () => void {
+  let stopped = false;
+  let unsubscribe: (() => void) | undefined;
+  void requireDatabase().then(database => {
+    if (stopped) return;
+    unsubscribe = onValue(ref(database, `shares/${shareId}`), snapshot => onData(snapshot.val()), onError);
+  }).catch(onError);
+  return () => { stopped = true; unsubscribe?.(); };
+}
+
+export function commitShare(shareId: string, revision: number, payload: SharePayload): Promise<SharePayload> {
+  return cloudOperation('firebase.share.commit', async () => {
+    const database = await requireDatabase();
+    const result = await runTransaction(ref(database, `shares/${shareId}`), current => {
+      // A transaction can first receive null from an empty local cache; returning null
+      // asks the server to retry against its authoritative value instead of aborting.
+      if (current === null) return null;
+      const next = commitSharedSnapshot(current, revision, payload);
+      return next ? { ...next, ...(current.createdAt != null ? { createdAt: current.createdAt } : {}) } : undefined;
+    }, { applyLocally: false });
+    if (!result.committed || !result.snapshot.val()) throw Object.assign(new Error('A newer session is available. Your draft was retained.'), { code: 'share/conflict' });
+    return result.snapshot.val();
+  });
+}
+
+export function performShareAction(shareId: string, action: SharedAction): Promise<SharePayload> {
+  return cloudOperation('firebase.share.action', async () => {
+    const database = await requireDatabase();
+    const result = await runTransaction(ref(database, `shares/${shareId}`), current => {
+      if (current === null) return null;
+      return applySharedAction(current, action) ?? undefined;
+    }, { applyLocally: false });
+    if (!result.committed || !result.snapshot.val()) throw Object.assign(new Error('This game changed, or another started game depends on this action. Refresh the session before trying again.'), { code: 'share/action-blocked' });
+    return result.snapshot.val();
   });
 }
 

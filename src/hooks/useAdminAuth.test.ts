@@ -5,11 +5,11 @@ import { useAdminAuth } from './useAdminAuth.js';
 
 beforeEach(() => {
   sessionStorage.clear();
-  window.ADMIN_PIN = undefined;
+  window.ADMIN_PIN = null;
 });
 
 afterEach(() => {
-  window.ADMIN_PIN = undefined;
+  window.ADMIN_PIN = null;
 });
 
 describe('useAdminAuth — initial state', () => {

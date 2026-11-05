@@ -2,6 +2,8 @@ import { useCallback, useEffect, useReducer } from 'react';
 import { DEFAULT_GAME_MINUTES, DEFAULT_TOTAL_MINUTES } from '../constants';
 import type { PlannerPersistedState, PlannerState } from '../types';
 import { captureUndoSnapshot, EMPTY_QUEUE_STATE } from '../utils/undoSnapshot';
+import { plannerStorageKey, seedBetaPlannerStorage } from '../utils/plannerStorage';
+import { normalizePlayerIdentities } from '../utils/playerIdentity';
 
 const STORAGE_KEYS = {
   players: 'bp-players',
@@ -29,7 +31,7 @@ const STORAGE_KEYS = {
 
 function loadState<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(plannerStorageKey(key));
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
@@ -42,7 +44,7 @@ function loadState<T>(key: string, fallback: T): T {
 // it can never resurface days later to silently overwrite an unrelated schedule.
 function loadSession<T>(key: string, fallback: T): T {
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = sessionStorage.getItem(plannerStorageKey(key));
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
@@ -50,31 +52,35 @@ function loadSession<T>(key: string, fallback: T): T {
 }
 
 function createInitialState(): PlannerState {
+  seedBetaPlannerStorage([...Object.values(STORAGE_KEYS), 'bp-player-level-scale', 'bp-bank-level-scale']);
   // bp-share-id/bp-share-token used to be persisted across visits, which caused a stale
   // share to silently reconnect (and overwrite local state) on a plain, non-share app open.
   // Clean up any leftovers from before this was fixed.
   try {
-    localStorage.removeItem('bp-share-id');
-    localStorage.removeItem('bp-share-token');
+    localStorage.removeItem(plannerStorageKey('bp-share-id'));
+    localStorage.removeItem(plannerStorageKey('bp-share-token'));
   } catch {}
 
   const storedPlayers = loadState<PlannerState['players']>(STORAGE_KEYS.players, []);
   const storedHistory = loadState<PlannerState['playerHistory']>(STORAGE_KEYS.playerHistory, []);
+  const migrateLevel = (level: PlannerState['levelInput'] | undefined, legacyLevels: boolean): PlannerState['levelInput'] =>
+    level == null ? 3 : legacyLevels && level <= 3 ? (2 * level - 1) as PlannerState['levelInput'] : level;
   const result = loadState<PlannerState['result']>(STORAGE_KEYS.result, null);
   const isSharedSession = loadSession('bp-is-shared-session', false);
   const storedTab = loadState<unknown>(STORAGE_KEYS.activeTab, null);
   const activeTab = (['live', 'setup', 'past', 'pairings', 'archive', 'about'] as const).find(tab => tab === storedTab)
     ?? (result ? 'live' : 'setup');
+  const identities = normalizePlayerIdentities(storedPlayers, storedHistory);
   return {
     ...EMPTY_QUEUE_STATE,
     undoSnapshot: null,
     // Older rosters and the original defaults did not store a level. Normalize those
     // records so the private setting survives reloads and future persistence writes.
-    players: storedPlayers.map(player => ({ ...player, level: player.level ?? 2 })),
-    playerHistory: storedHistory.map(player => ({ ...player, level: player.level ?? 2 })),
+    players: identities.players.map(player => ({ ...player, level: migrateLevel(player.level, loadState<number>('bp-player-level-scale', 3) !== 5) })),
+    playerHistory: identities.playerHistory.map(player => ({ ...player, level: migrateLevel(player.level, loadState<number>('bp-bank-level-scale', 3) !== 5) })),
     nameInput: '',
     genderInput: 'M',
-    levelInput: 2,
+    levelInput: 3,
     totalMinutes: loadState(STORAGE_KEYS.totalMinutes, DEFAULT_TOTAL_MINUTES),
     gameMinutes: loadState(STORAGE_KEYS.gameMinutes, DEFAULT_GAME_MINUTES),
     numCourts: loadState(STORAGE_KEYS.numCourts, 1),
@@ -179,15 +185,18 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames', 'totalMinutes', 'gameMinutes', 'numCourts', 'extraCourt', 'staggerMode', 'sessionStart', 'preferMixedTeams', 'preferredPairs']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
-      if (state.isSharedSession && liveSessionExempt.has(key)) continue;
+      const openingShare = new URLSearchParams(window.location.search).has('share') || window.location.hash.startsWith('#share=');
+      if ((state.isSharedSession || openingShare) && liveSessionExempt.has(key)) continue;
       const value = persisted[key as keyof PlannerPersistedState];
-      if (key === 'result' && !value) localStorage.removeItem(storageKey);
-      else if (['liveGames', 'completedGames', 'suspendedPlayerNames'].includes(key) && !state.result) localStorage.removeItem(storageKey);
-      else localStorage.setItem(storageKey, JSON.stringify(value));
+      if (key === 'result' && !value) localStorage.removeItem(plannerStorageKey(storageKey));
+      else if (['liveGames', 'completedGames', 'suspendedPlayerNames'].includes(key) && !state.result) localStorage.removeItem(plannerStorageKey(storageKey));
+      else localStorage.setItem(plannerStorageKey(storageKey), JSON.stringify(value));
     }
+    localStorage.setItem(plannerStorageKey('bp-bank-level-scale'), '5');
+    if (!state.isSharedSession && !new URLSearchParams(window.location.search).has('share') && !window.location.hash.startsWith('#share=')) localStorage.setItem(plannerStorageKey('bp-player-level-scale'), '5');
   }, [
     state.players,
     state.playerHistory,
@@ -215,11 +224,11 @@ export function usePlannerState() {
 
   useEffect(() => {
     try {
-      if (state.shareId) sessionStorage.setItem('bp-share-id', JSON.stringify(state.shareId));
-      else sessionStorage.removeItem('bp-share-id');
-      if (state.shareToken) sessionStorage.setItem('bp-share-token', JSON.stringify(state.shareToken));
-      else sessionStorage.removeItem('bp-share-token');
-      sessionStorage.setItem('bp-is-shared-session', JSON.stringify(state.isSharedSession));
+      if (state.shareId) sessionStorage.setItem(plannerStorageKey('bp-share-id'), JSON.stringify(state.shareId));
+      else sessionStorage.removeItem(plannerStorageKey('bp-share-id'));
+      if (state.shareToken) sessionStorage.setItem(plannerStorageKey('bp-share-token'), JSON.stringify(state.shareToken));
+      else sessionStorage.removeItem(plannerStorageKey('bp-share-token'));
+      sessionStorage.setItem(plannerStorageKey('bp-is-shared-session'), JSON.stringify(state.isSharedSession));
     } catch {}
   }, [state.shareId, state.shareToken, state.isSharedSession]);
 
