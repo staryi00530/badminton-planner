@@ -60,12 +60,24 @@ describe('PlayerList — gender-grouped alphabetical display', () => {
     expect(screen.getByText('Already on roster')).toBeInTheDocument();
     await user.click(screen.getByLabelText('Guest named; uncheck to use Yiwei +1'));
     expect(screen.getByText('Yiwei +1')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Add 2 players' }));
+    await user.click(screen.getByRole('button', { name: 'Replace roster with 3 players' }));
 
     expect(handlers.addImportedPlayers).toHaveBeenCalledWith([
       { name: 'New man', gender: 'M', level: 2 },
+      { name: 'Alice', gender: 'F', level: 2 },
       { name: 'Yiwei +1', gender: 'F', level: 2 },
     ]);
+    expect(screen.getByRole('status')).toHaveTextContent('Roster replaced with 3 players.');
+  });
+
+  it('allows replacing a roster with a subset of players already present', async () => {
+    const user = userEvent.setup();
+    const handlers = renderPlayerList();
+    await user.click(screen.getByText('Paste roster'));
+    await user.type(screen.getByLabelText('Paste attendee list'), '1. Alice');
+    await user.click(screen.getByRole('button', { name: 'Preview names' }));
+    await user.click(screen.getByRole('button', { name: 'Replace roster with 1 player', exact: true }));
+    expect(handlers.addImportedPlayers).toHaveBeenCalledWith([{ name: 'Alice', gender: 'F', level: 2 }]);
   });
 
   it('keeps an active roster compact while preserving bank and original-index actions', async () => {

@@ -49,10 +49,10 @@ export function usePlayerRoster({ players, playerHistory, nameInput, genderInput
   }, [players, scheduleActive, totalSlots]);
 
   const addImportedPlayers = useCallback((entries) => {
-    const additions = buildImportedPlayers(players, playerHistory, entries, totalSlots);
-    if (additions.length === 0) return;
+    const replacement = buildImportedPlayers([], [...players, ...playerHistory], entries, totalSlots);
+    if (replacement.length === 0) return;
     patchState({
-      players: [...players, ...additions],
+      players: replacement,
       undoSnapshot: null,
       ...(scheduleActive ? { scheduleDirty: true } : { result: null }),
     });

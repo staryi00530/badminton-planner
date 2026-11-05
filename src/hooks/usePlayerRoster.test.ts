@@ -100,9 +100,9 @@ describe('usePlayerRoster — addSelectedFromBank', () => {
 });
 
 describe('usePlayerRoster — addImportedPlayers', () => {
-  it('adds a batch once and preserves player-bank metadata', () => {
+  it('replaces the roster, removes absent players, and preserves known player metadata', () => {
     const { result, patchState } = setup({
-      players: [{ name: 'Alice', gender: 'F', availFrom: 0, availTo: 11 }],
+      players: [{ name: 'Alice', gender: 'F', level: 1, availFrom: 0, availTo: 11 }, { name: 'Old player', gender: 'M' }],
       playerHistory: [{ name: 'Bank player', gender: 'F', level: 3 }],
       totalSlots: 9,
       scheduleActive: true,
@@ -115,9 +115,26 @@ describe('usePlayerRoster — addImportedPlayers', () => {
 
     const patch = patchState.mock.calls[0][0];
     expect(patch.players).toHaveLength(3);
+    expect(patch.players.map(player => player.name)).toEqual(['Alice', 'Bank player', 'New player']);
+    expect(patch.players[0]).toMatchObject({ gender: 'F', level: 1 });
     expect(patch.players[1]).toMatchObject({ name: 'Bank player', gender: 'F', level: 3 });
     expect(patch.players[2]).toMatchObject({ name: 'New player', gender: 'M', availTo: 8 });
     expect(patch).toMatchObject({ scheduleDirty: true, undoSnapshot: null });
+    expect(patch).not.toHaveProperty('result');
+    expect(patch).not.toHaveProperty('playerHistory');
+  });
+
+  it('can replace the roster with only existing players and deduplicates pasted names', () => {
+    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F' }, { name: 'Bob', gender: 'M' }] });
+    act(() => result.current.addImportedPlayers([{ name: 'alice', gender: 'M' }, { name: ' Alice ', gender: 'M' }]));
+    expect(patchState.mock.calls[0][0].players.map(player => player.name)).toEqual(['Alice']);
+    expect(patchState.mock.calls[0][0].result).toBeNull();
+  });
+
+  it('keeps the roster when the pasted selection contains no valid names', () => {
+    const { result, patchState } = setup({ players: [{ name: 'Alice', gender: 'F' }] });
+    act(() => result.current.addImportedPlayers([{ name: ' ', gender: 'M' }]));
+    expect(patchState).not.toHaveBeenCalled();
   });
 });
 

@@ -168,10 +168,9 @@ export default function PlayerList({
 
   const applyRosterPaste = () => {
     const entries = importPreview
-      .filter(row => !row.alreadyActive)
       .map(({ name, gender, level }) => ({ name, gender, level }));
     addImportedPlayers(entries);
-    setImportMessage(`${entries.length} player${entries.length === 1 ? '' : 's'} added.`);
+    setImportMessage(`Roster replaced with ${entries.length} player${entries.length === 1 ? '' : 's'}.`);
     setImportPreview([]);
     setRosterPaste('');
   };
@@ -246,7 +245,7 @@ export default function PlayerList({
       <details style={{ margin: '0 0 14px', borderBottom: `1px solid ${C.border}`, paddingBottom: 12 }}>
         <summary style={{ cursor: 'pointer', color: C.text, fontSize: 13, fontWeight: 700 }}>Paste roster</summary>
         <p style={{ margin: '8px 0', color: C.textDim, fontSize: 12, lineHeight: 1.5 }}>
-          Paste an attendee list, then review names and genders before adding them.
+          Paste an attendee list, then review names and genders. Applying it replaces the current roster with this list.
         </p>
         <textarea
           aria-label="Paste attendee list"
@@ -272,7 +271,7 @@ export default function PlayerList({
         {importPreview.length > 0 && (
           <div style={{ marginTop: 12 }}>
             <p style={{ margin: '0 0 8px', color: C.textDim, fontSize: 12 }}>
-              {importPreview.length} names found. Existing roster entries will be skipped; saved player details are retained.
+              {importPreview.length} names found. Players not in this list will be removed from the roster; known player details are retained.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '0 20px', maxHeight: 320, overflowY: 'auto', padding: '0 8px 0 0' }}>
               {importPreview.map(row => (
@@ -306,8 +305,8 @@ export default function PlayerList({
                 </div>
               ))}
             </div>
-            <button onClick={applyRosterPaste} disabled={!importPreview.some(row => !row.alreadyActive)} style={{ marginTop: 10, background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>
-              Add {importPreview.filter(row => !row.alreadyActive).length} players
+            <button onClick={applyRosterPaste} style={{ marginTop: 10, background: C.accent, color: C.bg, border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 700, fontFamily: FONT }}>
+              Replace roster with {importPreview.length} player{importPreview.length === 1 ? '' : 's'}
             </button>
           </div>
         )}
