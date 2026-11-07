@@ -319,6 +319,10 @@ function BadmintonPlanner() {
     doRegen,
   } = useScheduleActions({
     recordUndo,
+    suspendedPlayerNames,
+    scheduleDirty,
+    loadedPlanId,
+    activeTab,
     players,
     result,
     totalSlots,

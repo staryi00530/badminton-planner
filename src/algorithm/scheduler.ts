@@ -524,15 +524,16 @@ export function* generateScheduleGen(
     // needed ("sacrifice" the consecutive-rest constraint to break the repeat).
     const repeatedCourts: number[] = [];
     {
-      const usedInGroups = new Set(courtGroups.flat());
-      const freeSitters = available.filter(i => !usedInGroups.has(i));
-      const normalSubs = freeSitters.filter(i => !mustRest.includes(i));
-      const rstSubs = freeSitters.filter(i => mustRest.includes(i));
-      const allSubs = [...normalSubs, ...rstSubs];
-
       for (let ci = 0; ci < courtGroups.length; ci++) {
         const currentGroup = courtGroups[ci]!;
         if (!courtGroupHistory.has(groupKey(currentGroup))) continue;
+        // Earlier repairs may already have put a sitter onto another court.
+        // Rebuild the pool for each court so substitutions remain exclusive.
+        const usedInGroups = new Set(courtGroups.flat());
+        const freeSitters = available.filter(i => !usedInGroups.has(i));
+        const normalSubs = freeSitters.filter(i => !mustRest.includes(i));
+        const rstSubs = freeSitters.filter(i => mustRest.includes(i));
+        const allSubs = [...normalSubs, ...rstSubs];
         let fixed = false;
         const protectedPreferredPlayers = new Set((options.preferredPairs ?? [])
           .filter(([first, second]) => currentGroup.includes(first) && currentGroup.includes(second))

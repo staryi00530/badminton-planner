@@ -28,6 +28,10 @@ interface ScheduleActionOptions {
   fromSlot: number;
   fromSlotCourts: number;
   courtOverrides?: Record<number, number>;
+  suspendedPlayerNames?: string[];
+  scheduleDirty?: boolean;
+  loadedPlanId?: number | null;
+  activeTab?: PlannerState['activeTab'];
   computeSkill: (name: string, level?: 1 | 2 | 3 | 4 | 5) => number;
   getPlayersWithAvailability: () => Player[];
   applyAvailability: (players: Player[]) => Player[];
@@ -65,6 +69,10 @@ export function useScheduleActions({
   fromSlot,
   fromSlotCourts,
   courtOverrides = {},
+  suspendedPlayerNames = [],
+  scheduleDirty = false,
+  loadedPlanId = null,
+  activeTab = 'setup',
   computeSkill,
   getPlayersWithAvailability,
   applyAvailability,
@@ -76,26 +84,47 @@ export function useScheduleActions({
   const runGenerate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
     patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1, fromSlotCourts: 0, courtOverrides: {} });
-    const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-    logRosterSnapshot(playersWithSkill, 'initial-generation', 1);
-    const gen = generateScheduleGen(playersWithSkill, totalSlots, getCourtsPerSlot({}), 0, null, null, getScheduleOptions(playersWithSkill));
     let lastValue: GeneratorYield | null = null;
+    let gen: ReturnType<typeof generateScheduleGen>;
+    const fail = (error: unknown) => {
+      const failedSlot = (lastValue?.schedule.length ?? 0) + 1;
+      liveQueueDebug('generate:failed', { failedSlot, totalSlots, playerCount: players.length,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      patchState({ ...(result ? { result } : {}), scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames,
+        fromSlot, fromSlotCourts, isConfirmed, scheduleDirty, loadedPlanId, activeTab,
+        isGenerating: false, genSlot: 0,
+        sessionChangeNotice: `Generation failed at slot ${failedSlot} of ${totalSlots}. ${result ? 'Your previous schedule was restored.' : 'No schedule was saved.'} Try again, or download debug logs if it repeats.`,
+      });
+    };
     function step() {
-      const { value, done } = gen.next();
-      if (value) {
-        lastValue = value;
-        patchState({ genSlot: value.schedule.length });
-      }
-      if (done) {
-        const initialLiveGames = lastValue
-          ? initialLiveGamesForSchedule(lastValue, getCourtsPerSlot({})[0] ?? 0)
-          : [];
-        patchState({ result: lastValue, liveGames: initialLiveGames, activeTab: lastValue ? 'live' : 'setup', scheduleDirty: false, isGenerating: false });
-      }
-      else requestAnimationFrame(step);
+      try {
+        const { value, done } = gen.next();
+        if (value) {
+          lastValue = value;
+          liveQueueDebug('generate:progress', { completedSlots: value.schedule.length, totalSlots });
+          patchState({ genSlot: value.schedule.length });
+        }
+        if (done) {
+          const initialLiveGames = lastValue
+            ? initialLiveGamesForSchedule(lastValue, getCourtsPerSlot({})[0] ?? 0)
+            : [];
+          liveQueueDebug('generate:complete', { completedSlots: lastValue?.schedule.length ?? 0, totalSlots });
+          patchState({ result: lastValue, liveGames: initialLiveGames, activeTab: lastValue ? 'live' : 'setup', scheduleDirty: false, isGenerating: false });
+        }
+        else requestAnimationFrame(step);
+      } catch (error) { fail(error); }
     }
-    requestAnimationFrame(step);
-  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players.length, totalSlots]);
+    try {
+      const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
+      const courtsPerSlot = getCourtsPerSlot({});
+      const options = getScheduleOptions(playersWithSkill);
+      logRosterSnapshot(playersWithSkill, 'initial-generation', 1);
+      liveQueueDebug('generate:start', { totalSlots, courtsPerSlot, playerCount: playersWithSkill.length, options });
+      gen = generateScheduleGen(playersWithSkill, totalSlots, courtsPerSlot, 0, null, null, options);
+      requestAnimationFrame(step);
+    } catch (error) { fail(error); }
+  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players.length, totalSlots, result, scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames, fromSlot, fromSlotCourts, isConfirmed, scheduleDirty, loadedPlanId, activeTab]);
 
   const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
     const fail = (reason: string) => { liveQueueDebug('regenerate:blocked', { reason, targetFromSlot, targetCourts, totalSlots }); patchState({ sessionChangeNotice: reason }); };
