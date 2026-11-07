@@ -1,5 +1,6 @@
 import { newPlayerId, resolvePlayerIdentity } from '../utils/playerIdentity';
 import { Fragment, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { C, DEFAULT_PLAYERS, FONT } from '../constants';
 import type { Player, StaggerMode, WinLossMap } from '../types';
 import type { Gender } from '../algorithm/types';
@@ -8,6 +9,20 @@ import { ignoredRosterLines, parseRosterPaste, type ParsedRosterEntry } from '..
 
 type PlayerField = 'name' | 'gender' | 'level' | 'group' | 'availFrom' | 'availTo' | 'leavesAt';
 type PlayerFieldValue = string | number | null;
+
+const rosterSelectStyle: CSSProperties = {
+  background: C.card,
+  color: C.text,
+  border: `1px solid ${C.border}`,
+  borderRadius: 6,
+  padding: '7px 10px',
+  minHeight: 36,
+  maxWidth: '100%',
+  fontSize: 12,
+  fontFamily: FONT,
+  colorScheme: 'dark',
+  cursor: 'pointer',
+};
 
 interface PlayerListProps {
   visible?: boolean;
@@ -283,7 +298,7 @@ export default function PlayerList({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
           <label style={{ color: C.textDim, fontSize: 12 }}>
             Default gender for unmarked names{' '}
-            <select aria-label="Default gender for unmarked names" value={defaultImportGender} onChange={event => setDefaultImportGender(event.target.value as Gender)} style={{ background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 8px' }}>
+            <select aria-label="Default gender for unmarked names" value={defaultImportGender} onChange={event => setDefaultImportGender(event.target.value as Gender)} style={rosterSelectStyle}>
               <option value="M">M</option>
               <option value="F">F</option>
             </select>
@@ -301,8 +316,8 @@ export default function PlayerList({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '0 20px', maxHeight: 320, overflowY: 'auto', padding: '0 8px 0 0' }}>
               {importPreview.map(row => (
                 <div key={row.id} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderTop: `1px solid ${C.border}`, padding: '8px 0' }}>
-                  <label style={{fontSize:11}}>Original: {row.parsed.name}
-                    <select aria-label={`Map ${row.parsed.name}`} value={row.mapping} onChange={event=>{
+                  <label style={{fontSize:11,flex:'1 1 180px',minWidth:0,overflowWrap:'anywhere'}}>Original: {row.parsed.name}
+                    <select aria-label={`Map ${row.parsed.name}`} value={row.mapping} style={{ ...rosterSelectStyle, display: 'block', width: '100%', marginTop: 4 }} onChange={event=>{
                       const mapping=event.target.value;
                       const saved=mappingOptions.find(p=>(p.id??p.name)===mapping.slice(9));
                       updatePreviewRow(row.id,{mapping,...(mapping==='new'?{newId:newPlayerId()}:{}),...(saved?{name:saved.name,gender:saved.gender,level:saved.level??3,knownPlayer:true}:{name:row.parsed.name,knownPlayer:false})});
@@ -333,7 +348,7 @@ export default function PlayerList({
                   ) : (
                     <label style={{ display: 'flex', gap: 4, alignItems: 'center', color: C.textDim, fontSize: 11 }}>
                       Gender
-                      <select aria-label={`Gender for ${row.name}`} value={row.gender} onChange={event => updatePreviewRow(row.id, { gender: event.target.value as Gender })} style={{ background: C.card, color: row.gender === 'F' ? C.pink : C.text, border: `1px solid ${C.border}`, borderRadius: 5, padding: '5px 7px' }}>
+                      <select aria-label={`Gender for ${row.name}`} value={row.gender} onChange={event => updatePreviewRow(row.id, { gender: event.target.value as Gender })} style={{ ...rosterSelectStyle, color: row.gender === 'F' ? C.pink : C.accent }}>
                         <option value="M">M</option>
                         <option value="F">F</option>
                       </select>
@@ -469,7 +484,7 @@ export default function PlayerList({
                   style={{ color: p.gender === 'F' ? C.pink : C.accent, fontWeight: 700, fontSize: 14, minWidth: 70, cursor: 'text' }}>{p.name}</span>
               )}
               {editingNameIdx===i && nameError && <span role="alert" style={{fontSize:12,color:C.amber}}>{nameError}</span>}
-              <select aria-label={`Gender for roster ${p.name}`} value={p.gender} onChange={e=>updatePlayer(i,'gender',e.target.value)}><option value="M">♂</option><option value="F">♀</option></select>
+              <select aria-label={`Gender for roster ${p.name}`} value={p.gender} onChange={e=>updatePlayer(i,'gender',e.target.value)} style={{ ...rosterSelectStyle, color: p.gender === 'F' ? C.pink : C.accent }}><option value="M">♂</option><option value="F">♀</option></select>
               {showPrivateFields && <div title="Private balancing level" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <span style={{ fontSize: 10, color: C.textMuted }}>L</span>
                 {([1, 2, 3, 4, 5] as const).map(level => (
