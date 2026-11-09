@@ -9,6 +9,7 @@ import type {
   ForcedFirstSlot,
 } from './types.js';
 import { scoreGameQuality, type QualityWeights } from '../utils/gameQuality.js';
+import { matchingWaitingGroups } from './formatGroups.js';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -57,6 +58,8 @@ export function normalizeUnstartedMixedCourts(schedule: SlotResult[], lockedGame
 // ─── Algorithm ───────────────────────────────────────────────────────────────
 
 export interface ScheduleOptions {
+  /** One-based logical slots whose full budget was consumed by retained history. */
+  consumedSlots?: number[];
   preferMixedTeams?: boolean; // pack 2F+2M on one court rather than spreading 1F per court
   preferredPairs?: Array<[number, number]>; // soft teammate preferences, expressed as player indices
   qualityWeights?: Partial<QualityWeights>;
@@ -132,7 +135,7 @@ export function* generateScheduleGen(
         }) satisfies PlayerState),
         repeatedCourts: [], // bug fix: was missing in JS version
       });
-      for (const i of available) {
+      for (const i of options.consumedSlots?.includes(slot + 1) ? [] : available) {
         consecutiveRested[i]!;
         consecutiveRested[i] = (consecutiveRested[i] ?? 0) + 1;
         consecutivePlayed[i] = 0;
@@ -210,11 +213,13 @@ export function* generateScheduleGen(
       const remM = shuffle(selectedAdditional.filter(i => players[i]!.gender === 'M'), rng);
       while (remF.length + remM.length >= 4) {
         if (remF.length >= 2 && remM.length >= 2) {
-          courtsToBuild.push([...remF.splice(0, 2), ...remM.splice(0, 2)]);
+          const f = remF.splice(0, 2), m = remM.splice(0, 2);
+          courtsToBuild.push([f[0]!, m[0]!, f[1]!, m[1]!]);
         } else if (remF.length >= 4) {
           courtsToBuild.push(remF.splice(0, 4));
         } else {
-          courtsToBuild.push(remM.splice(0, 4));
+          const f = remF.splice(0, Math.min(4, remF.length));
+          courtsToBuild.push([...f, ...remM.splice(0, 4 - f.length)]);
         }
       }
       const courts: Court[] = [];
@@ -587,47 +592,68 @@ export function* generateScheduleGen(
       }
     }
 
-    // A planned next slot is consumed court by court. Keep the resting cohort
-    // together before optimizing soft preferences: distributing returning
-    // players across every court blocks otherwise playable waiting groups.
-    if (!isForcedSlot && slot > 0 && actualCourts >= 4) {
-      const eligibleWaiting = available.filter(i => consecutivePlayed[i] === 0)
-        .sort((a, b) => consecutiveRested[b]! - consecutiveRested[a]! || gamesPlayed[a]! - gamesPlayed[b]!);
-      const readyCount = Math.min(actualCourts, Math.floor(eligibleWaiting.length / 4));
-      // Gender parity and repeat avoidance may have swapped a waiting player
-      // out of selection. Restore the ready cohort before applying preferences.
-      const required = eligibleWaiting.slice(0, readyCount * 4);
-      for (const player of required) {
-        if (selected.includes(player)) continue;
-        const replace = selected.findIndex(i => !required.includes(i));
-        if (replace >= 0) selected[replace] = player;
-      }
-      const waiting = selected.filter(i => consecutivePlayed[i] === 0);
-      const currentReady = courtGroups.slice(0, readyCount).every(group => group.every(i => consecutivePlayed[i] === 0));
-      if (readyCount > 0 && !currentReady) {
-        const pack = (pool: number[], count: number): number[][] => {
-          const women = pool.filter(i => players[i]!.gender === 'F');
-          const men = pool.filter(i => players[i]!.gender === 'M');
-          const groups: number[][] = [];
-          for (let c = 0; c < count; c++) {
-            if (women.length >= 2 && men.length >= 2) groups.push([...women.splice(0, 2), ...men.splice(0, 2)]);
-            else if (women.length >= 4) groups.push(women.splice(0, 4));
-            else if (men.length >= 4) groups.push(men.splice(0, 4));
-            else {
-              const femaleCount = Math.min(women.length, 4);
-              groups.push([...women.splice(0, femaleCount), ...men.splice(0, 4 - femaleCount)]);
-            }
-          }
-          return groups;
-        };
-        const readyGroups = pack(waiting, readyCount);
-        const packed = new Set(readyGroups.flat());
-        courtGroups.splice(0, courtGroups.length, ...readyGroups, ...pack(selected.filter(i => !packed.has(i)), actualCourts - readyCount));
+    // Maximize playable waiting groups within matching-format constraints.
+    // In particular, twelve waiting players with odd F parity can supply only
+    // two matching courts. Never restore a waiting cohort by breaking parity.
+    if (!isForcedSlot) {
+      const waiting = new Set(available.filter(i => consecutivePlayed[i] === 0));
+      const priority = [...available].sort((a, b) =>
+        Number(waiting.has(b)) - Number(waiting.has(a))
+        || consecutiveRested[b]! - consecutiveRested[a]!
+        || gamesPlayed[a]! - gamesPlayed[b]!
+        || Number(selected.includes(b)) - Number(selected.includes(a)));
+      const packed = matchingWaitingGroups(priority, waiting, i => players[i]!.gender === 'F', actualCourts);
+      const ready = (groups: number[][]) => groups.filter(g => g.every(i => waiting.has(i))).length;
+      const matching = courtGroups.every(g => g.filter(i => players[i]!.gender === 'F').length % 2 === 0);
+      if (packed && (!matching || (actualCourts >= 4 && ready(packed) > ready(courtGroups)))) {
+        courtGroups.splice(0, courtGroups.length, ...packed);
+        selected = packed.flat();
         repeatedCourts.length = 0;
         courtGroups.forEach((group, index) => { if (courtGroupHistory.has(groupKey(group))) repeatedCourts.push(index); });
       }
+      if (actualCourts >= 4) courtGroups.sort((a, b) => Number(b.every(i => waiting.has(i))) - Number(a.every(i => waiting.has(i))));
     }
-    for (const group of courtGroups) courtGroupHistory.add(groupKey(group));
+    // Cohort packing can recreate an old quartet. Exchange players only within
+    // the same gender and waiting status, preserving parity and ready courts.
+    // Bound the search by court count and read the current groups every pass.
+    if (!isForcedSlot && actualCourts >= 4) {
+      const repeatCount = () => courtGroups.filter(g => courtGroupHistory.has(groupKey(g))).length;
+      const softCost = () => {
+        const splitPairs = (options.preferredPairs ?? []).filter(([a, b]) => !courtGroups.some(g => g.includes(a) && g.includes(b))).length;
+        const span = courtGroups.reduce((sum, g) => {
+          const levels = g.map(i => players[i]!.level ?? 3);
+          return sum + Math.max(...levels) - Math.min(...levels);
+        }, 0);
+        return splitPairs * 12 + span;
+      };
+      for (let pass = 0; pass < actualCourts; pass++) {
+        const before = repeatCount();
+        if (!before) break;
+        let best: { a: number; b: number; ai: number; bi: number } | null = null;
+        let bestRepeats = before, bestSoft = Infinity;
+        for (let a = 0; a < courtGroups.length; a++) for (let b = a + 1; b < courtGroups.length; b++) {
+          for (let ai = 0; ai < 4; ai++) for (let bi = 0; bi < 4; bi++) {
+            const left = courtGroups[a]![ai]!, right = courtGroups[b]![bi]!;
+            if (players[left]!.gender !== players[right]!.gender || (consecutivePlayed[left] === 0) !== (consecutivePlayed[right] === 0)) continue;
+            courtGroups[a]![ai] = right; courtGroups[b]![bi] = left;
+            const repeats = repeatCount();
+            const soft = repeats < before ? softCost() : Infinity;
+            if (repeats < before && (repeats < bestRepeats || (repeats === bestRepeats && soft < bestSoft))) {
+              best = { a, b, ai, bi }; bestRepeats = repeats; bestSoft = soft;
+            }
+            courtGroups[a]![ai] = left; courtGroups[b]![bi] = right;
+          }
+        }
+        if (!best) break;
+        const { a, b, ai, bi } = best;
+        [courtGroups[a]![ai], courtGroups[b]![bi]] = [courtGroups[b]![bi]!, courtGroups[a]![ai]!];
+      }
+    }
+    repeatedCourts.length = 0;
+    courtGroups.forEach((group, index) => {
+      if (courtGroupHistory.has(groupKey(group))) repeatedCourts.push(index);
+      courtGroupHistory.add(groupKey(group));
+    });
 
     const courts: Court[] = [];
 
@@ -677,10 +703,14 @@ export function* generateScheduleGen(
           const quality = scoreGameQuality({ court: c + 1, teamA: [players[tA[0]]!, players[tA[1]]!], teamB: [players[tB[0]]!, players[tB[1]]!] }, {
             players, slot: slot + 1,
             waited: Object.fromEntries(players.map((p, i) => [p.name, consecutiveRested[i] ?? 0])),
-            history: schedule.flatMap(previous => previous.courts),
+            // Repeat matrices include both retained completed history and the
+            // newly projected plan, exactly once (kept slots alone do not).
+            history: [],
             preferredPairs: (options.preferredPairs ?? []).map(([a, b]) => [players[a]!.name, players[b]!.name]),
           }, options.qualityWeights);
-          score = quality.score == null ? Infinity : -quality.score;
+          score = -quality.score;
+          score += ((partnerCount[tA[0]]![tA[1]] ?? 0) + (partnerCount[tB[0]]![tB[1]] ?? 0)) * (options.qualityWeights.partners ?? 3);
+          score += tA.reduce((sum, a) => sum + tB.reduce((inner, b) => inner + (opponentCount[a]![b] ?? 0), 0), 0) * (options.qualityWeights.opponents ?? 1);
         }
         score += rng() * 1.5;
         if (score < bestScore) {

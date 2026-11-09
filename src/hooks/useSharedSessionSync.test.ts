@@ -156,3 +156,84 @@ describe('shared autosave and recovery', () => {
     expect(sessionStorage.getItem(plannerStorageKey('bp-share-draft:one'))).toContain('confirmed');
   });
 });
+
+describe('plan generation sync guard',()=>{
+ beforeEach(()=>{localStorage.clear();sessionStorage.clear();});
+ it('retains a remote Finish as conflict while generation still has unchanged local content',async()=>{
+  const t=transport();
+  const apply=vi.fn((p:SharePayload)=>p);
+  const {result,rerender}=renderHook(({payload,planEditing})=>useSharedSessionSync({
+    shareId:'one',payload,planEditing,isAdmin:true,applyRemote:apply,transport:t.api,
+  }),{initialProps:{payload:data(),planEditing:false}});
+  await waitFor(()=>expect(result.current.status).toBe('saved'));
+  apply.mockClear();
+  rerender({payload:data(),planEditing:true});
+  const remote={...data(),revision:1,runtime:{live:[],completed:[{slot:1,court:0}]}};
+  act(()=>t.remote(remote));
+  expect(result.current.status).toBe('conflict');
+  expect(apply).not.toHaveBeenCalled();
+  const generated={...data(),planId:'new-plan',confirmed:true};
+  rerender({payload:generated,planEditing:false});
+  expect(JSON.parse(sessionStorage.getItem(plannerStorageKey('bp-share-draft:one'))!).draft.planId).toBe('new-plan');
+  await act(async()=>{expect(await result.current.saveNow()).toBe(false);});
+  expect(t.read()).toEqual(remote);
+ });
+ it('suppresses saves and game actions while editing and resumes autosave after successful generation',async()=>{
+  const t=transport();
+  const commit=vi.spyOn(t.api,'commit');
+  const action=vi.spyOn(t.api,'action');
+  const {result,rerender}=renderHook(({payload,planEditing})=>useSharedSessionSync({
+    shareId:'one',payload,planEditing,isAdmin:true,applyRemote:p=>p,transport:t.api,
+  }),{initialProps:{payload:data(),planEditing:false}});
+  await waitFor(()=>expect(result.current.status).toBe('saved'));
+  const draft={...data(),confirmed:true};
+  rerender({payload:draft,planEditing:true});
+  await act(async()=>{
+    expect(await result.current.saveNow()).toBe(false);
+    expect(await result.current.performAction({type:'finish',id:'guarded',gameId:'old'})).toBe(false);
+    await new Promise(resolve=>setTimeout(resolve,400));
+  });
+  expect(commit).not.toHaveBeenCalled();
+  expect(action).not.toHaveBeenCalled();
+  rerender({payload:draft,planEditing:false});
+  await waitFor(()=>expect(commit).toHaveBeenCalledTimes(1));
+ });
+});
+
+it('retains the newest remote completion when generation starts during an in-flight action',async()=>{
+ localStorage.clear();sessionStorage.clear();
+ const t=transport();
+ let resolve!: (p:SharePayload)=>void;
+ t.api.action=()=>new Promise(r=>{resolve=r;});
+ const apply=vi.fn((p:SharePayload)=>p);
+ const {result,rerender}=renderHook(({planEditing})=>useSharedSessionSync({
+   shareId:'one',payload:data(),planEditing,isAdmin:true,applyRemote:apply,transport:t.api,
+ }),{initialProps:{planEditing:false}});
+ await waitFor(()=>expect(result.current.status).toBe('saved'));
+ apply.mockClear();
+ let pending!:Promise<boolean>;
+ act(()=>{pending=result.current.performAction({type:'finish',id:'old',gameId:'game'});});
+ rerender({planEditing:true});
+ const newer={...data(),revision:2,confirmed:true};
+ act(()=>t.remote(newer));
+ await act(async()=>{resolve({...data(),revision:1});await pending;});
+ expect(result.current.status).toBe('conflict');
+ expect(result.current.latest?.revision).toBe(2);
+ expect(apply).not.toHaveBeenCalled();
+});
+
+it('keeps a generation draft when the initial cloud fetch resolves after editing begins',async()=>{
+ localStorage.clear();sessionStorage.clear();
+ const t=transport();
+ let resolve!: (p:{status:'ok';data:SharePayload})=>void;
+ t.api.fetch=()=>new Promise(r=>{resolve=r;});
+ const apply=vi.fn((p:SharePayload)=>p);
+ const {result,rerender}=renderHook(({planEditing})=>useSharedSessionSync({
+   shareId:'one',payload:data(),planEditing,isAdmin:true,applyRemote:apply,transport:t.api,
+ }),{initialProps:{planEditing:false}});
+ rerender({planEditing:true});
+ await act(async()=>resolve({status:'ok',data:{...data(),revision:1,confirmed:true}}));
+ expect(result.current.status).toBe('conflict');
+ expect(apply).not.toHaveBeenCalled();
+ expect(sessionStorage.getItem(plannerStorageKey('bp-share-draft:one'))).not.toBeNull();
+});

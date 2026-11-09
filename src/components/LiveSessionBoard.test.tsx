@@ -8,6 +8,7 @@ import LiveSessionBoard from './LiveSessionBoard';
 import { useLiveQueue } from '../hooks/useLiveQueue';
 import type { PlannerResult, RuntimePatch, QueueRuntimeState } from '../types';
 import type { GameRef } from '../utils/liveQueue';
+import { migratePlayedGames } from '../utils/playedHistory';
 
 const players: Player[] = Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: 0, availTo: 10 }));
 const court = (number: number, names: number[]): Court => ({
@@ -49,6 +50,14 @@ function InteractiveBoard({ result, completedGames }: { result: PlannerResult; c
 }
 
 describe('LiveSessionBoard', () => {
+  it('uses retained completions once when current slot numbers are reused', () => {
+    const oldResult = { planId: 'old', schedule: [slot(1, [court(1, [1,2,3,4])])], gamesPlayed: [] };
+    const playedGames = migratePlayedGames(oldResult, players, [{slot:1,court:0}], {});
+    render(<LiveSessionBoard {...props({ isAdmin:true, result:{planId:'new',schedule:[slot(1,[court(1,[1,2,3,4])])],gamesPlayed:[]},playedGames })} />);
+    const quality = screen.getByRole('region', {name:'Game quality'});
+    expect(quality).toHaveTextContent('5.0 points across 1 unplayed games');
+    expect(quality).toHaveTextContent('P1: 1 completed');
+  });
   it('counts waiting only during attendance for late arrivals and departed players', () => {
     const attending = players.map(player => player.name === 'P21' ? { ...player, availFrom: 1 } : player.name === 'P22' ? { ...player, availTo: 0 } : player);
     render(<LiveSessionBoard {...props({ isAdmin: true, players: attending, fromSlot: 2, completedGames: [{ slot: 1, court: 0 }, { slot: 2, court: 1 }] })} />);
@@ -60,12 +69,22 @@ describe('LiveSessionBoard', () => {
   it('offers organizer quality weights and keeps private quality context out of player view', async () => {
     const { rerender } = render(<LiveSessionBoard {...props({ isAdmin: true })} />);
     expect(screen.getByRole('region', { name: 'Game quality' })).toHaveTextContent('MF/MM/FF');
-    const waiting = screen.getByRole('spinbutton', { name: 'Waiting fairness weight' });
+    expect(screen.queryByRole('spinbutton', { name: 'Waiting fairness weight' })).not.toBeInTheDocument();
+    const waiting = screen.getByRole('spinbutton', { name: 'Level balance weight' });
     await userEvent.clear(waiting);
     await userEvent.type(waiting, '20');
     expect(waiting).toHaveValue(20);
     rerender(<LiveSessionBoard {...props({ isAdmin: false })} />);
     expect(screen.queryByRole('region', { name: 'Game quality' })).not.toBeInTheDocument();
+  });
+  it('projects the entire pending plan in order and keeps busy matchups assessable', () => {
+    const many = Array.from({ length: 12 }, (_, i) => slot(i + 1, [court(1, [1, 2, 3, 4])]));
+    render(<LiveSessionBoard {...props({ isAdmin: true, result: { schedule: many, gamesPlayed: [] }, liveGames: [{ slot: 1, court: 0 }] })} />);
+    const quality = screen.getByRole('region', { name: 'Game quality' });
+    expect(quality).toHaveTextContent('11 unplayed games');
+    expect(quality).toHaveTextContent('Slot 12');
+    expect(quality).toHaveTextContent('Blocked now');
+    expect(quality).toHaveTextContent('Projected average matchup');
   });
   it.each([2, 3, 4, 5])('retains all %i live lanes, names and Finish actions when upcoming capacity decreases', courts => {
     const initial = props({

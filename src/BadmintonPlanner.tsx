@@ -1,8 +1,9 @@
 import QuarantinePanel from './components/QuarantinePanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSharedSessionSync } from './hooks/useSharedSessionSync';
+import { loadQualityWeights, saveQualityWeights } from './utils/qualityPreferences';
 import { sharedGameId } from './utils/sharedSession';
-import { DEFAULT_QUALITY_WEIGHTS, type QualityWeights } from './utils/gameQuality';
+import { type QualityWeights } from './utils/gameQuality';
 import { normalizePlayerIdentities } from './utils/playerIdentity';
 import { playerMetadataPatch } from './utils/playerMetadataPatch';
 import { extractRuntimeScheduleState } from './utils/runtimeScheduleState';
@@ -98,7 +99,8 @@ function BadmintonPlanner() {
   const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
   const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
   const [initialShareId, setInitialShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
-  const [qualityWeights, setQualityWeights] = useState<QualityWeights>(DEFAULT_QUALITY_WEIGHTS);
+  const [qualityWeights, setQualityWeights] = useState<QualityWeights>(loadQualityWeights);
+  useEffect(() => { saveQualityWeights(qualityWeights); }, [qualityWeights]);
   const [pendingSharedUndo, setPendingSharedUndo] = useState<string | null>(null);
   const hydratedShare = useRef<string | null>(null);
 
@@ -155,6 +157,8 @@ function BadmintonPlanner() {
     shareNotice,
     liveGames,
     completedGames,
+    playedGames,
+    historyEpoch,
     suspendedPlayerNames,
   } = state;
 
@@ -302,9 +306,9 @@ function BadmintonPlanner() {
     () => buildSharePayloadUtil({ result: result ?? (isSharedSession ? { schedule: [] } : null), playersWithAvailability: getPlayersWithAvailability(), gameMinutes, numCourts, scores, isConfirmed,
       settings: { totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides },
       runtime: { live: liveGames, completed: completedGames, suspended: suspendedPlayerNames },
-      includeScoreDrafts: true,
+      playedGames, historyEpoch, includeScoreDrafts: true,
     }),
-    [gameMinutes, getPlayersWithAvailability, isConfirmed, isSharedSession, numCourts, result, scores, totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides, liveGames, completedGames, suspendedPlayerNames]
+    [gameMinutes, getPlayersWithAvailability, isConfirmed, isSharedSession, numCourts, result, scores, totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides, liveGames, completedGames, suspendedPlayerNames, playedGames, historyEpoch]
   );
 
   const parseScheduleText = useCallback((text: string) => parseScheduleTextUtil(text, players), [players]);
@@ -332,6 +336,7 @@ function BadmintonPlanner() {
     winLoss,
     liveGames,
     completedGames,
+    playedGames, historyEpoch,
     fromSlot,
     fromSlotCourts,
     courtOverrides,
@@ -346,12 +351,12 @@ function BadmintonPlanner() {
 
   const generate = useCallback(() => {
     if (players.length < 4 || isGenerating) return;
-    if (isConfirmed) {
+    if (isConfirmed || playedGames.length || completedGames.length) {
       patchState({ pendingOverwrite: 'generate' });
       return;
     }
     runGenerate();
-  }, [isConfirmed, isGenerating, players.length, runGenerate]);
+  }, [isConfirmed, isGenerating, players.length, runGenerate, playedGames.length, completedGames.length]);
 
   const {
     applyLiveGamesUpdate,
@@ -415,12 +420,12 @@ function BadmintonPlanner() {
     else runImport();
   }, [isConfirmed, runImport]);
 
-  const executeOverwrite = useCallback(() => {
+  const executeOverwrite = useCallback((resetHistory = false) => {
     if (result && result.schedule?.length) {
       patchState({ savedPlans: [{ id: Date.now(), tag: '', result, savedAt: new Date().toISOString() }, ...savedPlans] });
     }
     patchState({ pendingOverwrite: null });
-    if (pendingOverwrite === 'generate') runGenerate();
+    if (pendingOverwrite === 'generate') runGenerate(resetHistory);
     else if (pendingOverwrite === 'clear') runClearSchedule();
     else if (pendingOverwrite === 'import') runImport();
     else if (pendingOverwrite === 'regenerateRemaining') runRegenerateRemaining();
@@ -609,6 +614,7 @@ function BadmintonPlanner() {
   }, [applyLiveGamesUpdate, completedGames, editingSlot, editLayout, liveGames, players, result]);
 
   const updateScore = useCallback((slot: number, courtIdx: number, aVal: string, bVal: string, teamA: string[], teamB: string[]) => {
+    if (isGenerating) return;
     const key = `s${slot}c${courtIdx}`;
     const aNum = parseInt(aVal);
     const bNum = parseInt(bVal);
@@ -651,7 +657,7 @@ function BadmintonPlanner() {
     ];
     const targetLiveCount = Math.max(nextLiveGames.length, Math.min(liveCapacity, liveGames.length));
     applyLiveGamesUpdate(nextLiveGames, slot, nextCompletedGames, { scores: nextScores, winLoss: nextWinLoss }, { targetLiveCount });
-  }, [applyLiveGamesUpdate, completedGames, isAdmin, isSharedSession, liveCapacity, liveGames, players, result, scores, updateScoreBase, winLoss, recordUndo]);
+  }, [isGenerating, applyLiveGamesUpdate, completedGames, isAdmin, isSharedSession, liveCapacity, liveGames, players, result, scores, updateScoreBase, winLoss, recordUndo]);
 
   const buildCopyText = useCallback(
     (mode: 'full' | 'games') => buildCopyTextUtil(result, { mode, extraCourt, numCourts, gameMinutes, sessionStart, totalSlots, players, scores }),
@@ -853,13 +859,14 @@ function BadmintonPlanner() {
       savedPlans: nextSavedPlans as SavedPlan[],
       liveGames: decoded.liveGames,
       completedGames: decoded.completedGames,
+      playedGames: decoded.playedGames, historyEpoch: decoded.historyEpoch,
       suspendedPlayerNames: decoded.suspendedPlayerNames,
       editingSlot: null, editLayout: null, undoSnapshot: null, scheduleDirty: false,
       queuePromotionPrompt: null, queueAdjustment: null, pendingSessionChange: null,
       ...(sourceShareId ? { shareId: sourceShareId, shareNotice: null } : {}),
     });
     return buildSharePayloadUtil({ result: decoded.result as PlannerResult, playersWithAvailability: nextPlayers, gameMinutes: decoded.gameMinutes, numCourts: decoded.numCourts,
-      scores: decoded.scores, isConfirmed: decoded.isConfirmed,
+      scores: decoded.scores, isConfirmed: decoded.isConfirmed, playedGames: decoded.playedGames, historyEpoch: decoded.historyEpoch,
       settings: { totalMinutes: decoded.totalMinutes, sessionStart: decoded.sessionStart, staggerMode: decoded.staggerMode, extraCourt: decoded.extraCourt, courtOverrides: decoded.courtOverrides },
       runtime: { live: decoded.liveGames, completed: decoded.completedGames, suspended: decoded.suspendedPlayerNames },
       includeScoreDrafts: true,
@@ -867,7 +874,7 @@ function BadmintonPlanner() {
   }, [gameMinutes, numCourts, savedPlans, players, playerHistory, isSharedSession]);
 
   const sharedTarget = isFirebaseConfigured() ? (initialShareId ?? (isSharedSession ? shareId : null)) : null;
-  const sharedSync = useSharedSessionSync({ shareId: sharedTarget, payload: buildSharePayload(), isAdmin,
+  const sharedSync = useSharedSessionSync({ shareId: sharedTarget, payload: buildSharePayload(), isAdmin, planEditing: isGenerating,
     applyRemote: data => applySharePayload(data, sharedTarget ?? undefined),
   });
   useEffect(() => {
@@ -884,14 +891,15 @@ function BadmintonPlanner() {
     prepareQueuePromotionForOpenCourt();
   }, [sharedTarget, sharedSync.status, sharedSync.latest, isAdmin, liveGames.length, liveCapacity, queuePromotionPrompt, prepareQueuePromotionForOpenCourt]);
   const toggleSessionGame = (slot: number, court: number, displayCourt?: number) => {
+    if (isGenerating) return;
     if (!sharedTarget) { toggleLiveGame(slot, court, displayCourt); return; }
     const payload = buildSharePayload();
     if (!payload) return;
     const type = liveGames.some(game => gameMatches(game, slot, court)) ? 'finish' : 'start';
     if (sharedSync.status !== 'saved') { patchState({ sessionChangeNotice: 'Wait for the shared session to finish saving, or retry its connection, before changing game progress.' }); return; }
     // Bind the action to the card actually rendered, never a newer buffered lineup.
-    const rendered = { ...payload, ...(!sharedSync.latest?.ids ? { ids: undefined } : {}) };
-    void sharedSync.performAction({ type, id: crypto.randomUUID(), gameId: sharedGameId(rendered, slot, court), ...(displayCourt != null ? { displayCourt } : {}) });
+    const rendered = { ...payload, ...(!sharedSync.latest?.ids ? { ids: undefined } : {}), ...(!sharedSync.latest?.planId ? { planId: undefined } : {}) };
+    void sharedSync.performAction({ type, at: Date.now(), id: crypto.randomUUID(), gameId: sharedGameId(rendered, slot, court), ...(displayCourt != null ? { displayCourt } : {}) });
   };
   const resolveSessionPromotion = (choice: 'lookahead' | 'substitute') => {
     if (!sharedTarget) { resolveQueuePromotion(choice); return; }
@@ -923,7 +931,7 @@ function BadmintonPlanner() {
     assignToPosition={assignToPosition}
     updateScore={updateScore}
     liveGames={liveGames}
-    completedGames={completedGames}
+    playedGames={playedGames} completedGames={completedGames}
     onToggleLive={toggleSessionGame}
     onAdjustCourts={adjustCourtsAtSlot}
     blockedPlayerNames={blockedPlayerNames}
@@ -1022,7 +1030,7 @@ function BadmintonPlanner() {
         </div>}
 
         <nav aria-label="Session views" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
-          {([['live', 'Live session'], ['setup', 'Setup'], ['past', `Past games${completedGames.length ? ` (${completedGames.length})` : ''}`], ['pairings', 'Pairings'], ['archive', `Saved plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How it works']] as const).map(([val, label]) => (
+          {([['live', 'Live session'], ['setup', 'Setup'], ['past', `Past games${playedGames.length ? ` (${playedGames.length})` : ''}`], ['pairings', 'Pairings'], ['archive', `Saved plans${savedPlans.length ? ` (${savedPlans.length})` : ''}`], ['about', 'How it works']] as const).map(([val, label]) => (
             <button key={val} onClick={() => patchState({ activeTab: val })}
               disabled={val === 'live' && !result}
               aria-current={selectedTab === val ? 'page' : undefined}
@@ -1052,7 +1060,7 @@ function BadmintonPlanner() {
           <ArchiveTab savedPlans={savedPlans} loadPlan={loadPlan} deletePlan={deletePlan} />
         )}
 
-        {activeTab === 'past' && <PastGamesTab result={result} completedGames={completedGames} liveGames={liveGames} scores={scores} players={players} winLoss={winLoss} />}
+        {activeTab === 'past' && <PastGamesTab playedGames={playedGames} result={result} completedGames={completedGames} liveGames={liveGames} scores={scores} players={players} winLoss={winLoss} />}
 
         {activeTab === 'pairings' && <PairingsTab players={players} result={result} completedGames={completedGames} scores={scores} />}
 
@@ -1144,7 +1152,7 @@ function BadmintonPlanner() {
         )}
 
         {pendingOverwrite && (
-          <ConfirmOverwriteModal onConfirm={executeOverwrite} onCancel={cancelOverwrite} />
+          <ConfirmOverwriteModal historyCount={playedGames.length} liveCount={liveGames.length} isReroll={pendingOverwrite === 'generate'} onConfirm={executeOverwrite} onCancel={cancelOverwrite} />
         )}
 
         {selectedTab === 'setup' && <>

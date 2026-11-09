@@ -1,4 +1,7 @@
 import type { PlannerResult, ScoresMap, SharePayload } from '../types';
+import { migratePlayedGames, type PlayedGame } from './playedHistory';
+import { publicPlayedGames } from './playedHistoryCodec';
+import type { Player } from '../algorithm/types';
 
 /** Serializes the current schedule into the compact shape written to a share link. */
 export function buildSharePayload({
@@ -11,8 +14,10 @@ export function buildSharePayload({
   settings = {},
   runtime,
   includeScoreDrafts = false,
+  playedGames,
+  historyEpoch = 0,
 }: {
-  result: Pick<PlannerResult, 'schedule'> | null;
+  result: Pick<PlannerResult, 'schedule' | 'planId'> | null;
   playersWithAvailability: { id?: string; name: string; gender: string; quarantined?: boolean; availFrom?: number; availTo?: number; group?: string; leavesAt?: number | null }[];
   gameMinutes: number;
   numCourts: number;
@@ -21,6 +26,8 @@ export function buildSharePayload({
   settings?: Omit<NonNullable<SharePayload['cfg']>, 'g' | 'c'>;
   runtime?: SharePayload['runtime'];
   includeScoreDrafts?: boolean;
+  playedGames?: PlayedGame[];
+  historyEpoch?: number;
 }): SharePayload | null {
   if (!result) return null;
   const pwith = [...playersWithAvailability];
@@ -32,7 +39,9 @@ export function buildSharePayload({
   const indexOf = (player: { id?: string; name: string }) => pwith.findIndex(p => player.id && p.id ? player.id === p.id : p.name === player.name);
   return {
     v: 1,
-    schema: 2,
+    schema: 3,
+    ...(result.planId ? { planId: result.planId } : {}),
+    ...(playedGames ? { history: publicPlayedGames(playedGames), historyEpoch } : {}),
     p: pwith.map(p => [p.name, p.gender as 'M' | 'F' | '?']),
     ids: pwith.map(p => p.id ?? `legacy:${p.name.toLocaleLowerCase()}`),
     ...(pwith.length !== playersWithAvailability.length ? { active: playersWithAvailability.map((_, i) => i) } : {}),
@@ -63,7 +72,7 @@ export function buildSharePayload({
  * Pure reconstruction only — does not touch Saved Plans, see upsertSavedPlanFromShare.
  */
 export function reconstructScheduleFromSharePayload(
-  data: { p: [string, string][]; q?: number[]; cfg?: SharePayload['cfg']; ids?: string[]; active?: number[]; availability?: SharePayload['availability']; runtime?: SharePayload['runtime']; slots: Array<{ s: number; c?: number[][][]; sit?: number[] }>; scores?: SharePayload['scores']; confirmed?: boolean },
+  data: { p: [string, string][]; q?: number[]; cfg?: SharePayload['cfg']; ids?: string[]; active?: number[]; availability?: SharePayload['availability']; runtime?: SharePayload['runtime']; slots: Array<{ s: number; c?: number[][][]; sit?: number[] }>; scores?: SharePayload['scores']; confirmed?: boolean; planId?: string; history?: PlayedGame[]; historyEpoch?: number },
   { currentGameMinutes, currentNumCourts }: { currentGameMinutes: number; currentNumCourts: number }
 ) {
   const { p: sharedPlayers, cfg, slots, scores: sharedScores, confirmed } = data;
@@ -72,6 +81,8 @@ export function reconstructScheduleFromSharePayload(
     || (slots.length > 0 && sharedPlayers.length === 0)
     || sharedPlayers.some(player => !Array.isArray(player) || typeof player[0] !== 'string' || typeof player[1] !== 'string')) throw invalid();
   const n = sharedPlayers.length;
+  if (data.planId !== undefined && (typeof data.planId !== 'string' || !data.planId.trim())) throw invalid();
+  if (!Number.isInteger(data.historyEpoch ?? 0) || (data.historyEpoch ?? 0) < 0) throw invalid();
   if (!Array.isArray(data.q ?? []) || !(data.q ?? []).every(index => Number.isInteger(index) && index >= 0 && index < n)) throw invalid();
   const quarantined = new Set(data.q ?? []);
   const active = new Set(data.active ?? sharedPlayers.map((_, i) => i));
@@ -81,7 +92,7 @@ export function reconstructScheduleFromSharePayload(
   const gp: number[] = new Array(n).fill(0);
   const cp: number[] = new Array(n).fill(0);
   const cr: number[] = new Array(n).fill(0);
-  const playerAt = (index: number) => ({ name: sharedPlayers[index]![0], gender: sharedPlayers[index]![1], ...(data.ids?.[index] ? { id: data.ids[index] } : {}) });
+  const playerAt = (index: number) => ({ name: sharedPlayers[index]![0], gender: sharedPlayers[index]![1] === 'F' ? 'F' as const : 'M' as const, ...(data.ids?.[index] ? { id: data.ids[index] } : {}) });
   type SharedPlayerInGame = ReturnType<typeof playerAt>;
   const teamAt = (indices: number[]): [SharedPlayerInGame, SharedPlayerInGame] => {
     if (indices.length !== 2) throw new Error('Shared teams must contain exactly two players');
@@ -113,7 +124,7 @@ export function reconstructScheduleFromSharePayload(
       sitting: (slot.sit ?? []).map(playerAt),
       playerState: sharedPlayers.map(([name, gender], i) => ({
         name,
-        gender,
+        gender: gender === 'F' ? 'F' as const : 'M' as const,
         total: gp[i]!,
         conPlayed: cp[i]!,
         conRested: cr[i]!,
@@ -147,19 +158,25 @@ export function reconstructScheduleFromSharePayload(
     });
   };
   const restoredGameMinutes = cfg?.g || currentGameMinutes;
+  const decodedPlayers: Player[] = sharedPlayers.flatMap(([name, gender], index) => active.has(index) ? [{ name, gender: gender === 'F' ? 'F' as const : 'M' as const, ...(data.ids?.[index] ? { id: data.ids[index] } : {}), skill: 2, availFrom: data.availability?.[index]?.from ?? 0, availTo: data.availability?.[index]?.to ?? slots.length - 1, group: data.availability?.[index]?.group ?? 'full', leavesAt: data.availability?.[index]?.leavesAt ?? null, ...(quarantined.has(index) ? { quarantined: true } : {}) }] : []);
+  const decodedResult: PlannerResult = { schedule: newSchedule, gamesPlayed: gp.filter((_, i) => active.has(i)), ...(data.planId ? { planId: data.planId } : {}) };
+  const completedGames = refs(data.runtime?.completed);
+  const playedGames = data.history ? publicPlayedGames(data.history) : migratePlayedGames(decodedResult, decodedPlayers, completedGames, restoredScores);
   return {
-    players: sharedPlayers.flatMap(([name, gender], index) => active.has(index) ? [{ name, gender, ...(data.ids?.[index] ? { id: data.ids[index] } : {}), skill: 2, availFrom: data.availability?.[index]?.from ?? 0, availTo: data.availability?.[index]?.to ?? slots.length - 1, group: data.availability?.[index]?.group ?? 'full', leavesAt: data.availability?.[index]?.leavesAt ?? null, ...(quarantined.has(index) ? { quarantined: true } : {}) }] : []),
+    players: decodedPlayers,
+    playedGames,
+    historyEpoch: data.historyEpoch ?? 0,
     totalMinutes: cfg?.totalMinutes ?? Math.max(1, ...slots.map(slot => slot.s)) * restoredGameMinutes,
     sessionStart: cfg?.sessionStart ?? '',
     staggerMode: cfg?.staggerMode ?? 'none',
     extraCourt: cfg?.extraCourt ?? { enabled: false, startMin: 60, durationMin: 90 },
     courtOverrides: cfg?.courtOverrides ?? {},
     liveGames: refs(data.runtime?.live),
-    completedGames: refs(data.runtime?.completed),
+    completedGames,
     suspendedPlayerNames: data.runtime?.suspended ?? [],
     gameMinutes: cfg?.g || currentGameMinutes,
     numCourts: cfg?.c || currentNumCourts,
-    result: { schedule: newSchedule, gamesPlayed: gp.filter((_, i) => active.has(i)) },
+    result: decodedResult,
     scores: restoredScores,
     isConfirmed: !!confirmed,
   };

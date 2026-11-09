@@ -4,8 +4,11 @@ import type { PlannerPersistedState, PlannerState } from '../types';
 import { captureUndoSnapshot, EMPTY_QUEUE_STATE } from '../utils/undoSnapshot';
 import { plannerStorageKey, seedBetaPlannerStorage } from '../utils/plannerStorage';
 import { normalizePlayerIdentities } from '../utils/playerIdentity';
+import { makePlayedGame, mergePlayedGames, migratePlayedGames } from '../utils/playedHistory';
 
 const STORAGE_KEYS = {
+  playedGames: 'bp-played-games',
+  historyEpoch: 'bp-history-epoch',
   players: 'bp-players',
   playerHistory: 'bp-player-history',
   totalMinutes: 'bp-totalMinutes',
@@ -71,9 +74,15 @@ function createInitialState(): PlannerState {
   const activeTab = (['live', 'setup', 'past', 'pairings', 'archive', 'about'] as const).find(tab => tab === storedTab)
     ?? (result ? 'live' : 'setup');
   const identities = normalizePlayerIdentities(storedPlayers, storedHistory);
+  const completedGames = result && !isSharedSession ? loadState<PlannerState['completedGames']>(STORAGE_KEYS.completedGames, []) : [];
+  const scores = loadState<PlannerState['scores']>(STORAGE_KEYS.scores, {});
+  const playedGames = isSharedSession ? [] : loadState<PlannerState['playedGames'] | null>(STORAGE_KEYS.playedGames, null)
+    ?? migratePlayedGames(result, identities.players as PlannerState['players'], completedGames, scores);
   return {
     ...EMPTY_QUEUE_STATE,
     undoSnapshot: null,
+    playedGames,
+    historyEpoch: isSharedSession ? 0 : loadState(STORAGE_KEYS.historyEpoch, 0),
     // Older rosters and the original defaults did not store a level. Normalize those
     // records so the private setting survives reloads and future persistence writes.
     players: identities.players.map(player => ({ ...player, level: migrateLevel(player.level, loadState<number>('bp-player-level-scale', 3) !== 5) })),
@@ -90,7 +99,7 @@ function createInitialState(): PlannerState {
     sessionStart: loadState(STORAGE_KEYS.sessionStart, ''),
     result,
     scheduleDirty: false,
-    scores: loadState(STORAGE_KEYS.scores, {}),
+    scores,
     winLoss: loadState(STORAGE_KEYS.winLoss, {}),
     fromSlot: 1,
     fromSlotCourts: 0,
@@ -127,7 +136,7 @@ function createInitialState(): PlannerState {
     shareNotice: null,
     loadedPlanId: loadState(STORAGE_KEYS.loadedPlanId, null),
     liveGames: result && !isSharedSession ? loadState(STORAGE_KEYS.liveGames, []) : [],
-    completedGames: result && !isSharedSession ? loadState(STORAGE_KEYS.completedGames, []) : [],
+    completedGames,
     suspendedPlayerNames: result && !isSharedSession ? loadState(STORAGE_KEYS.suspendedPlayerNames, []) : [],
   };
 }
@@ -146,8 +155,21 @@ function plannerReducer(state: PlannerState, action: PlannerAction): PlannerStat
       return state.undoSnapshot ? { ...state, ...state.undoSnapshot, undoSnapshot: null } : state;
     case 'set':
       return { ...state, [action.key]: action.value };
-    case 'patch':
-      return { ...state, ...action.value, ...(action.value.result === null ? { ...EMPTY_QUEUE_STATE, undoSnapshot: null } : {}) };
+    case 'patch': {
+      const next = { ...state, ...action.value, ...(action.value.result === null ? { ...EMPTY_QUEUE_STATE, undoSnapshot: null } : {}) };
+      if (action.value.playedGames !== undefined) return next;
+      let history = migratePlayedGames(state.result, state.players, state.completedGames, state.scores, state.playedGames);
+      const identity = (record: NonNullable<ReturnType<typeof makePlayedGame>>) => JSON.stringify([record.planId, record.slot, [...record.teamA, ...record.teamB].map(p => p.id).sort()]);
+      const oldCompletions = new Set(history.map(identity));
+      for (const ref of next.completedGames) {
+        const record = makePlayedGame(next.result, next.players, ref, next.scores, state.liveGames);
+        if (!record) continue;
+        const existing = history.find(game => identity(game) === identity(record));
+        if (!oldCompletions.has(identity(record))) history = mergePlayedGames(history, [record]);
+        else if (existing && action.value.scores !== undefined) history = history.map(game => game === existing ? { ...game, ...(record.score ? { score: record.score } : {}) } : game);
+      }
+      return { ...next, playedGames: history };
+    }
     default:
       return state;
   }
@@ -158,6 +180,8 @@ export function usePlannerState() {
 
   useEffect(() => {
     const persisted: PlannerPersistedState = {
+      playedGames: state.playedGames,
+      historyEpoch: state.historyEpoch,
       activeTab: state.activeTab,
       players: state.players,
       playerHistory: state.playerHistory,
@@ -185,7 +209,7 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames', 'totalMinutes', 'gameMinutes', 'numCourts', 'extraCourt', 'staggerMode', 'sessionStart', 'preferMixedTeams', 'preferredPairs']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames', 'totalMinutes', 'gameMinutes', 'numCourts', 'extraCourt', 'staggerMode', 'sessionStart', 'preferMixedTeams', 'preferredPairs', 'playedGames', 'historyEpoch']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
       const openingShare = new URLSearchParams(window.location.search).has('share') || window.location.hash.startsWith('#share=');
@@ -199,6 +223,8 @@ export function usePlannerState() {
     if (!state.isSharedSession && !new URLSearchParams(window.location.search).has('share') && !window.location.hash.startsWith('#share=')) localStorage.setItem(plannerStorageKey('bp-player-level-scale'), '5');
   }, [
     state.players,
+    state.playedGames,
+    state.historyEpoch,
     state.playerHistory,
     state.totalMinutes,
     state.gameMinutes,

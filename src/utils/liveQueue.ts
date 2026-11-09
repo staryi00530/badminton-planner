@@ -33,16 +33,21 @@ export function addUniqueGame(games: GameRef[], game: GameRef) {
 }
 
 export function initialLiveGamesForSchedule(
-  result: { schedule: Array<{ slot: number; courts: Array<{ teamA: Array<{ name: string }>; teamB: Array<{ name: string }> }> }> },
+  result: { planId?: string; schedule: Array<{ slot: number; courts: Array<{ teamA: Array<{ id?: string; name: string }>; teamB: Array<{ id?: string; name: string }> }> }> },
   capacity: number,
 ): GameRef[] {
-  const firstSlot = result.schedule.find(slot => slot.slot === 1);
-  if (!firstSlot) return [];
-  return firstSlot.courts.slice(0, Math.max(0, Math.floor(capacity))).map((court, index) => ({
-    slot: firstSlot.slot,
-    court: index,
-    players: [...court.teamA, ...court.teamB].map(player => player.name),
-  }));
+  const games: GameRef[] = [], busy = new Set<string>();
+  for (const slot of result.schedule) for (const [court, lineup] of slot.courts.entries()) {
+    if (games.length >= Math.max(0, Math.floor(capacity))) return games;
+    const players = [...lineup.teamA, ...lineup.teamB];
+    if (players.length !== 4 || players.some(p => busy.has(p.name))) continue;
+    players.forEach(p => busy.add(p.name));
+    games.push({ slot: slot.slot, court, players: players.map(p => p.name), ...(result.planId ? {
+      displayCourt: games.length,
+      id: JSON.stringify([result.planId, slot.slot, court, players.map(p => p.id ?? `legacy:${p.name.toLowerCase()}`)]),
+    } : {}) });
+  }
+  return games;
 }
 
 export function normalizeGameRefs(

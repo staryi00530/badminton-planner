@@ -27,10 +27,12 @@ export function sharedContentKey(payload: SharePayload | null): string {
   return JSON.stringify(ordered({ ...content, q: content.q ?? [], scores: content.scores ?? {}, runtime: { live: content.runtime?.live ?? [], completed: content.runtime?.completed ?? [], suspended: content.runtime?.suspended ?? [] } }));
 }
 
-export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, transport = firebaseTransport, recoveryStorage = window.sessionStorage }: {
+export function useSharedSessionSync({ shareId, payload, isAdmin, planEditing = false, applyRemote, transport = firebaseTransport, recoveryStorage = window.sessionStorage }: {
   shareId: string | null;
   payload: SharePayload | null;
   isAdmin: boolean;
+  /** Hold cloud writes and incoming replacement while a new plan is being generated. */
+  planEditing?: boolean;
   /** Apply to React and return the canonical payload produced by that reconstructed state. */
   applyRemote: (data: SharePayload) => SharePayload;
   transport?: SharedTransport;
@@ -40,8 +42,8 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
   const [message, setMessage] = useState('');
   const [version, setVersion] = useState(0);
   const [reconnect, setReconnect] = useState(0);
-  const latest = useRef({ payload, isAdmin, applyRemote });
-  latest.current = { payload, isAdmin, applyRemote };
+  const latest = useRef({ payload, isAdmin, planEditing, applyRemote });
+  latest.current = { payload, isAdmin, planEditing, applyRemote };
   const base = useRef<SharePayload | null>(null);
   const remote = useRef<SharePayload | null>(null);
   const canonicalKey = useRef('');
@@ -109,9 +111,14 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
       if (stopped || epoch.current !== currentEpoch) return;
       if (!data) { blocked.current = true; setStatus('not_found'); return; }
       remote.current = data;
-      if (!ready.current || inFlight.current) return;
+      if (!ready.current) return;
       if ((data.revision ?? 0) <= (base.current?.revision ?? 0)) return;
       const draft = latest.current.payload;
+      if (latest.current.planEditing) {
+        if (draft) writeJournal(draft);
+        blocked.current = true; setStatus('conflict'); return;
+      }
+      if (inFlight.current) return;
       if (blocked.current || (latest.current.isAdmin && draft && sharedContentKey(draft) !== canonicalKey.current)) {
         if (draft) writeJournal(draft);
         blocked.current = true; setStatus('conflict'); return;
@@ -124,6 +131,15 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
       if (response.status !== 'ok') { blocked.current = true; cloudDiagnostic('share.load', response.status); setStatus(response.status); return; }
       const data = response.data as SharePayload;
       if (data.v !== 1 || !Array.isArray(data.p) || !Array.isArray(data.slots)) throw new Error('Invalid shared session');
+      if (latest.current.planEditing) {
+        // The fetch may finish after generation begins; retain the local base and
+        // never reconstruct cloud state over the organizer's in-progress plan.
+        base.current = journal?.base ?? latest.current.payload ?? data;
+        canonicalKey.current = sharedContentKey(base.current);
+        remote.current = data;
+        if (latest.current.payload) writeJournal(latest.current.payload);
+        blocked.current = true; setStatus('conflict');
+      } else {
       apply(data);
       if (journal?.draft && latest.current.isAdmin) {
         if (sharedContentKey(journal.draft) === canonicalKey.current) clearJournal();
@@ -133,6 +149,7 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
           else setStatus('saving');
         }
       } else setStatus('saved');
+      }
       try { pendingAction.current = JSON.parse(recoveryStorage.getItem(actionKey) ?? 'null'); } catch {}
       if (pendingAction.current && !blocked.current) { setStatus('offline'); setMessage('A game action is retained on this device. Retry to confirm it with the shared session.'); }
       ready.current = true;
@@ -144,7 +161,7 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
   }, [shareId, transport, journalKey, actionKey, apply, writeJournal, reconnect, recoveryStorage, clearJournal]);
 
   const saveNow = useCallback(async (): Promise<boolean> => {
-    if (!shareId || !ready.current || blocked.current || inFlight.current) return false;
+    if (!shareId || !ready.current || blocked.current || inFlight.current || latest.current.planEditing) return false;
     const draft = latest.current.payload;
     if (!draft || !base.current) return false;
     if (sharedContentKey(draft) === canonicalKey.current) return true;
@@ -158,11 +175,15 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
       if (epoch.current !== startedEpoch) return false;
       base.current = { ...draft, revision: saved.revision ?? 0, actions: saved.actions ?? [] };
       canonicalKey.current = sentKey;
-      if (sharedContentKey(latest.current.payload) === sentKey) clearJournal();
+      if (!blocked.current && sharedContentKey(latest.current.payload) === sentKey) clearJournal();
       else if (latest.current.payload) writeJournal(latest.current.payload);
+      if (blocked.current) {
+        if (latest.current.payload) writeJournal(latest.current.payload);
+        setStatus('conflict'); return false;
+      }
       if ((remote.current?.revision ?? 0) > (saved.revision ?? 0)) {
         // A later remote action must be seen before accepting more organizer edits.
-        if (sharedContentKey(latest.current.payload) === sentKey) apply(remote.current!);
+        if (!latest.current.planEditing && sharedContentKey(latest.current.payload) === sentKey) apply(remote.current!);
         else { blocked.current = true; setStatus('conflict'); return false; }
       } else remote.current = saved;
       setStatus('saved'); cloudDiagnostic('share.autosave', 'ok'); return true;
@@ -176,8 +197,9 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
   }, [shareId, transport, journalKey, writeJournal, apply, clearJournal]);
 
   const performAction = useCallback(async (action: SharedAction): Promise<boolean> => {
-    if (!shareId || !ready.current || blocked.current || inFlight.current) return false;
+    if (!shareId || !ready.current || blocked.current || inFlight.current || latest.current.planEditing) return false;
     if (latest.current.isAdmin && sharedContentKey(latest.current.payload) !== canonicalKey.current && !await saveNow()) return false;
+    if (latest.current.planEditing || blocked.current) return false;
     if (latest.current.isAdmin && sharedContentKey(latest.current.payload) !== canonicalKey.current) {
       setMessage('Your latest edits are still saving. Try the game action again once saved.'); return false;
     }
@@ -190,9 +212,10 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
       const saved = await transport.action(shareId, action);
       if (epoch.current !== startedEpoch) return false;
       pendingAction.current = null; recoveryStorage.removeItem(actionKey);
-      if (latest.current.isAdmin && sharedContentKey(latest.current.payload) !== startingContent) {
+      if (blocked.current || latest.current.planEditing || (latest.current.isAdmin && sharedContentKey(latest.current.payload) !== startingContent)) {
         if (latest.current.payload) writeJournal(latest.current.payload);
-        remote.current = saved; blocked.current = true; setStatus('conflict');
+        if ((remote.current?.revision ?? 0) < (saved.revision ?? 0)) remote.current = saved;
+        blocked.current = true; setStatus('conflict');
         setMessage('The game action saved, and your newer organizer edits were retained for review.'); return true;
       }
       apply((remote.current?.revision ?? 0) > (saved.revision ?? 0) ? remote.current! : saved);
@@ -203,7 +226,7 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
       if ((error as { code?: string }).code === 'share/action-blocked') {
         pendingAction.current = null; recoveryStorage.removeItem(actionKey);
         setMessage((error as Error).message);
-        if (latest.current.isAdmin && sharedContentKey(latest.current.payload) !== startingContent) {
+        if (blocked.current || latest.current.planEditing || (latest.current.isAdmin && sharedContentKey(latest.current.payload) !== startingContent)) {
           if (latest.current.payload) writeJournal(latest.current.payload);
           blocked.current = true; setStatus('conflict');
         } else {
@@ -219,11 +242,11 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
     if (base.current && isAdmin && payload && localKey !== canonicalKey.current) writeJournal(payload);
   }, [localKey, isAdmin, payload, writeJournal, version]);
   useEffect(() => {
-    if (!ready.current || blocked.current || inFlight.current || !isAdmin || !payload || localKey === canonicalKey.current || status === 'offline') return;
+    if (!ready.current || blocked.current || inFlight.current || planEditing || !isAdmin || !payload || localKey === canonicalKey.current || status === 'offline') return;
     setStatus('saving');
     const timer = setTimeout(() => { void saveNow(); }, 350);
     return () => clearTimeout(timer);
-  }, [localKey, isAdmin, shareId, saveNow, version]);
+  }, [localKey, isAdmin, planEditing, shareId, saveNow, version]);
 
   const retry = useCallback(() => {
     if (!ready.current) { setReconnect(v => v + 1); return; }
@@ -232,8 +255,9 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, applyRemote, t
   }, [performAction, saveNow]);
   useEffect(() => { window.addEventListener('online', retry); return () => window.removeEventListener('online', retry); }, [retry]);
   const loadLatest = useCallback(async () => {
-    if (!shareId) return;
+    if (!shareId || latest.current.planEditing) return;
     const latestCloud = await transport.fetch(shareId).catch(() => null);
+    if (latest.current.planEditing) return;
     if (latestCloud?.status !== 'ok') { setMessage('Could not load the latest session. Your draft is still retained.'); return; }
     const journal = recoveryStorage.getItem(journalKey);
     if (journal) recoveryStorage.setItem(`${journalKey}:recovery`, journal);

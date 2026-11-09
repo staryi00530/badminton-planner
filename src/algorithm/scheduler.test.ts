@@ -1,8 +1,44 @@
 import { describe, it, expect } from 'vitest';
 import { generateSchedule, generateScheduleGen, extractState, recomputeStats, normalizeUnstartedMixedCourts } from './scheduler.js';
 import type { Court, Player, SlotResult } from './types.js';
+import { matchingWaitingGroups } from './formatGroups';
 
 describe('waiting cohorts', () => {
+  it('does not invent waiting credit in a consumed zero-budget gap', () => {
+    const players = makePlayers(8);
+    const state = extractState([], players);
+    state.gamesPlayed.fill(2);
+    state.consecutiveRested.fill(1);
+    const frames = [...generateScheduleGen(players, 3, [1,0,1], 0, state, null, {consumedSlots:[2]}, seededRng(1))];
+    const before = frames[0]!.schedule[0]!.playerState;
+    const after = frames[2]!.schedule[2]!.playerState;
+    expect(frames[1]!.schedule[1]!.courts).toEqual([]);
+    for (const player of after) {
+      const previous = before.find(p=>p.name===player.name)!;
+      expect(player.conRested).toBe(player.playing ? 0 : previous.conRested + 1);
+      expect(player.conPlayed).toBe(player.playing ? previous.conPlayed + 1 : 0);
+    }
+  });
+  it('preserves a forced court and matches formats on automatically added mixed courts', () => {
+    const players = makePlayers(8, 2);
+    const result = generateSchedule(players, 1, [2], 0, null, { courts: [[2,3,4,5]], targetCourts: 2 }, {}, seededRng(2))!;
+    const added = result.schedule[0]!.courts[1]!;
+    expect(added.teamA[0].gender).not.toBe(added.teamA[1].gender);
+    expect(added.teamB[0].gender).not.toBe(added.teamB[1].gender);
+  });
+  it('fills an unavoidable odd-gender extra court without incomplete teams', () => {
+    const result = generateSchedule(makePlayers(8, 1), 1, [2], 0, null, { courts: [[2,3,4,5]], targetCourts: 2 }, {}, seededRng(2))!;
+    expect(result.schedule[0]!.courts.flatMap(c => [...c.teamA, ...c.teamB]).every(Boolean)).toBe(true);
+  });
+  it('uses retained repeat matrices with configurable matchup weights', () => {
+    const players = makePlayers(4);
+    const state = extractState([], players);
+    const plain = generateSchedule(players, 1, [1], 0, null, null, { qualityWeights: { partners: 100 } }, seededRng(1))!.schedule[0]!.courts[0]!;
+    const indices = plain.teamA.map(p => players.findIndex(q => q.name === p.name));
+    state.partnerCount[indices[0]!]![indices[1]!] = state.partnerCount[indices[1]!]![indices[0]!] = 100;
+    const result = generateSchedule(players, 1, [1], 0, state, null, { qualityWeights: { partners: 100 } }, seededRng(1))!;
+    expect([result.schedule[0]!.courts[0]!.teamA, result.schedule[0]!.courts[0]!.teamB].some(team => plain.teamA.every(p => team.some(q => q.name === p.name)))).toBe(false);
+  });
   it('uses tunable weights to trade preferred teammates against level balance', () => {
     const players = makePlayers(4).map((p, i) => ({ ...p, level: (i < 2 ? 1 : 5) as 1 | 5 }));
     const balanced = generateSchedule(players, 1, [1], 0, null, null, { preferredPairs: [[0, 1]], qualityWeights: { levels: 100, preferred: 0 } }, seededRng(4))!;
@@ -16,7 +52,13 @@ describe('waiting cohorts', () => {
       for (const femaleCount of [0, 2, 7, 8, 14, count]) {
       const { schedule } = generateSchedule(makePlayers(count, femaleCount), 3, [4, 4, 4], 0, null, null, {}, seededRng(seed))!;
       const busy = new Set(schedule[0]!.courts.flatMap(c => [...c.teamA, ...c.teamB].map(p => p.name)));
-      expect(schedule[1]!.courts.slice(0, Math.floor((count - 16) / 4)).every(c => [...c.teamA, ...c.teamB].every(p => !busy.has(p.name)))).toBe(true);
+      const roster = makePlayers(count, femaleCount);
+      const ids = roster.map((_, i) => i);
+      const waiting = new Set(ids.filter(i => !busy.has(roster[i]!.name)));
+      const feasible = matchingWaitingGroups(ids, waiting, i => roster[i]!.gender === 'F', 4)!;
+      const ready = feasible.filter(g => g.every(i => waiting.has(i))).length;
+      expect(schedule[1]!.courts.slice(0, ready).every(c => [...c.teamA, ...c.teamB].every(p => !busy.has(p.name)))).toBe(true);
+      expect(schedule[1]!.courts.every(c => [...c.teamA, ...c.teamB].filter(p => p.gender === 'F').length % 2 === 0)).toBe(true);
       expect(new Set(schedule[1]!.courts.flatMap(c => [...c.teamA, ...c.teamB].map(p => p.name))).size).toBe(16);
       }
     }

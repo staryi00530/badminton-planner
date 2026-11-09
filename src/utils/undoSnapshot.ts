@@ -12,12 +12,12 @@ export function captureUndoSnapshot(state: PlannerState): UndoSnapshot {
     result, scores, winLoss, players, liveGames, completedGames, suspendedPlayerNames,
     fromSlot, fromSlotCourts, courtOverrides, scheduleDirty, copied, isConfirmed,
     loadedPlanId, savedPlans, editingSlot, editLayout, pendingOverwrite, isGenerating,
-    genSlot, sessionChangeNotice, pendingSessionChange, queueAdjustment, queuePromotionPrompt,
+    genSlot, sessionChangeNotice, pendingSessionChange, queueAdjustment, queuePromotionPrompt, playedGames, historyEpoch,
   } = state;
   return structuredClone({
     result, scores, winLoss, players, liveGames, completedGames, suspendedPlayerNames,
     fromSlot, fromSlotCourts, courtOverrides, scheduleDirty, copied, isConfirmed,
     loadedPlanId, savedPlans, editingSlot, editLayout, pendingOverwrite, isGenerating,
-    genSlot, sessionChangeNotice, pendingSessionChange, queueAdjustment, queuePromotionPrompt,
+    genSlot, sessionChangeNotice, pendingSessionChange, queueAdjustment, queuePromotionPrompt, playedGames, historyEpoch,
   });
 }

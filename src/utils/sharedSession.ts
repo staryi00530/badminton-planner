@@ -1,9 +1,12 @@
 import type { SharePayload } from '../types';
 import type { GameRef } from './liveQueue';
 import { computeCourtsPerSlot } from './courtsPerSlot';
+import { reconstructScheduleFromSharePayload } from './sharePayload';
+import { makePlayedGame, mergePlayedGames } from './playedHistory';
+import { publicPlayedGames } from './playedHistoryCodec';
 
 export type SharedAction =
-  | { type: 'finish' | 'start'; id: string; gameId: string; displayCourt?: number; replacements?: Array<{ replacee: string; replacer: string }> }
+  | { type: 'finish' | 'start'; id: string; gameId: string; at?: number; displayCourt?: number; replacements?: Array<{ replacee: string; replacer: string }> }
   | { type: 'undo'; id: string; target: string; confirmDependents?: boolean };
 
 const same = (a: GameRef, b: GameRef) => a.slot === b.slot && a.court === b.court;
@@ -14,13 +17,22 @@ function indices(data: SharePayload, game: GameRef): number[] {
 /** Stable across revisions, but changes whenever the planned lineup changes. */
 export function sharedGameId(data: SharePayload, slot: number, court: number): string {
   const lineup = indices(data, { slot, court }).map(i => data.ids?.[i] ?? data.p[i]?.[0] ?? '?');
-  return JSON.stringify([slot, court, lineup]);
+  return JSON.stringify(data.planId ? [data.planId, slot, court, lineup] : [slot, court, lineup]);
 }
 
 export function commitSharedSnapshot(current: SharePayload | null, expectedRevision: number, next: SharePayload): SharePayload | null {
   if (!current || (current.revision ?? 0) !== expectedRevision) return null;
-  // Preserve action history across organizer edits; it belongs to session progress.
-  return { ...next, actions: current.actions ?? [], receipts: current.receipts ?? [], revision: expectedRevision + 1, schema: 2 };
+  const decoded = reconstructScheduleFromSharePayload(current, { currentGameMinutes: 15, currentNumCourts: 1 });
+  const epoch = current.historyEpoch ?? 0, nextEpoch = next.historyEpoch ?? epoch;
+  const newPlan = (next.planId ?? 'legacy') !== (current.planId ?? 'legacy');
+  const incoming = next.history ? publicPlayedGames(next.history) : [];
+  if (nextEpoch !== epoch && !(nextEpoch === epoch + 1 && newPlan && incoming.length === 0)) return null;
+  const history = nextEpoch !== epoch ? [] : mergePlayedGames(decoded.playedGames, incoming).map(game => {
+    const changed = incoming.find(item => item.id === game.id);
+    return changed?.score ? { ...game, score: changed.score } : game;
+  });
+  // Receipts outlive replaced plans so delayed requests cannot replay an undone action.
+  return { ...next, history, historyEpoch: nextEpoch, actions: newPlan ? [] : current.actions ?? [], receipts: current.receipts ?? [], revision: expectedRevision + 1, schema: 3 };
 }
 
 /** Pure RTDB transaction reducer; no random IDs, side effects or client clocks. */
@@ -28,6 +40,9 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
   if (!current) return null;
   if (current.receipts?.includes(action.id)) return current;
   const data = structuredClone(current);
+  const decoded = reconstructScheduleFromSharePayload(data, { currentGameMinutes: 15, currentNumCourts: 1 });
+  data.history = decoded.playedGames;
+  data.historyEpoch = decoded.historyEpoch;
   let live = data.runtime?.live ?? [];
   let completed = data.runtime?.completed ?? [];
   const history = data.actions ?? [];
@@ -63,6 +78,7 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
     live = [...remaining, { ...prior.game, displayCourt: lane }].sort((a, b) => (a.displayCourt ?? a.court) - (b.displayCourt ?? b.court));
     completed = completed.filter(game => !same(game, prior.game));
     data.actions = history.filter(item => item.id !== prior.id);
+    data.history = data.history.filter(record => record.id !== prior.playedGameId && !(record.planId === (data.planId ?? 'legacy') && record.slot === prior.game.slot && record.court === prior.game.court));
   } else {
     const game = data.slots.flatMap(slot => (slot.c ?? []).map((_, court) => ({ slot: slot.s, court })))
       .find(item => sharedGameId(data, item.slot, item.court) === action.gameId);
@@ -72,6 +88,9 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
       if (completed.some(item => same(item, game))) return acknowledgeDuplicate();
       const active = live.find(item => same(item, game));
       if (!active) return null;
+      const played = makePlayedGame(decoded.result, decoded.players, { ...active, id: action.gameId }, decoded.scores, live, action.at ?? 0);
+      if (!played) return null;
+      data.history = mergePlayedGames(data.history, [played]);
       live = live.filter(item => !same(item, game));
       completed = [...completed, active];
       const next = data.slots.flatMap(slot => (slot.c ?? []).map((_, court) => ({ slot: slot.s, court })))
@@ -81,7 +100,7 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
       const lane = finishingLane < capacity && !used.has(finishingLane) ? finishingLane : Array.from({ length: capacity }, (_, i) => i).find(i => !used.has(i));
       const promoted: GameRef[] = next && live.length < capacity && lane != null ? [{ ...next, id: sharedGameId(data, next.slot, next.court), displayCourt: lane, players: indices(data, next).map(i => data.p[i]![0]) }] : [];
       live = [...live, ...promoted];
-      data.actions = [...history, { id: action.id, gameId: action.gameId, game: active, promoted }].slice(-20);
+      data.actions = [...history, { id: action.id, gameId: action.gameId, game: active, promoted, playedGameId: played.id }].slice(-20);
     } else {
       if (live.some(item => same(item, game))) return acknowledgeDuplicate();
       if (completed.some(item => same(item, game))) return null;
@@ -113,6 +132,6 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
   // Keep request receipts after Undo so a delayed retry cannot repeat an undone Finish.
   data.receipts = [...(data.receipts ?? []), action.id].slice(-1000);
   data.revision = (current.revision ?? 0) + 1;
-  data.schema = 2;
+  data.schema = 3;
   return data;
 }

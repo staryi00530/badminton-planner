@@ -87,6 +87,46 @@ async function assertLayout(page, step) {
   assert.deepEqual(problems, [], `clipping/overlap at ${step}`);
 }
 
+async function verifyHistoryRecovery(newContext) {
+  stage = 'five-court history recovery';
+  const context = await newContext(1280);
+  const page = await context.newPage(); activePage = page;
+  page.setDefaultTimeout(10000);
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(prefix => {
+    localStorage.clear(); sessionStorage.clear();
+    const players = Array.from({length:32}, (_,i)=>({id:`history-p${i}`,name:`History Player ${i+1}`,gender:i<14?'F':'M',availFrom:0,availTo:2,level:3}));
+    const schedule = Array.from({length:3},(_,i)=>({slot:i+1,courts:Array.from({length:5},(_,c)=>({court:c+1,teamA:players.slice(c*4,c*4+2),teamB:players.slice(c*4+2,c*4+4)})),sitting:players.slice(20),repeatedCourts:[],playerState:[]}));
+    const values = {players,result:{planId:'history-fixture',schedule,gamesPlayed:players.map(()=>0)},numCourts:5,totalMinutes:45,gameMinutes:15,staggerMode:'custom','completed-games':[0,1,2].map(c=>({slot:1,court:c})), 'active-tab':'setup'};
+    for(const [key,value] of Object.entries(values)) localStorage.setItem(`${prefix}bp-${key}`,JSON.stringify(value));
+    if(prefix) localStorage.setItem(`${prefix}bp-storage-seeded`,'1');
+  },storagePrefix);
+  await page.reload({waitUntil:'domcontentloaded'});
+  const nav = name => page.getByRole('button',{name,exact:true});
+  const read = () => page.evaluate(prefix=>Object.fromEntries(['result','played-games','history-epoch'].map(key=>[key,JSON.parse(localStorage.getItem(`${prefix}bp-${key}`))])),storagePrefix);
+  await expect(nav('Past games (3)')).toBeVisible();
+  await nav('Re-roll').click();
+  await expect(page.getByRole('button',{name:'Keep history & reroll',exact:true})).toBeVisible();
+  await nav('Cancel').click();
+  assert.equal((await read()).result.planId,'history-fixture');
+  await nav('Re-roll').click(); await nav('Keep history & reroll').click();
+  await expect.poll(async()=> (await read()).result.planId).not.toBe('history-fixture');
+  let saved = await read();
+  assert.equal(saved['played-games'].length,3);
+  assert.equal(saved.result.schedule.reduce((n,slot)=>n+slot.courts.length,0),12);
+  const keptId=saved.result.planId;
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expect(nav('Past games (3)')).toBeVisible();
+  assert.equal((await read()).result.planId,keptId);
+  await nav('Setup').click(); await nav('Re-roll').click();
+  await page.getByRole('checkbox',{name:'Reset session history'}).check();
+  await nav('Reset history & reroll').click();
+  await expect.poll(async()=> (await read())['history-epoch']).toBe(1);
+  saved=await read(); assert.equal(saved['played-games'].length,0);
+  assert.equal(saved.result.schedule.reduce((n,slot)=>n+slot.courts.length,0),15);
+  await context.close();
+}
+
 async function verifySessionWorkflows(newContext) {
   for (const width of [1280, 390]) for (const courts of [2, 3, 4, 5]) {
     stage = `${width}px/${courts}-court session workflow`;
@@ -421,6 +461,7 @@ try {
   // Session-mode workflows are exercised below at desktop and mobile widths.
   await verifySessionWorkflows(newContext);
   await verifyQuarantine(newContext);
+  await verifyHistoryRecovery(newContext);
   assert.equal(timedOut, false, 'E2E deadline exceeded');
   console.log(`E2E smoke passed: ${completed} games, max ${maxLive} live courts; 8 desktop/mobile workflows. Screenshots: ${artifacts}`);
 } catch (error) {

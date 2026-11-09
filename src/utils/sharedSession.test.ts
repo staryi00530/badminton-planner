@@ -16,6 +16,25 @@ function session(): SharePayload {
 }
 
 describe('shared session transactions', () => {
+  it('captures a Finish once in independent history and preserves it across a new plan', () => {
+    const base = { ...session(), planId: 'first', history: [], historyEpoch: 0 };
+    const action = { type: 'finish' as const, id: 'finish-1', gameId: sharedGameId(base, 1, 0) };
+    const done = applySharedAction(base, action)!;
+    expect(done.history).toHaveLength(1);
+    expect(applySharedAction(done, action)?.history).toHaveLength(1);
+    const replacement = { ...base, planId: 'second', history: done.history, runtime: { live: [{ slot: 1, court: 0 }], completed: [] } };
+    const rerolled = commitSharedSnapshot(done, done.revision!, replacement)!;
+    expect(rerolled.history).toHaveLength(1);
+    expect(applySharedAction(rerolled, { ...action, id: 'stale-finish' })).toBeNull();
+  });
+  it('allows deliberate history reset only with a new plan and prevents stale reset from dropping a Finish', () => {
+    const base = { ...session(), planId: 'first', history: [], historyEpoch: 0 };
+    const done = applySharedAction(base, { type: 'finish', id: 'a', gameId: sharedGameId(base, 1, 0) })!;
+    expect(commitSharedSnapshot(done, done.revision!, { ...done, history: [], historyEpoch: 1 })).toBeNull();
+    const reset = { ...base, planId: 'second', history: [], historyEpoch: 1 };
+    expect(commitSharedSnapshot(done, 0, reset)).toBeNull();
+    expect(commitSharedSnapshot(done, done.revision!, reset)?.history).toEqual([]);
+  });
   it('rejects a stale organizer snapshot instead of overwriting another finish', () => {
     const base = session();
     const latest = applySharedAction(base, { type: 'finish', id: 'a', gameId: sharedGameId(base, 1, 0) })!;

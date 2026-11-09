@@ -2,10 +2,52 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { usePlannerState } from './usePlannerState.js';
+import { generateSchedule } from '../algorithm/scheduler';
+import type { Player } from '../types';
 
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
+});
+
+describe('independent played history', () => {
+  function seedCompleted() {
+    const players: Player[] = Array.from({ length: 4 }, (_, i) => ({ id: `id-${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 11 }));
+    const plan = { ...generateSchedule(players, 1, [1])!, planId: 'old-plan' };
+    localStorage.setItem('bp-players', JSON.stringify(players));
+    localStorage.setItem('bp-result', JSON.stringify(plan));
+    localStorage.setItem('bp-completed-games', JSON.stringify([{ slot: 1, court: 0 }]));
+    localStorage.setItem('bp-scores', JSON.stringify({ s1c0: { a: '21', b: '18', applied: true, teamA: plan.schedule[0]!.courts[0]!.teamA.map(p => p.name), teamB: plan.schedule[0]!.courts[0]!.teamB.map(p => p.name) } }));
+    return { players, plan };
+  }
+  it('migrates completed games once and retains their lineup/score after clear and refresh', () => {
+    seedCompleted();
+    const first = renderHook(() => usePlannerState());
+    expect(first.result.current.state.playedGames).toHaveLength(1);
+    expect(first.result.current.state.playedGames[0]?.score).toMatchObject({ a: '21', b: '18' });
+    act(() => first.result.current.patchState({ result: null, scores: {}, completedGames: [], liveGames: [] }));
+    expect(first.result.current.state.playedGames).toHaveLength(1);
+    first.unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.result).toBeNull();
+    expect(reloaded.result.current.state.playedGames).toHaveLength(1);
+    expect(reloaded.result.current.state.playedGames[0]?.planId).toBe('old-plan');
+  });
+  it('captures a new Finish and local Undo reverses only that completion', () => {
+    const { players, plan } = seedCompleted();
+    localStorage.removeItem('bp-completed-games');
+    const { result } = renderHook(() => usePlannerState());
+    act(() => result.current.patchState({ liveGames: [{ slot: 1, court: 0, players: players.map(p => p.name) }] }));
+    act(() => {
+      result.current.recordUndo();
+      result.current.patchState({ completedGames: [{ slot: 1, court: 0 }], liveGames: [] });
+    });
+    expect(result.current.state.playedGames).toHaveLength(1);
+    expect(result.current.state.playedGames[0]?.teamA.map(p => p.name)).toEqual(plan.schedule[0]!.courts[0]!.teamA.map(p => p.name));
+    act(() => result.current.restoreUndo());
+    expect(result.current.state.playedGames).toHaveLength(0);
+    expect(result.current.state.liveGames).toHaveLength(1);
+  });
 });
 
 describe('usePlannerState — defaults & loading', () => {

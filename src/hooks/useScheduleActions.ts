@@ -1,13 +1,14 @@
 import { computeSkill as computePlayerSkill } from '../utils/skill';
 import { useCallback } from 'react';
 import type { ForcedFirstSlot, GeneratorYield, Player } from '../algorithm/types';
-import { extractState, generateSchedule, generateScheduleGen } from '../algorithm/scheduler';
+import { generateSchedule, generateScheduleGen } from '../algorithm/scheduler';
 import type { ScheduleOptions } from '../algorithm/scheduler';
 import type { PlannerResult, PlannerState, RuntimePatch, ScoresMap, WinLossMap } from '../types';
 import { initialLiveGamesForSchedule, liveQueueDebug } from '../utils/liveQueue';
 import { getFutureChangeBoundary, reconcileFutureSessionChange } from '../utils/liveQueueTransition';
-import { extractRuntimeScheduleState } from '../utils/runtimeScheduleState';
 import type { GameRef } from '../utils/liveQueue';
+import { historyScheduleState, makePlayedGame, mergePlayedGames, migratePlayedGames, remainingCourtsPerSlot, type PlayedGame } from '../utils/playedHistory';
+import type { SlotResult } from '../algorithm/types';
 
 interface RegeneratedPlan {
   newResult: PlannerResult;
@@ -32,6 +33,8 @@ interface ScheduleActionOptions {
   scheduleDirty?: boolean;
   loadedPlanId?: number | null;
   activeTab?: PlannerState['activeTab'];
+  playedGames?: PlayedGame[];
+  historyEpoch?: number;
   computeSkill: (name: string, level?: 1 | 2 | 3 | 4 | 5) => number;
   getPlayersWithAvailability: () => Player[];
   applyAvailability: (players: Player[]) => Player[];
@@ -39,6 +42,17 @@ interface ScheduleActionOptions {
   getScheduleOptions: (players: Player[]) => ScheduleOptions;
   patchState: (patch: RuntimePatch) => void;
   keepGamesBeforeSlot: (games: PlannerState['liveGames'], slot: number) => PlannerState['liveGames'];
+}
+
+/** Preserve the prefix for display, but seed decisions only from completed/live reality. */
+function regenerationState(base: PlannerResult, players: Player[], completed: GameRef[], actual: GameRef[],
+  scores: ScoresMap, history: PlayedGame[], targetSlot: number) {
+  const retained = migratePlayedGames(base, players, completed.filter(ref => ref.slot < targetSlot), scores, history);
+  const provisional = actual.filter(ref => ref.slot < targetSlot).flatMap((ref, index) => {
+    const record = makePlayedGame(base, players, ref, scores, actual, index);
+    return record ? [record] : [];
+  });
+  return historyScheduleState(mergePlayedGames(retained, provisional), players, base.schedule.slice(0, targetSlot - 1));
 }
 
 function logRosterSnapshot(players: Player[], phase: 'initial-generation' | 'regeneration', fromSlot: number) {
@@ -73,6 +87,8 @@ export function useScheduleActions({
   scheduleDirty = false,
   loadedPlanId = null,
   activeTab = 'setup',
+  playedGames = [],
+  historyEpoch = 0,
   computeSkill,
   getPlayersWithAvailability,
   applyAvailability,
@@ -81,9 +97,17 @@ export function useScheduleActions({
   patchState,
   keepGamesBeforeSlot,
 }: ScheduleActionOptions) {
-  const runGenerate = useCallback(() => {
+  const runGenerate = useCallback((resetHistory = false) => {
     if (players.length < 4 || isGenerating) return;
-    patchState({ isGenerating: true, result: null, scheduleDirty: false, scores: {}, copied: false, genSlot: 0, isConfirmed: false, loadedPlanId: null, liveGames: [], completedGames: [], suspendedPlayerNames: [], fromSlot: 1, fromSlotCourts: 0, courtOverrides: {} });
+    const retained = resetHistory ? [] : migratePlayedGames(result, players, completedGames, scores, playedGames);
+    const nominalCourts = getCourtsPerSlot({});
+    const courtsPerSlot = remainingCourtsPerSlot(retained, nominalCourts);
+    const firstIndex = courtsPerSlot.findIndex(count => count > 0);
+    if (firstIndex < 0) { patchState({ sessionChangeNotice: 'No remaining games in this session. Extend the session or choose Reset history to start a fresh block.' }); return; }
+    recordUndo();
+    // Keep the prior plan/history intact until the replacement is fully generated.
+    patchState({ isGenerating: true, genSlot: 0, sessionChangeNotice: null });
+    const planId = crypto.randomUUID();
     let lastValue: GeneratorYield | null = null;
     let gen: ReturnType<typeof generateScheduleGen>;
     const fail = (error: unknown) => {
@@ -106,25 +130,35 @@ export function useScheduleActions({
           patchState({ genSlot: value.schedule.length });
         }
         if (done) {
-          const initialLiveGames = lastValue
-            ? initialLiveGamesForSchedule(lastValue, getCourtsPerSlot({})[0] ?? 0)
+          const newResult = lastValue ? { ...lastValue, planId } : null;
+          const initialLiveGames = newResult
+            ? initialLiveGamesForSchedule(newResult, nominalCourts[firstIndex] ?? 0)
             : [];
           liveQueueDebug('generate:complete', { completedSlots: lastValue?.schedule.length ?? 0, totalSlots });
-          patchState({ result: lastValue, liveGames: initialLiveGames, activeTab: lastValue ? 'live' : 'setup', scheduleDirty: false, isGenerating: false });
+          patchState({ result: newResult, playedGames: retained, historyEpoch: resetHistory ? historyEpoch + 1 : historyEpoch,
+            liveGames: initialLiveGames, completedGames: [], scores: {}, courtOverrides: {}, suspendedPlayerNames: [],
+            fromSlot: firstIndex + 1, fromSlotCourts: 0, activeTab: newResult ? 'live' : 'setup', scheduleDirty: false, isGenerating: false,
+            copied: false, isConfirmed: false, loadedPlanId: null,
+          });
         }
         else requestAnimationFrame(step);
       } catch (error) { fail(error); }
     }
     try {
       const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-      const courtsPerSlot = getCourtsPerSlot({});
-      const options = getScheduleOptions(playersWithSkill);
+      const options = { ...getScheduleOptions(playersWithSkill), consumedSlots: courtsPerSlot.flatMap((count, i) => count === 0 ? [i + 1] : []) };
+      const snapshot = historyScheduleState(retained, playersWithSkill);
+      const prefix: SlotResult[] = Array.from({ length: firstIndex }, (_, index) => ({ slot: index + 1, courts: [], sitting: [], repeatedCourts: [],
+        playerState: playersWithSkill.map((p, i) => ({ name: p.name, gender: p.gender, total: snapshot.gamesPlayed[i] ?? 0,
+          conPlayed: snapshot.consecutivePlayed[i] ?? 0, conRested: snapshot.consecutiveRested[i] ?? 0, playing: false, available: false })),
+      }));
+      snapshot.keptSlots = prefix;
       logRosterSnapshot(playersWithSkill, 'initial-generation', 1);
       liveQueueDebug('generate:start', { totalSlots, courtsPerSlot, playerCount: playersWithSkill.length, options });
-      gen = generateScheduleGen(playersWithSkill, totalSlots, courtsPerSlot, 0, null, null, options);
+      gen = generateScheduleGen(playersWithSkill, totalSlots, courtsPerSlot, firstIndex, snapshot, null, options);
       requestAnimationFrame(step);
     } catch (error) { fail(error); }
-  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players.length, totalSlots, result, scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames, fromSlot, fromSlotCourts, isConfirmed, scheduleDirty, loadedPlanId, activeTab]);
+  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players, totalSlots, result, scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames, fromSlot, fromSlotCourts, isConfirmed, scheduleDirty, loadedPlanId, activeTab, playedGames, historyEpoch, recordUndo]);
 
   const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
     const fail = (reason: string) => { liveQueueDebug('regenerate:blocked', { reason, targetFromSlot, targetCourts, totalSlots }); patchState({ sessionChangeNotice: reason }); };
@@ -139,9 +173,9 @@ export function useScheduleActions({
       courtOverrides: nextOverrides, liveGames, completedGames, scores,
       regenerate: () => {
         const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-        const snapshot = extractRuntimeScheduleState(result.schedule.slice(0, boundarySlot - 1), playersWithSkill, [...completedGames, ...liveGames]);
+        const snapshot = regenerationState(result, playersWithSkill, completedGames, [...completedGames, ...liveGames], scores, playedGames, boundarySlot);
         const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, boundarySlot - 1, snapshot, null, getScheduleOptions(playersWithSkill));
-        return newResult ? { newResult, nextScores: {} } : null;
+        return newResult ? { newResult: { ...newResult, planId: result.planId }, nextScores: {} } : null;
       },
     });
     if (patch) {
@@ -149,7 +183,7 @@ export function useScheduleActions({
       patchState({ ...patch, sessionChangeNotice: `Upcoming games regenerated from slot ${boundarySlot}. Current and completed games are unchanged.` });
       liveQueueDebug('regenerate:applied', { boundarySlot, totalSlots });
     } else fail('Unable to regenerate upcoming games with the current roster and availability. Review attendance and quarantine, then retry.');
-  }, [completedGames, computeSkill, courtOverrides, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, patchState, players.length, result, scores, totalSlots, recordUndo]);
+  }, [completedGames, computeSkill, courtOverrides, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, patchState, players.length, result, scores, totalSlots, recordUndo, playedGames]);
 
   const runRegenerateRemaining = useCallback(() => runRegenerateFromSlotWithCourts(fromSlot, fromSlotCourts), [fromSlot, fromSlotCourts, runRegenerateFromSlotWithCourts]);
 
@@ -175,8 +209,7 @@ export function useScheduleActions({
     const skillFor = (name: string, level?: Player['level']) => computePlayerSkill(basePlayers.find(p => p.name === name)?.statsKey ?? name, sourceWinLoss, level);
     const playersWithSkill = applyAvailability(basePlayers).map(p => ({ ...p, skill: skillFor(p.name, p.level), ...(blockedForFirstSlot.has(p.name) && targetSlotIdx >= p.availFrom && targetSlotIdx <= p.availTo ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}) }));
     logRosterSnapshot(playersWithSkill, 'regeneration', targetFromSlot);
-    const keptSlots = baseResult.schedule.slice(0, targetFromSlot - 1);
-    const stateSnapshot = extractRuntimeScheduleState(keptSlots, playersWithSkill, actualGames);
+    const stateSnapshot = regenerationState(baseResult, playersWithSkill, completedGames, actualGames, overrideScores ?? scores, playedGames, targetFromSlot);
     const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(overrideCourtOverrides), targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));
     if (!newResult) return null;
     const nextScores: ScoresMap = {};
@@ -185,8 +218,8 @@ export function useScheduleActions({
       const match = key.match(/^s(\d+)c/);
       if (match && parseInt(match[1]!, 10) < targetFromSlot && sourceScores[key]) nextScores[key] = sourceScores[key];
     }
-    return { newResult, nextScores };
-  }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss, liveGames, completedGames]);
+    return { newResult: { ...newResult, planId: baseResult.planId }, nextScores };
+  }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss, liveGames, completedGames, playedGames]);
 
   return { runGenerate, runRegenerateFromSlotWithCourts, runRegenerateRemaining, regenerateRemaining, runClearSchedule, clearSchedule, confirmSchedule, unconfirmSchedule, doRegen };
 }

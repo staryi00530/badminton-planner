@@ -5,6 +5,32 @@ import { useScheduleActions } from './useScheduleActions';
 import type { Player } from '../types';
 import * as scheduler from '../algorithm/scheduler';
 import { exportLiveQueueLogs } from '../utils/liveQueue';
+import { migratePlayedGames } from '../utils/playedHistory';
+
+it.each([false, true])('rerolls only unplayed court budget unless history reset is selected (%s)', reset => {
+  const players: Player[] = Array.from({ length: 32 }, (_, i) => ({ id: `id-${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 2 }));
+  const prior = { ...scheduler.generateSchedule(players, 3, [5, 5, 5])!, planId: 'old' };
+  const completed = [0, 1, 2].map(court => ({ slot: 1, court }));
+  const playedGames = migratePlayedGames(prior, players, completed, {});
+  const frames: FrameRequestCallback[] = [];
+  const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length; });
+  const patchState = vi.fn();
+  try {
+    const { result } = renderHook(() => useScheduleActions({ players, result: prior, playedGames, historyEpoch: 0, totalSlots: 3, isGenerating: false, isConfirmed: false,
+      scores: {}, winLoss: {}, liveGames: [{ slot: 1, court: 3 }, { slot: 1, court: 4 }], completedGames: completed, fromSlot: 1, fromSlotCourts: 0,
+      recordUndo: vi.fn(), computeSkill: () => 0.5, getPlayersWithAvailability: () => players, applyAvailability: p => p,
+      getCourtsPerSlot: () => [5, 5, 5], getScheduleOptions: () => ({}), patchState, keepGamesBeforeSlot: games => games,
+    }));
+    act(() => { result.current.runGenerate(reset); while (frames.length) frames.shift()!(0); });
+    const applied = patchState.mock.calls.at(-1)![0];
+    expect(applied.result.schedule.reduce((n: number, slot: { courts: unknown[] }) => n + slot.courts.length, 0)).toBe(reset ? 15 : 12);
+    expect(applied.result.planId).not.toBe('old');
+    expect(applied.playedGames).toHaveLength(reset ? 0 : 3);
+    expect(applied.historyEpoch).toBe(reset ? 1 : 0);
+    expect(applied.liveGames).toHaveLength(5);
+    expect(applied.result.gamesPlayed.reduce((a: number, b: number) => a + b, 0)).toBe(60);
+  } finally { raf.mockRestore(); }
+});
 
 it('explains why regenerating beyond the last shared slot cannot change a game', () => {
   const players: Player[] = Array.from({ length: 4 }, (_, i) => ({ name: `P${i}`, gender: 'M', availFrom: 0, availTo: 0 }));
@@ -41,4 +67,43 @@ it('releases generation and restores the previous plan when a later slot throws'
     expect(logs).toContain('generate:failed');
     expect(logs).not.toContain('private failure details');
   } finally { generator.mockRestore(); raf.mockRestore(); }
+});
+
+it.each(['doRegen', 'upcoming'] as const)('seeds %s from retained completions and live games exactly once', action => {
+  const players: Player[] = Array.from({ length: 16 }, (_, i) => ({
+    id: `id-${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 2,
+  }));
+  const prior = { ...scheduler.generateSchedule(players, 3, [3, 3, 3])!, planId: 'current' };
+  const older = { ...prior, planId: 'older' };
+  const completed = [{ slot: 1, court: 0 }];
+  const live = [{ slot: 1, court: 1 }];
+  const playedGames = migratePlayedGames(prior, players, completed, {},
+    migratePlayedGames(older, players, completed, {}));
+  const generate = vi.spyOn(scheduler, 'generateSchedule');
+  const patchState = vi.fn();
+  try {
+    const { result } = renderHook(() => useScheduleActions({
+      players, result: prior, playedGames, totalSlots: 3, isGenerating: false, isConfirmed: false,
+      scores: {}, winLoss: {}, liveGames: live, completedGames: completed, fromSlot: 2, fromSlotCourts: 0,
+      recordUndo: vi.fn(), computeSkill: () => 0.5, getPlayersWithAvailability: () => players,
+      applyAvailability: p => p, getCourtsPerSlot: () => [3, 3, 3], getScheduleOptions: () => ({}),
+      patchState, keepGamesBeforeSlot: games => games,
+    }));
+    let regenerated;
+    act(() => {
+      if (action === 'doRegen') regenerated = result.current.doRegen(2, null);
+      else result.current.runRegenerateFromSlotWithCourts(2, 0);
+    });
+    const snapshot = generate.mock.calls[0]![4]!;
+    expect(snapshot.gamesPlayed.reduce((a, b) => a + b, 0)).toBe(12);
+    expect(snapshot.partnerCount.flat().reduce((a, b) => a + b, 0)).toBe(12);
+    expect(snapshot.keptSlots).toEqual(prior.schedule.slice(0, 1));
+    const newResult = action === 'doRegen'
+      ? (regenerated as unknown as { newResult: typeof prior }).newResult
+      : patchState.mock.calls.at(-1)![0].result;
+    expect(newResult.planId).toBe('current');
+    expect(newResult.schedule[0]).toEqual(prior.schedule[0]);
+    expect(playedGames).toHaveLength(2);
+    expect(patchState.mock.calls.every(([patch]) => patch.playedGames === undefined)).toBe(true);
+  } finally { generate.mockRestore(); }
 });

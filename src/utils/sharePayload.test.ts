@@ -1,3 +1,4 @@
+import type { SharePayload } from '../types';
 import { describe, it, expect } from 'vitest';
 import { buildSharePayload, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './sharePayload.js';
 import { generateSchedule } from '../algorithm/scheduler.js';
@@ -56,6 +57,20 @@ describe('buildSharePayload', () => {
 });
 
 describe('buildSharePayload -> reconstructScheduleFromSharePayload roundtrip', () => {
+  it('keeps independent played history when the current plan is empty and strips private metadata', () => {
+    const history = [{ id: 'played-1', planId: 'old', slot: 1, court: 0, completedAt: 123, waitingIds: ['e'],
+      teamA: [{ id: 'a', name: 'A', gender: 'M' as const, level: 5 }, { id: 'b', name: 'B', gender: 'M' as const }],
+      teamB: [{ id: 'c', name: 'C', gender: 'F' as const }, { id: 'd', name: 'D', gender: 'F' as const }], score: { a: '21', b: '18', applied: true },
+    }];
+    const payload = buildSharePayload({ result: { schedule: [], planId: 'new' }, playersWithAvailability: [], gameMinutes: 15, numCourts: 5, scores: {}, isConfirmed: false,
+      playedGames: history as import('./playedHistory').PlayedGame[], historyEpoch: 2 })!;
+    const decoded = reconstructScheduleFromSharePayload(payload, { currentGameMinutes: 15, currentNumCourts: 1 });
+    expect(decoded.playedGames).toHaveLength(1);
+    expect(decoded.playedGames[0]?.score).toMatchObject({ a: '21', b: '18' });
+    expect(decoded.historyEpoch).toBe(2);
+    expect(decoded.result.planId).toBe('new');
+    expect(JSON.stringify(payload)).not.toContain('level');
+  });
   it('keeps protected game participants after replacing the roster without restoring them to the roster', () => {
     const old = makePlayers(4);
     const result = generateSchedule(old, 1, [1], 0, null, null, {})!;
@@ -208,4 +223,10 @@ it.each([1, 3])('rejects a malformed shared team with %i players', size => {
   const p: [string, string][] = Array.from({ length: 5 }, (_, i) => [`P${i}`, 'M']);
   const data = { p, slots: [{ s: 1, c: [[Array.from({ length: size }, (_, i) => i), [3, 4]]], sit: [] }] };
   expect(() => reconstructScheduleFromSharePayload(data, { currentGameMinutes: 15, currentNumCourts: 1 })).toThrow('Shared teams must contain exactly two players');
+});
+
+it('accepts empty waiting lists omitted by Firebase in played history', () => {
+  const p = (id: string) => ({ id, name: id, gender: 'M' as const });
+  const decoded = reconstructScheduleFromSharePayload({ p: [], slots: [], history: [{ id: 'done', planId: 'old', slot: 1, court: 0, completedAt: 1, teamA: [p('a'),p('b')], teamB: [p('c'),p('d')] }] } as unknown as SharePayload, { currentGameMinutes: 15, currentNumCourts: 1 });
+  expect(decoded.playedGames[0]?.waitingIds).toEqual([]);
 });
