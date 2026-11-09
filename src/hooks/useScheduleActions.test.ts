@@ -107,3 +107,70 @@ it.each(['doRegen', 'upcoming'] as const)('seeds %s from retained completions an
     expect(patchState.mock.calls.every(([patch]) => patch.playedGames === undefined)).toBe(true);
   } finally { generate.mockRestore(); }
 });
+
+it.each(['doRegen', 'upcoming'] as const)('keeps prior-plan later-slot court consumption during %s', action => {
+  const players: Player[] = Array.from({ length: 16 }, (_, i) => ({
+    id: `id-${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 2,
+  }));
+  const older = { ...scheduler.generateSchedule(players, 3, [2, 2, 2])!, planId: 'older' };
+  const playedGames = migratePlayedGames(older, players,
+    [{ slot: 2, court: 0 }, { slot: 3, court: 0 }, { slot: 3, court: 1 }], {});
+  const prior = { ...scheduler.generateSchedule(players, 3, [2, 1, 0])!, planId: 'current' };
+  const completed = [{ slot: 1, court: 0 }];
+  const history = migratePlayedGames(prior, players, completed, {}, playedGames);
+  const patchState = vi.fn();
+  const generate = vi.spyOn(scheduler, 'generateSchedule');
+  try {
+    const { result } = renderHook(() => useScheduleActions({
+      players, result: prior, playedGames: history, totalSlots: 3, isGenerating: false, isConfirmed: false,
+      scores: {}, winLoss: {}, liveGames: [], completedGames: completed, fromSlot: 2, fromSlotCourts: 0,
+      recordUndo: vi.fn(), computeSkill: () => 0.5, getPlayersWithAvailability: () => players,
+      applyAvailability: p => p, getCourtsPerSlot: () => [2, 2, 2], getScheduleOptions: () => ({}),
+      patchState, keepGamesBeforeSlot: games => games,
+    }));
+    let regenerated;
+    act(() => {
+      if (action === 'doRegen') regenerated = result.current.doRegen(2, null);
+      else result.current.runRegenerateFromSlotWithCourts(2, 0);
+    });
+    if (action === 'upcoming') expect(patchState.mock.calls.at(-1)![0].fromSlotCourts).toBe(2);
+    expect(generate.mock.calls[0]![2]).toEqual([2, 1, 0]);
+    expect(generate.mock.calls[0]![6]?.consumedSlots).toEqual([3]);
+    const newResult = action === 'doRegen'
+      ? (regenerated as unknown as { newResult: typeof prior }).newResult
+      : patchState.mock.calls.at(-1)![0].result;
+    expect(newResult.schedule.map((slot: { courts: unknown[] }) => slot.courts.length)).toEqual([2, 1, 0]);
+    expect(newResult.planId).toBe('current');
+  } finally { generate.mockRestore(); }
+});
+
+it.each([false, true])('skips a consumed regeneration boundary or reports session completion (%s)', exhausted => {
+  const players: Player[] = Array.from({ length: 8 }, (_, i) => ({
+    id: `id-${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 2,
+  }));
+  const older = { ...scheduler.generateSchedule(players, 3, [1, 1, 1])!, planId: 'older' };
+  const playedGames = migratePlayedGames(older, players,
+    [{ slot: 2, court: 0 }, ...(exhausted ? [{ slot: 3, court: 0 }] : [])], {});
+  const prior = { ...scheduler.generateSchedule(players, 3, [1, 0, exhausted ? 0 : 1])!, planId: 'current' };
+  const patchState = vi.fn();
+  const recordUndo = vi.fn();
+  const { result } = renderHook(() => useScheduleActions({
+    players, result: prior, playedGames, totalSlots: 3, isGenerating: false, isConfirmed: false,
+    scores: {}, winLoss: {}, liveGames: [], completedGames: [{ slot: 1, court: 0 }], fromSlot: 2, fromSlotCourts: 0,
+    recordUndo, computeSkill: () => 0.5, getPlayersWithAvailability: () => players,
+    applyAvailability: p => p, getCourtsPerSlot: () => [1, 1, 1], getScheduleOptions: () => ({}),
+    patchState, keepGamesBeforeSlot: games => games,
+  }));
+  act(() => result.current.runRegenerateFromSlotWithCourts(2, 0));
+  const patch = patchState.mock.calls.at(-1)![0];
+  if (exhausted) {
+    expect(patch.result).toBeUndefined();
+    expect(patch.sessionChangeNotice).toMatch(/no remaining games/i);
+    expect(recordUndo).not.toHaveBeenCalled();
+  } else {
+    expect(patch.fromSlot).toBe(3);
+    expect(patch.result.schedule.map((slot: { courts: unknown[] }) => slot.courts.length)).toEqual([1, 0, 1]);
+    expect(patch.sessionChangeNotice).toMatch(/from slot 3/i);
+    expect(recordUndo).toHaveBeenCalledOnce();
+  }
+});

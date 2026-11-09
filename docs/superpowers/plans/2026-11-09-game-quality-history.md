@@ -72,3 +72,9 @@ User approved both proposed defaults after design review. Preserve native execut
 - Beta production build passes; production dependency audit reports 0 vulnerabilities.
 - Fresh whole-branch review completed; event-order waiting and physical court numbering findings fixed with regressions. Standalone history reset deferred; explicit reset in reroll meets the requested scope.
 - Five-court 100-seed simulation: matchup mean 8.183833, format mismatches 0, exact repeated groups 0, 20 unique players per slot, 3 ready groups per transition, 7–8 games/player.
+
+### Release follow-up verification
+- Apply-and-regenerate retains prior-plan history and plan identity (root integration regression).
+- Upcoming regeneration subtracts consumed prior-plan budgets, skips zero-budget boundaries, and keeps physical court capacity separate from remaining games (10 hook tests pass).
+- Full follow-up suite: 543 unit tests and complete E2E pass; subsequent boundary regressions and strict typecheck pass.
+- E2E fixture clears storage after document unload to prevent old effects repopulating state in CI.

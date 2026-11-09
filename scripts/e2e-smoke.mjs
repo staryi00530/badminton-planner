@@ -336,7 +336,8 @@ try {
   const next = () => page.getByRole('heading', { name: 'Next game' }).locator('..');
 
   async function setup(courtCount, playerCount) {
-    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    // Clear after the old document unloads so its pending effects cannot repopulate the fixture.
+    await page.addInitScript(() => { if (window === window.top) { localStorage.clear(); sessionStorage.clear(); } });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: 'Setup', exact: true })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('button', { name: 'Live session', exact: true })).toBeDisabled();

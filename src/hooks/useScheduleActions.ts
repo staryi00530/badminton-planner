@@ -44,8 +44,13 @@ interface ScheduleActionOptions {
   keepGamesBeforeSlot: (games: PlannerState['liveGames'], slot: number) => PlannerState['liveGames'];
 }
 
+/** Current-plan completions occupy protected prefix courts; earlier plans consume nominal budget. */
+export function remainingPlanCourts(base: PlannerResult, history: PlayedGame[], nominal: number[]): number[] {
+  return remainingCourtsPerSlot(history.filter(game => game.planId !== (base.planId ?? 'legacy')), nominal);
+}
+
 /** Preserve the prefix for display, but seed decisions only from completed/live reality. */
-function regenerationState(base: PlannerResult, players: Player[], completed: GameRef[], actual: GameRef[],
+export function regenerationState(base: PlannerResult, players: Player[], completed: GameRef[], actual: GameRef[],
   scores: ScoresMap, history: PlayedGame[], targetSlot: number) {
   const retained = migratePlayedGames(base, players, completed.filter(ref => ref.slot < targetSlot), scores, history);
   const provisional = actual.filter(ref => ref.slot < targetSlot).flatMap((ref, index) => {
@@ -164,17 +169,24 @@ export function useScheduleActions({
     const fail = (reason: string) => { liveQueueDebug('regenerate:blocked', { reason, targetFromSlot, targetCourts, totalSlots }); patchState({ sessionChangeNotice: reason }); };
     if (players.length < 4 || !result) { fail('Add at least four eligible players and generate a schedule before regenerating games.'); return; }
     if (!Number.isInteger(targetFromSlot) || !Number.isInteger(targetCourts) || targetFromSlot < 1 || targetCourts < 0 || targetCourts > 5) { fail('Choose a valid starting slot and between one and five courts.'); return; }
-    const boundarySlot = Math.max(targetFromSlot, getFutureChangeBoundary(liveGames, completedGames));
+    let boundarySlot = Math.max(targetFromSlot, getFutureChangeBoundary(liveGames, completedGames));
     if (boundarySlot > totalSlots) { fail('No upcoming slot can be regenerated. Extend the session duration to add more games.'); return; }
     const nextOverrides = targetCourts > 0 ? { ...courtOverrides, [boundarySlot]: targetCourts } : courtOverrides;
-    const courtsArr = getCourtsPerSlot(nextOverrides);
+    const nominalCourts = getCourtsPerSlot(nextOverrides);
+    const courtsArr = remainingPlanCourts(result, playedGames, nominalCourts);
+    const playableIndex = courtsArr.findIndex((count, index) => index >= boundarySlot - 1 && count > 0);
+    if (playableIndex < 0) {
+      fail('No remaining games in this session. Extend the session or choose Reset history to start a fresh block.');
+      return;
+    }
+    boundarySlot = playableIndex + 1;
     const patch = reconcileFutureSessionChange({
-      result, totalSlots, boundarySlot, targetCapacity: courtsArr[boundarySlot - 1] ?? 1,
+      result, totalSlots, boundarySlot, targetCapacity: nominalCourts[boundarySlot - 1] ?? 1,
       courtOverrides: nextOverrides, liveGames, completedGames, scores,
       regenerate: () => {
         const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
         const snapshot = regenerationState(result, playersWithSkill, completedGames, [...completedGames, ...liveGames], scores, playedGames, boundarySlot);
-        const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, boundarySlot - 1, snapshot, null, getScheduleOptions(playersWithSkill));
+        const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, boundarySlot - 1, snapshot, null, { ...getScheduleOptions(playersWithSkill), consumedSlots: courtsArr.flatMap((count, index) => count === 0 ? [index + 1] : []) });
         return newResult ? { newResult: { ...newResult, planId: result.planId }, nextScores: {} } : null;
       },
     });
@@ -210,7 +222,8 @@ export function useScheduleActions({
     const playersWithSkill = applyAvailability(basePlayers).map(p => ({ ...p, skill: skillFor(p.name, p.level), ...(blockedForFirstSlot.has(p.name) && targetSlotIdx >= p.availFrom && targetSlotIdx <= p.availTo ? { availFrom: Math.max(p.availFrom, targetSlotIdx + 1) } : {}) }));
     logRosterSnapshot(playersWithSkill, 'regeneration', targetFromSlot);
     const stateSnapshot = regenerationState(baseResult, playersWithSkill, completedGames, actualGames, overrideScores ?? scores, playedGames, targetFromSlot);
-    const newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(overrideCourtOverrides), targetFromSlot - 1, stateSnapshot, forcedFirstSlot, getScheduleOptions(playersWithSkill));
+    const courtsArr = remainingPlanCourts(baseResult, playedGames, getCourtsPerSlot(overrideCourtOverrides));
+    const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, targetFromSlot - 1, stateSnapshot, forcedFirstSlot, { ...getScheduleOptions(playersWithSkill), consumedSlots: courtsArr.flatMap((count, index) => count === 0 ? [index + 1] : []) });
     if (!newResult) return null;
     const nextScores: ScoresMap = {};
     const sourceScores = overrideScores ?? scores;

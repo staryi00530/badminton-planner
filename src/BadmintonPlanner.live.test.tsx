@@ -1284,7 +1284,9 @@ describe('BadmintonPlanner live game flow', () => {
       ['P5', 'P6', 'P7', 'P8'],
       ['P9', 'P10', 'P11', 'P12'],
     ], ['P13']));
-    const result = { schedule, gamesPlayed: players.map(() => 2) };
+    const result = { planId: 'retained-edit-plan', schedule, gamesPlayed: players.map(() => 2) };
+    const snapshot = (name: string) => ({ id: 'legacy:' + name.toLowerCase(), name, gender: 'M' });
+    localStorage.setItem('bp-played-games', JSON.stringify([{ id: 'prior-game', planId: 'prior-plan', slot: 1, court: 0, completedAt: 1, teamA: [snapshot('P1'),snapshot('P2')], teamB: [snapshot('P3'),snapshot('P13')], waitingIds: [] }]));
     localStorage.setItem('bp-players', JSON.stringify(players));
     localStorage.setItem('bp-result', JSON.stringify(result));
     localStorage.setItem('bp-totalMinutes', JSON.stringify(105));
@@ -1322,8 +1324,9 @@ describe('BadmintonPlanner live game flow', () => {
     expect(rowLineup(state.keptSlots[5]!)).toEqual(rowLineup(schedule[5]!));
     // Only the three live references count as played history; abandoned plan rows do not.
     expect(state.gamesPlayed[8]).toBe(1);
-    expect(state.gamesPlayed[0]).toBe(1);
-    expect(state.gamesPlayed[12]).toBe(0);
+    expect(state.gamesPlayed[0]).toBe(2);
+    expect(state.gamesPlayed[12]).toBe(1);
+    expect(JSON.parse(localStorage.getItem('bp-result')!).planId).toBe('retained-edit-plan');
     generateSpy.mockRestore();
   });
 

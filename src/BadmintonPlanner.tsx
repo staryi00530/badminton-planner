@@ -6,7 +6,6 @@ import { sharedGameId } from './utils/sharedSession';
 import { type QualityWeights } from './utils/gameQuality';
 import { normalizePlayerIdentities } from './utils/playerIdentity';
 import { playerMetadataPatch } from './utils/playerMetadataPatch';
-import { extractRuntimeScheduleState } from './utils/runtimeScheduleState';
 import type { Player, PlayerInGame } from './algorithm/types';
 import { extractState, generateSchedule, normalizeUnstartedMixedCourts, recomputeStats } from './algorithm/scheduler';
 import { C, DEFAULT_PLAYERS, FONT } from './constants';
@@ -23,7 +22,7 @@ import { isValidBadmintonScore } from './utils/scoreValidation';
 import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot, liveQueueDebug } from './utils/liveQueue';
 import type { GameRef } from './utils/liveQueue';
 import { useLiveQueue } from './hooks/useLiveQueue';
-import { useScheduleActions } from './hooks/useScheduleActions';
+import { useScheduleActions, regenerationState, remainingPlanCourts } from './hooks/useScheduleActions';
 import { parseScheduleText as parseScheduleTextUtil, buildCopyText as buildCopyTextUtil } from './utils/scheduleText';
 import { buildSharePayload as buildSharePayloadUtil, reconstructScheduleFromSharePayload, upsertSavedPlanFromShare } from './utils/sharePayload';
 import PastGamesTab from './components/PastGamesTab';
@@ -501,9 +500,10 @@ function BadmintonPlanner() {
       return;
     }
     const slotIdx = editingSlot - 1;
+    const remainingCourts = remainingPlanCourts(result, playedGames, getCourtsPerSlot());
+    const regenerationOptions = { ...getScheduleOptions(getPlayersWithAvailability()), consumedSlots: remainingCourts.flatMap((count, i) => count === 0 ? [i + 1] : []) };
     const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
-    const keptSlots = result.schedule.slice(0, slotIdx);
-    const stateSnapshot = extractRuntimeScheduleState(keptSlots, playersWithSkill, [...completedGames, ...liveGames]);
+    const stateSnapshot = regenerationState(result, playersWithSkill, completedGames, [...completedGames, ...liveGames], scores, playedGames, editingSlot);
     const nameToIdx = new Map(playersWithSkill.map((p, i) => [p.name, i]));
     const editedSlotBefore = result.schedule[slotIdx];
     const courtsForced = editLayout.courts.map((court, ci) => {
@@ -522,7 +522,7 @@ function BadmintonPlanner() {
       liveQueueDebug('edit:blocked', { reason: 'roster-lineup-mismatch', editingSlot });
       patchState({ sessionChangeNotice: 'Some players in this game are no longer in the roster. Update the game lineup or return those players before regenerating.' }); return;
     }
-    let newResult = generateSchedule(playersWithSkill, totalSlots, getCourtsPerSlot(), slotIdx, stateSnapshot, { courts: courtsForced }, getScheduleOptions(playersWithSkill));
+    let newResult: PlannerResult | null = generateSchedule(playersWithSkill, totalSlots, remainingCourts, slotIdx, stateSnapshot, { courts: courtsForced }, regenerationOptions);
     if (!newResult) { patchState({ sessionChangeNotice: 'Unable to apply this lineup. Check attendance and court capacity, then retry.' }); return; }
     const runtimeSlots = [...new Set([...liveGames, ...completedGames]
       .map(game => game.slot)
@@ -535,16 +535,16 @@ function BadmintonPlanner() {
       const continuedResult = generateSchedule(
         playersWithSkill,
         totalSlots,
-        getCourtsPerSlot(),
+        remainingCourts,
         slotNum,
-        extractRuntimeScheduleState(stateThroughRuntimeSlot.schedule, playersWithSkill, [...completedGames, ...liveGames]),
+        regenerationState({ ...result, schedule: stateThroughRuntimeSlot.schedule }, playersWithSkill, completedGames, [...completedGames, ...liveGames], scores, playedGames, slotNum + 1),
         null,
-        getScheduleOptions(playersWithSkill),
+        regenerationOptions,
       );
       if (!continuedResult) { patchState({ sessionChangeNotice: 'Unable to regenerate around current games. Your previous schedule is unchanged.' }); return; }
       newResult = continuedResult;
     }
-    newResult = recomputeStats(newResult.schedule, playersWithSkill);
+    newResult = { ...recomputeStats(newResult.schedule, playersWithSkill), gamesPlayed: newResult.gamesPlayed, planId: result.planId };
     const nextScores: ScoresMap = {};
     for (const key in scores) {
       const match = key.match(/^s(\d+)c/);
@@ -566,7 +566,7 @@ function BadmintonPlanner() {
       },
       { targetLiveCount: liveGames.length, overrideResult: newResult },
     );
-  }, [applyLiveGamesUpdate, completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, players, result, scores, totalSlots]);
+  }, [applyLiveGamesUpdate, completedGames, computeSkill, editLayout, editingSlot, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, liveGames, players, result, scores, totalSlots, playedGames]);
 
   const applySlotEditOnly = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
