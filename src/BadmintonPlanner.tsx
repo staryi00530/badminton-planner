@@ -33,6 +33,9 @@ import PastGamesTab from './components/PastGamesTab';
 import PairingsTab from './components/PairingsTab';
 import PlayerList from './components/PlayerList';
 import LiveSessionBoard from './components/LiveSessionBoard';
+import PlayerWaitingPanel from './components/PlayerWaitingPanel';
+import { waitingPlayerKey, waitingPlayerStatuses } from './utils/waitingClock';
+import { historyGamesWaited, historyScheduleState, migratePlayedGames } from './utils/playedHistory';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
 import SessionStatusPanel from './components/SessionStatusPanel';
 import AboutTab from './components/AboutTab';
@@ -161,6 +164,7 @@ function BadmintonPlanner() {
     completedGames,
     playedGames,
     historyEpoch,
+    waitingClock,
     suspendedPlayerNames,
   } = state;
 
@@ -301,10 +305,10 @@ function BadmintonPlanner() {
   const buildSharePayload = useCallback(
     () => buildSharePayloadUtil({ result: result ?? (isSharedSession ? { schedule: [] } : null), playersWithAvailability: getPlayersWithAvailability(), gameMinutes, numCourts, scores, isConfirmed,
       settings: { totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides },
-      runtime: { live: liveGames, completed: completedGames, suspended: suspendedPlayerNames },
+      runtime: { live: liveGames, completed: completedGames, suspended: suspendedPlayerNames, waitingClock },
       playedGames, historyEpoch, includeScoreDrafts: true,
     }),
-    [gameMinutes, getPlayersWithAvailability, isConfirmed, isSharedSession, numCourts, result, scores, totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides, liveGames, completedGames, suspendedPlayerNames, playedGames, historyEpoch]
+    [gameMinutes, getPlayersWithAvailability, isConfirmed, isSharedSession, numCourts, result, scores, totalMinutes, sessionStart, staggerMode, extraCourt, courtOverrides, liveGames, completedGames, suspendedPlayerNames, playedGames, historyEpoch, waitingClock]
   );
 
   const parseScheduleText = useCallback((text: string) => parseScheduleTextUtil(text, players), [players]);
@@ -837,6 +841,11 @@ function BadmintonPlanner() {
       const saved = privateMetadata.find(p => player.id ? p.id === player.id : p.name === player.name);
       return { ...player, gender: player.gender === 'F' ? 'F' as const : 'M' as const, ...(saved?.level ? { level: saved.level } : {}), ...(saved?.statsKey ? { statsKey: saved.statsKey } : {}) } as Player;
     }), playerHistory).players as Player[];
+    // Older shares identify players by name; retain their clocks when assigning IDs.
+    const nextWaitingClock = { ...decoded.waitingClock, since: Object.fromEntries(nextPlayers.flatMap((player, index) => {
+      const since = decoded.waitingClock.since[waitingPlayerKey(decoded.players[index]!)];
+      return since === undefined ? [] : [[waitingPlayerKey(player), since]];
+    })) };
     patchState({
       players: nextPlayers,
       totalMinutes: decoded.totalMinutes,
@@ -858,6 +867,7 @@ function BadmintonPlanner() {
       liveGames: decoded.liveGames,
       completedGames: decoded.completedGames,
       playedGames: decoded.playedGames, historyEpoch: decoded.historyEpoch,
+      waitingClock: nextWaitingClock,
       suspendedPlayerNames: decoded.suspendedPlayerNames,
       editingSlot: null, editLayout: null, undoSnapshot: null, scheduleDirty: false,
       queuePromotionPrompt: null, queueAdjustment: null, pendingSessionChange: null,
@@ -866,7 +876,7 @@ function BadmintonPlanner() {
     return buildSharePayloadUtil({ result: decoded.result as PlannerResult, playersWithAvailability: nextPlayers, gameMinutes: decoded.gameMinutes, numCourts: decoded.numCourts,
       scores: decoded.scores, isConfirmed: decoded.isConfirmed, playedGames: decoded.playedGames, historyEpoch: decoded.historyEpoch,
       settings: { totalMinutes: decoded.totalMinutes, sessionStart: decoded.sessionStart, staggerMode: decoded.staggerMode, extraCourt: decoded.extraCourt, courtOverrides: decoded.courtOverrides },
-      runtime: { live: decoded.liveGames, completed: decoded.completedGames, suspended: decoded.suspendedPlayerNames },
+      runtime: { live: decoded.liveGames, completed: decoded.completedGames, suspended: decoded.suspendedPlayerNames, waitingClock: nextWaitingClock },
       includeScoreDrafts: true,
     })!;
   }, [gameMinutes, numCourts, savedPlans, players, playerHistory, isSharedSession]);
@@ -986,6 +996,13 @@ function BadmintonPlanner() {
     : initialShareId ? 'This page was opened with a shared link. Check its loading status below.'
     : 'Schedule edits stay in this browser.';
   const selectedTab = activeTab === 'live' && !result ? 'setup' : activeTab;
+  const waitingHistory = isAdmin && result ? migratePlayedGames(result, players, completedGames, scores, playedGames) : [];
+  const gamesWaited = historyGamesWaited(waitingHistory, players, liveGames);
+  const playedCounts = historyScheduleState(waitingHistory, players).gamesPlayed;
+  const playedCountsById = new Map(players.map((player, index) => [waitingPlayerKey(player), playedCounts[index] ?? 0]));
+  const waitingRows = isAdmin && result ? waitingPlayerStatuses({ players, result, liveGames, completedGames, staggerMode, suspendedPlayerNames })
+    .map(({ player, key, status }) => ({ key, name: player.name, status, since: waitingClock?.since[key],
+      gamesWaited: gamesWaited[player.name] ?? 0, gamesPlayed: playedCountsById.get(key) ?? 0 })) : [];
   const liveBoard = result && <LiveSessionBoard
     result={result}
     players={players}
@@ -1019,6 +1036,7 @@ function BadmintonPlanner() {
     preferredQualityPairs={preferredPairs}
     qualityWeights={qualityWeights}
     onQualityWeightsChange={setQualityWeights}
+    waitingPanel={isAdmin ? <PlayerWaitingPanel rows={waitingRows} trackingStartedAt={waitingClock?.trackingStartedAt} /> : undefined}
   />;
 
   return (
@@ -1031,7 +1049,7 @@ function BadmintonPlanner() {
         {queuePromotionPrompt && <QueuePromotionModal prompt={queuePromotionPrompt.prompt} onUseLookahead={() => resolveSessionPromotion('lookahead')} onSubstitute={() => resolveSessionPromotion('substitute')} onCancel={cancelQueuePromotion} />}
         {pendingSharedUndo && <div role="alertdialog" aria-label="Undo Finish" style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#000b', display: 'grid', placeItems: 'center' }}><div style={{ background: C.card, padding: 24, borderRadius: 12, maxWidth: 420 }}>
           <h2>Undo Finish?</h2><p>This also stops the replacement game that was started. Confirm only if that replacement game has not actually begun play. If it has already finished or changed, undo will be blocked.</p>
-          <button onClick={() => { void sharedSync.performAction({ type: 'undo', id: crypto.randomUUID(), target: pendingSharedUndo, confirmDependents: true }); setPendingSharedUndo(null); }} style={{ minHeight: 48 }}>Undo Finish and stop replacement</button>
+          <button onClick={() => { void sharedSync.performAction({ type: 'undo', at: Date.now(), id: crypto.randomUUID(), target: pendingSharedUndo, confirmDependents: true }); setPendingSharedUndo(null); }} style={{ minHeight: 48 }}>Undo Finish and stop replacement</button>
           <button onClick={() => setPendingSharedUndo(null)} style={{ minHeight: 48, marginLeft: 8 }}>Cancel</button>
         </div></div>}
         {pendingSessionChange && <SessionChangeModal {...pendingSessionChange} onConfirm={confirmSessionChange} onCancel={cancelSessionChange} />}
@@ -1129,7 +1147,7 @@ function BadmintonPlanner() {
             if (!sharedTarget) { restoreUndo(); return; }
             const action = sharedSync.latest?.actions?.at(-1);
             if (action?.promoted?.length) setPendingSharedUndo(action.id);
-            else if (action) void sharedSync.performAction({ type: 'undo', id: crypto.randomUUID(), target: action.id });
+            else if (action) void sharedSync.performAction({ type: 'undo', at: Date.now(), id: crypto.randomUUID(), target: action.id });
           }} disabled={isGenerating || (sharedTarget ? !sharedSync.latest?.actions?.length || sharedSync.status !== 'saved' : !state.undoSnapshot)} title={sharedTarget ? 'Undo last Finish' : 'Undo last action'} style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '12px 16px', minHeight: 44, fontSize: 13, fontFamily: FONT }}>
             <LucideIcon name="undo" size={16} /> {sharedTarget ? 'Undo last Finish' : 'Undo last action'}
           </button>

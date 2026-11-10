@@ -9,7 +9,7 @@ const BACKUP_KEYS = [
   'bp-totalMinutes', 'bp-gameMinutes', 'bp-numCourts', 'bp-extraCourt',
   'bp-courtOverrides', 'bp-staggerMode', 'bp-sessionStart', 'bp-result',
   'bp-live-games', 'bp-completed-games', 'bp-suspended-player-names', 'bp-scores',
-  'bp-played-games', 'bp-history-epoch', 'bp-prefer-mixed-teams', 'bp-preferred-pairs',
+  'bp-waiting-clock', 'bp-played-games', 'bp-history-epoch', 'bp-prefer-mixed-teams', 'bp-preferred-pairs',
   'bp-is-confirmed', 'bp-loaded-plan-id', 'bp-quality-weights', 'bp-active-tab',
   'bp-saved-plans',
 ] as const;
@@ -69,7 +69,7 @@ export function persistDeviceSessionCopy(state: PlannerState, qualityWeights: Qu
     extraCourt: 'bp-extraCourt', courtOverrides: 'bp-courtOverrides', staggerMode: 'bp-staggerMode',
     sessionStart: 'bp-sessionStart', result: 'bp-result', liveGames: 'bp-live-games',
     completedGames: 'bp-completed-games', suspendedPlayerNames: 'bp-suspended-player-names',
-    scores: 'bp-scores', playedGames: 'bp-played-games', historyEpoch: 'bp-history-epoch',
+    waitingClock: 'bp-waiting-clock', scores: 'bp-scores', playedGames: 'bp-played-games', historyEpoch: 'bp-history-epoch',
     preferMixedTeams: 'bp-prefer-mixed-teams', preferredPairs: 'bp-preferred-pairs',
     isConfirmed: 'bp-is-confirmed', loadedPlanId: 'bp-loaded-plan-id', activeTab: 'bp-active-tab',
   } satisfies Partial<Record<keyof PlannerState, string>>;

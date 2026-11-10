@@ -1,3 +1,4 @@
+import { reconcileWaitingClock, waitingPlayerStatuses, validWaitingClock } from './waitingClock';
 import type { SharePayload } from '../types';
 import type { GameRef } from './liveQueue';
 import { computeCourtsPerSlot } from './courtsPerSlot';
@@ -8,7 +9,7 @@ import { publicPlayedGames } from './playedHistoryCodec';
 export type SharedAction =
   | { type: 'finish' | 'start'; id: string; gameId: string; at?: number; displayCourt?: number; replacements?: Array<{ replacee: string; replacer: string }> }
   | { type: 'start_timers'; id: string; at: number; gameIds: string[] }
-  | { type: 'undo'; id: string; target: string; confirmDependents?: boolean };
+  | { type: 'undo'; id: string; target: string; at?: number; confirmDependents?: boolean };
 
 const same = (a: GameRef, b: GameRef) => a.slot === b.slot && a.court === b.court;
 function indices(data: SharePayload, game: GameRef): number[] {
@@ -39,6 +40,15 @@ export function commitSharedSnapshot(current: SharePayload | null, expectedRevis
     const { startedAt: _incomingStart, ...rest } = game;
     return { ...rest, ...(active.startedAt !== undefined ? { startedAt: active.startedAt } : {}) };
   }) };
+  if (runtime) {
+    if (nextEpoch !== epoch) runtime.waitingClock = { since: {} };
+    else if (runtime.waitingClock === undefined && current.runtime?.waitingClock !== undefined) {
+      // Older organizer clients cannot silently erase a newer session's clocks.
+      const context = reconstructScheduleFromSharePayload(next, { currentGameMinutes: 15, currentNumCourts: 1 });
+      const waiting = new Set(waitingPlayerStatuses(context).filter(row => row.status === 'waiting').map(row => row.key));
+      runtime.waitingClock = { ...decoded.waitingClock, since: Object.fromEntries(Object.entries(decoded.waitingClock.since).filter(([key]) => waiting.has(key))) };
+    }
+  }
   // Receipts outlive replaced plans so delayed requests cannot replay an undone action.
   return { ...next, ...(runtime ? { runtime } : {}), history, historyEpoch: nextEpoch, actions: newPlan ? [] : current.actions ?? [], receipts: current.receipts ?? [], revision: expectedRevision + 1, schema: 3 };
 }
@@ -53,7 +63,10 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
     const requested = new Set(action.gameIds);
     const live = current.runtime?.live?.map(game => game.startedAt === undefined && requested.has(sharedGameId(current, game.slot, game.court))
       ? { ...game, startedAt: action.at } : game);
-    return { ...current, ...(current.runtime ? { runtime: { ...current.runtime, ...(live ? { live } : {}) } } : {}),
+    const before = reconstructScheduleFromSharePayload(current, { currentGameMinutes: 15, currentNumCourts: 1 });
+    const waitingClock = reconcileWaitingClock(before.waitingClock, before, { ...before, liveGames: live ?? [] }, action.at,
+      { start: before.liveGames.some(game => requested.has(sharedGameId(current, game.slot, game.court))) });
+    return { ...current, ...(current.runtime ? { runtime: { ...current.runtime, waitingClock, ...(live ? { live } : {}) } } : {}),
       receipts: [...(current.receipts ?? []), action.id].slice(-1000), revision: (current.revision ?? 0) + 1, schema: 3 };
   }
   const activation = action.type !== 'undo' && action.at !== undefined && Number.isInteger(action.at) && action.at >= 0 ? { startedAt: action.at } : {};
@@ -118,7 +131,7 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
       const lane = finishingLane < capacity && !used.has(finishingLane) ? finishingLane : Array.from({ length: capacity }, (_, i) => i).find(i => !used.has(i));
       const promoted: GameRef[] = next && live.length < capacity && lane != null ? [{ ...next, ...activation, id: sharedGameId(data, next.slot, next.court), displayCourt: lane, players: indices(data, next).map(i => data.p[i]![0]) }] : [];
       live = [...live, ...promoted];
-      data.actions = [...history, { id: action.id, gameId: action.gameId, game: active, promoted, playedGameId: played.id }].slice(-20);
+      data.actions = [...history, { id: action.id, gameId: action.gameId, game: active, promoted, playedGameId: played.id, waitingClockBefore: decoded.waitingClock }].slice(-20);
     } else {
       if (live.some(item => same(item, game))) return acknowledgeDuplicate();
       if (completed.some(item => same(item, game))) return null;
@@ -147,6 +160,19 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
     }
   }
   data.runtime = { ...data.runtime, live, completed };
+  if (typeof action.at === 'number' && Number.isSafeInteger(action.at) && action.at >= 0) {
+    const after = reconstructScheduleFromSharePayload(data, { currentGameMinutes: 15, currentNumCourts: 1 });
+    const waitingClock = reconcileWaitingClock(decoded.waitingClock, decoded, after, action.at);
+    if (action.type === 'undo') {
+      const prior = history.find(item => item.id === action.target);
+      const previouslyWaiting = new Set(waitingPlayerStatuses(decoded).filter(row => row.status === 'waiting').map(row => row.key));
+      for (const row of waitingPlayerStatuses(after)) if (row.status === 'waiting' && !previouslyWaiting.has(row.key)) {
+        const original = validWaitingClock(prior?.waitingClockBefore) ? prior.waitingClockBefore.since?.[row.key] : undefined;
+        if (original !== undefined) waitingClock.since[row.key] = original;
+      }
+    }
+    data.runtime.waitingClock = waitingClock;
+  }
   // Keep request receipts after Undo so a delayed retry cannot repeat an undone Finish.
   data.receipts = [...(data.receipts ?? []), action.id].slice(-1000);
   data.revision = (current.revision ?? 0) + 1;

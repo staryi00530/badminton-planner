@@ -1,3 +1,4 @@
+import { validWaitingClock } from './waitingClock';
 import type { PlannerResult, ScoresMap, SharePayload } from '../types';
 import { migratePlayedGames, type PlayedGame } from './playedHistory';
 import { publicPlayedGames } from './playedHistoryCodec';
@@ -89,6 +90,7 @@ export function reconstructScheduleFromSharePayload(
   if (data.active && (!Array.isArray(data.active) || !data.active.every(i => Number.isInteger(i) && i >= 0 && i < n))) throw invalid();
   if (data.ids && (!Array.isArray(data.ids) || data.ids.length !== n || new Set(data.ids).size !== n || data.ids.some(id => typeof id !== 'string' || !id))) throw invalid();
   if (data.availability && (!Array.isArray(data.availability) || data.availability.length !== n || data.availability.some(a => !Number.isInteger(a?.from) || !Number.isInteger(a?.to)))) throw invalid();
+  if (data.runtime?.waitingClock !== undefined && !validWaitingClock(data.runtime.waitingClock)) throw invalid();
   const gp: number[] = new Array(n).fill(0);
   const cp: number[] = new Array(n).fill(0);
   const cr: number[] = new Array(n).fill(0);
@@ -167,6 +169,7 @@ export function reconstructScheduleFromSharePayload(
     players: decodedPlayers,
     playedGames,
     historyEpoch: data.historyEpoch ?? 0,
+    waitingClock: { ...(data.runtime?.waitingClock?.trackingStartedAt !== undefined ? { trackingStartedAt: data.runtime.waitingClock.trackingStartedAt } : {}), since: { ...data.runtime?.waitingClock?.since } },
     totalMinutes: cfg?.totalMinutes ?? Math.max(1, ...slots.map(slot => slot.s)) * restoredGameMinutes,
     sessionStart: cfg?.sessionStart ?? '',
     staggerMode: cfg?.staggerMode ?? 'none',

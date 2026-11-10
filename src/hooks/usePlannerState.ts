@@ -1,3 +1,4 @@
+import { reconcileWaitingClock, validWaitingClock } from '../utils/waitingClock';
 import { useCallback, useEffect, useReducer } from 'react';
 import { DEFAULT_GAME_MINUTES, DEFAULT_TOTAL_MINUTES } from '../constants';
 import type { PlannerPersistedState, PlannerState } from '../types';
@@ -7,6 +8,7 @@ import { normalizePlayerIdentities } from '../utils/playerIdentity';
 import { makePlayedGame, mergePlayedGames, migratePlayedGames } from '../utils/playedHistory';
 
 const STORAGE_KEYS = {
+  waitingClock: 'bp-waiting-clock',
   playedGames: 'bp-played-games',
   historyEpoch: 'bp-history-epoch',
   players: 'bp-players',
@@ -81,6 +83,7 @@ function createInitialState(): PlannerState {
   return {
     ...EMPTY_QUEUE_STATE,
     undoSnapshot: null,
+    waitingClock: !isSharedSession && validWaitingClock(loadState(STORAGE_KEYS.waitingClock, null)) ? loadState(STORAGE_KEYS.waitingClock, { since: {} }) : { since: {} },
     playedGames,
     historyEpoch: isSharedSession ? 0 : loadState(STORAGE_KEYS.historyEpoch, 0),
     // Older rosters and the original defaults did not store a level. Normalize those
@@ -154,10 +157,13 @@ function plannerReducer(state: PlannerState, action: PlannerAction): PlannerStat
     case 'restoreUndo':
       return state.undoSnapshot ? { ...state, ...state.undoSnapshot, undoSnapshot: null } : state;
     case 'set':
-      return { ...state, [action.key]: action.value };
+      return ['players', 'result', 'liveGames', 'completedGames', 'suspendedPlayerNames', 'staggerMode', 'historyEpoch'].includes(action.key)
+        ? plannerReducer(state, { type: 'patch', value: { [action.key]: action.value } })
+        : { ...state, [action.key]: action.value };
     case 'patch': {
       const next = { ...state, ...action.value, ...(action.value.result === null ? { ...EMPTY_QUEUE_STATE, undoSnapshot: null } : {}) };
-      if (action.value.playedGames !== undefined) return next;
+      const finalize = (value: PlannerState) => ({ ...value, waitingClock: action.value.waitingClock !== undefined ? action.value.waitingClock : reconcileWaitingClock(state.waitingClock, state, value, Date.now(), { reset: value.historyEpoch !== state.historyEpoch }) });
+      if (action.value.playedGames !== undefined) return finalize(next);
       let history = migratePlayedGames(state.result, state.players, state.completedGames, state.scores, state.playedGames);
       const identity = (record: NonNullable<ReturnType<typeof makePlayedGame>>) => JSON.stringify([record.planId, record.slot, [...record.teamA, ...record.teamB].map(p => p.id).sort()]);
       const oldCompletions = new Set(history.map(identity));
@@ -168,7 +174,7 @@ function plannerReducer(state: PlannerState, action: PlannerAction): PlannerStat
         if (!oldCompletions.has(identity(record))) history = mergePlayedGames(history, [record]);
         else if (existing && action.value.scores !== undefined) history = history.map(game => game === existing ? { ...game, ...(record.score ? { score: record.score } : {}) } : game);
       }
-      return { ...next, playedGames: history };
+      return finalize({ ...next, playedGames: history });
     }
     default:
       return state;
@@ -180,6 +186,7 @@ export function usePlannerState() {
 
   useEffect(() => {
     const persisted: PlannerPersistedState = {
+      waitingClock: state.waitingClock,
       playedGames: state.playedGames,
       historyEpoch: state.historyEpoch,
       activeTab: state.activeTab,
@@ -209,7 +216,7 @@ export function usePlannerState() {
     // device's own local copy — don't let it overwrite the personal schedule other tabs/
     // future visits would otherwise load. Settings unrelated to "whose schedule is this"
     // (player bank, saved plans, win/loss) still persist normally.
-    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames', 'totalMinutes', 'gameMinutes', 'numCourts', 'extraCourt', 'staggerMode', 'sessionStart', 'preferMixedTeams', 'preferredPairs', 'playedGames', 'historyEpoch']);
+    const liveSessionExempt = new Set(['players', 'result', 'scores', 'isConfirmed', 'activeTab', 'courtOverrides', 'liveGames', 'completedGames', 'suspendedPlayerNames', 'totalMinutes', 'gameMinutes', 'numCourts', 'extraCourt', 'staggerMode', 'sessionStart', 'preferMixedTeams', 'preferredPairs', 'playedGames', 'historyEpoch', 'waitingClock']);
 
     for (const [key, storageKey] of Object.entries(STORAGE_KEYS)) {
       const openingShare = new URLSearchParams(window.location.search).has('share') || window.location.hash.startsWith('#share=');
@@ -223,6 +230,7 @@ export function usePlannerState() {
     if (!state.isSharedSession && !new URLSearchParams(window.location.search).has('share') && !window.location.hash.startsWith('#share=')) localStorage.setItem(plannerStorageKey('bp-player-level-scale'), '5');
   }, [
     state.players,
+    state.waitingClock,
     state.playedGames,
     state.historyEpoch,
     state.playerHistory,

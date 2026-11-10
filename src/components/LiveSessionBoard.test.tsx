@@ -50,6 +50,17 @@ function InteractiveBoard({ result, completedGames }: { result: PlannerResult; c
 }
 
 describe('LiveSessionBoard', () => {
+  it('shows live and projected card quality directly for admins and hides it from players', () => {
+    const many = [slot(1, [court(1, [1,2,3,4])]), slot(2, [court(1, [1,2,3,4])]), slot(3, [court(1, [1,2,3,4])])];
+    const setup = props({ isAdmin: true, result: { schedule: many, gamesPlayed: [] }, liveCapacity: 1, liveGames: [{ slot: 1, court: 0 }] });
+    const { rerender } = render(<LiveSessionBoard {...setup} waitingPanel={<div>Waiting panel fixture</div>} />);
+    expect(within(lane(1)).getByLabelText('Matchup quality score')).toHaveTextContent('Quality: 15 points');
+    expect(screen.getAllByLabelText('Matchup quality score').map(item => item.textContent)).toEqual(['Quality: 15 points', 'Quality: 15 points', 'Quality: 5 points']);
+    expect(screen.getByText('Waiting panel fixture')).toBeInTheDocument();
+    rerender(<LiveSessionBoard {...setup} isAdmin={false} waitingPanel={<div>Waiting panel fixture</div>} />);
+    expect(screen.queryAllByLabelText('Matchup quality score')).toHaveLength(0);
+    expect(screen.queryByText('Waiting panel fixture')).not.toBeInTheDocument();
+  });
   it('uses retained completions once when current slot numbers are reused', () => {
     const oldResult = { planId: 'old', schedule: [slot(1, [court(1, [1,2,3,4])])], gamesPlayed: [] };
     const playedGames = migratePlayedGames(oldResult, players, [{slot:1,court:0}], {});

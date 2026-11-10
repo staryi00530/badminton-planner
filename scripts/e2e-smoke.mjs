@@ -135,9 +135,14 @@ async function verifyOrganizerHandoff(newContext) {
   assert.ok((await sourceStarts()).every(g=>g.startedAt===undefined),'preparation must not start clocks');
   await source.getByRole('button',{name:'Start session timers',exact:true}).click();
   await expect(current(source).getByText('Elapsed 00:00',{exact:true})).toHaveCount(5);
+  await expect(current(source).getByLabel('Matchup quality score')).toHaveCount(5);
+  const waitingPanel=page=>page.getByLabel('Player waiting times',{exact:true});
+  await waitingPanel(source).locator('summary').click();
+  await expect(waitingPanel(source).getByText('00:00',{exact:true})).toHaveCount(15);
   assert.ok((await sourceStarts()).every(g=>g.startedAt===timerEpoch));
   await source.clock.setFixedTime(timerEpoch+45000);await source.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
   await expect(current(source).getByText('Elapsed 00:45',{exact:true})).toHaveCount(5);
+  await expect(waitingPanel(source).getByText('00:45',{exact:true})).toHaveCount(15);
   async function finish(page,count){
     await current(page).getByRole('button',{name:'Finish game',exact:true}).first().click();
     const past=page.getByRole('button',{name:`Past games (${count})`,exact:true});
@@ -148,6 +153,7 @@ async function verifyOrganizerHandoff(newContext) {
     await expect(past).toBeVisible();
   }
   await finish(source,1);
+  assert.equal(await waitingPanel(source).locator('tbody tr td:last-child').evaluateAll(cells=>cells.reduce((sum,cell)=>sum+Number(cell.textContent),0)),4);
   await source.getByRole('button',{name:'Setup',exact:true}).click();
   await source.getByRole('button',{name:'Transfer organizer setup',exact:true}).click();
   const field=source.getByRole('textbox',{name:'Private transfer link',exact:true});await expect(field).toBeVisible();
@@ -168,7 +174,7 @@ async function verifyOrganizerHandoff(newContext) {
   await target.clock.setFixedTime(timerEpoch+45000);
   await target.goto(transferUrl,{waitUntil:'domcontentloaded'});
   await expect(target.getByRole('button',{name:'Use on this device',exact:true})).toBeVisible();
-  const read=async page=>page.evaluate(prefix=>Object.fromEntries(['players','player-history','preferred-pairs','quality-weights','played-games','live-games'].map(k=>[k,JSON.parse(localStorage.getItem(`${prefix}bp-${k}`))])),storagePrefix);
+  const read=async page=>page.evaluate(prefix=>Object.fromEntries(['players','player-history','preferred-pairs','quality-weights','played-games','live-games','waiting-clock'].map(k=>[k,JSON.parse(localStorage.getItem(`${prefix}bp-${k}`))])),storagePrefix);
   assert.equal((await read(target)).players[0].name,'Target-only player');
   await target.getByRole('button',{name:'Use on this device',exact:true}).click();
   await expect(target.getByRole('region',{name:'Session mode'})).toContainText('This device only');
@@ -178,6 +184,8 @@ async function verifyOrganizerHandoff(newContext) {
   assert.ok(imported['player-history'].some(p=>p.name==='Target-only player'&&p.level===4));assert.ok(imported['player-history'].some(p=>p.name==='Bank-only friend'&&p.level===2));
   assert.equal(imported['played-games'].length,1);assert.equal(imported['live-games'].length,5);
   assert.deepEqual(imported['live-games'].map(g=>g.startedAt),(await sourceStarts()).map(g=>g.startedAt));
+  assert.deepEqual(imported['waiting-clock'],(await read(source))['waiting-clock']);
+  assert.equal(imported['waiting-clock'].trackingStartedAt,timerEpoch);
   await expect(current(target).getByText('Elapsed 00:45',{exact:true})).toHaveCount(4);
   await expect(current(target).getByText('Elapsed 00:00',{exact:true})).toHaveCount(1);
   assert.equal(new URL(target.url()).search,'');assert.equal(new URL(target.url()).hash,'');
@@ -186,7 +194,11 @@ async function verifyOrganizerHandoff(newContext) {
   assert.equal((await read(target)).players[0].level,5);
   await expect(current(target).getByText('Elapsed 00:45',{exact:true})).toHaveCount(4);
   assert.deepEqual((await read(target))['live-games'].map(g=>g.startedAt),imported['live-games'].map(g=>g.startedAt));
+  assert.deepEqual((await read(target))['waiting-clock'],imported['waiting-clock']);
+  await waitingPanel(target).locator('summary').click();
+  await expect(waitingPanel(target).getByRole('columnheader',{name:'Games waited',exact:true})).toBeVisible();
   await finish(target,2);assert.equal((await read(source))['played-games'].length,1);
+  assert.equal(await waitingPanel(target).locator('tbody tr td:last-child').evaluateAll(cells=>cells.reduce((sum,cell)=>sum+Number(cell.textContent),0)),8);
   assert.equal(creates,1);assert.equal(reads,1);assert.equal(JSON.stringify(records.get('private-copy')),storedEnvelope);
   await assertLayout(target,'iPad organizer handoff');assert.deepEqual(failures,[]);
   await target.screenshot({path:join(artifacts,'organizer-handoff-ipad.png'),fullPage:true});

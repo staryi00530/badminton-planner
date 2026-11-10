@@ -18,8 +18,9 @@ export function SessionSummary({ players, result, fromSlot, staggerMode, liveGam
     return game.players ?? (court ? [...court.teamA, ...court.teamB].map(player => player.name) : []);
   }));
   const availablePlayers = applyAvailability(players, { staggerMode, totalSlots: Math.max(0, ...result.schedule.map(slot => slot.slot)) });
+  const availabilitySlot = liveGames.length ? Math.min(fromSlot - 1, Math.max(0, ...result.schedule.map(slot => slot.slot)) - 1) : fromSlot - 1;
   const waiting = availablePlayers.filter(player => !onCourt.has(player.name) &&
-    player.availFrom <= fromSlot - 1 && player.availTo >= fromSlot - 1).length;
+    player.availFrom <= availabilitySlot && player.availTo >= availabilitySlot).length;
   return <section aria-label="Session summary" style={{ marginBottom: 16 }}>
     <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, margin: 0 }}>
       {[

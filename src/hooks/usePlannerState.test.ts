@@ -11,6 +11,32 @@ beforeEach(() => {
 });
 
 describe('independent played history', () => {
+  it('persists waiting clocks, restores Undo, retains a recovery reroll and clears a full reset', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const players: Player[] = Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 3 }));
+    const plan = { ...generateSchedule(players, 4, [1, 1, 1, 1])!, planId: 'first' };
+    const initial = renderHook(() => usePlannerState());
+    act(() => initial.result.current.patchState({ players, result: plan, liveGames: [{ slot: 1, court: 0 }] }));
+    expect(initial.result.current.state.waitingClock).toEqual({ since: {} });
+    act(() => initial.result.current.patchState({ liveGames: [{ slot: 1, court: 0, startedAt: 1000 }] }));
+    const started = structuredClone(initial.result.current.state.waitingClock);
+    expect(Object.values(started.since)).toEqual([1000, 1000, 1000, 1000]);
+    const waitingKey = Object.keys(started.since)[0]!;
+    const waitingPlayer = players.find(p => p.id === waitingKey)!;
+    act(() => { initial.result.current.recordUndo(); initial.result.current.patchState({ suspendedPlayerNames: [waitingPlayer.name] }); });
+    expect(initial.result.current.state.waitingClock.since[waitingKey]).toBeUndefined();
+    act(() => initial.result.current.restoreUndo());
+    expect(initial.result.current.state.waitingClock).toEqual(started);
+    initial.unmount();
+    const reloaded = renderHook(() => usePlannerState());
+    expect(reloaded.result.current.state.waitingClock).toEqual(started);
+    act(() => reloaded.result.current.patchState({ result: { ...plan, planId: 'recovery' }, playedGames: [] }));
+    expect(reloaded.result.current.state.waitingClock).toEqual(started);
+    act(() => reloaded.result.current.patchState({ result: { ...plan, planId: 'reset' }, playedGames: [], historyEpoch: 1 }));
+    expect(reloaded.result.current.state.waitingClock).toEqual({ since: {} });
+    reloaded.unmount();
+    vi.restoreAllMocks();
+  });
   function seedCompleted() {
     const players: Player[] = Array.from({ length: 4 }, (_, i) => ({ id: `id-${i}`, name: `P${i}`, gender: 'M', availFrom: 0, availTo: 11 }));
     const plan = { ...generateSchedule(players, 1, [1])!, planId: 'old-plan' };

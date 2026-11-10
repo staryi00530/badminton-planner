@@ -33,6 +33,7 @@ interface SlotCardProps {
   displayCourt?: number;
   sessionActions?: boolean;
   waitingReason?: string;
+  qualityScore?: number;
 }
 
 export default function SlotCard({
@@ -61,6 +62,7 @@ export default function SlotCard({
   displayCourt,
   sessionActions = false,
   waitingReason,
+  qualityScore,
 }: SlotCardProps) {
   const stepBtnStyle = { background: 'none', border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMuted, fontSize: 12, fontWeight: 700, fontFamily: FONT, width: 20, height: 20, lineHeight: 1, cursor: 'pointer' };
   const visibleCourts = (visibleCourtIndexes ?? slot.courts.map((_, ci) => ci))
@@ -113,6 +115,7 @@ export default function SlotCard({
         </div>
       </div>
 
+      {isAdmin && qualityScore != null && Number.isFinite(qualityScore) && <p aria-label="Matchup quality score" title="Matchup points: format, level balance, repeated partners/opponents and preferred pairings. Higher is better; waiting priority is assessed separately." style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 700, color: C.accent }}>Quality: {qualityScore} points</p>}
       {editing && editLayout && (() => {
         const genderByName = new Map<string, string>([
           ...editOptions.map(p => [p.name, p.gender] as [string, string]),

@@ -16,6 +16,35 @@ function session(): SharePayload {
 }
 
 describe('shared session transactions', () => {
+  it('tracks waiting through session start, promotion, unrelated Finish and guarded Undo', () => {
+    const base = session();
+    base.slots.push({ ...base.slots[0]!, s: 3 });
+    base.ids = base.p.map((_, index) => `p${index}`);
+    const started = applySharedAction(base, { type: 'start_timers', id: 'timers', at: 1000,
+      gameIds: base.runtime!.live!.map(game => sharedGameId(base, game.slot, game.court)) })!;
+    expect(started.runtime!.waitingClock).toEqual({ trackingStartedAt: 1000, since: { p8: 1000, p9: 1000, p10: 1000, p11: 1000 } });
+    const finished = applySharedAction(started, { type: 'finish', id: 'one', at: 2000, gameId: sharedGameId(started, 1, 0) })!;
+    expect(finished.runtime!.waitingClock!.since).toEqual({ p0: 2000, p1: 2000, p2: 2000, p3: 2000 });
+    const other = applySharedAction(finished, { type: 'finish', id: 'two', at: 3000, gameId: sharedGameId(finished, 1, 1) })!;
+    expect(other.runtime!.waitingClock!.since.p2).toBe(2000);
+    const undone = applySharedAction(other, { type: 'undo', id: 'undo-two', target: 'two', at: 4000, confirmDependents: true })!;
+    expect(undone.runtime!.waitingClock!.since.p0).toBe(2000);
+    expect(undone.runtime!.waitingClock!.since.p2).toBe(2000);
+    const undoneFirst = applySharedAction(undone, { type: 'undo', id: 'undo-one', target: 'one', at: 5000, confirmDependents: true })!;
+    expect(undoneFirst.runtime!.waitingClock!.since).toEqual({ p8: 1000, p9: 1000, p10: 1000, p11: 1000 });
+  });
+  it('keeps clocks across legacy organizer commits and clears them on history reset', () => {
+    const base = { ...session(), planId: 'first', history: [], historyEpoch: 0 };
+    base.ids = base.p.map((_, index) => `p${index}`);
+    const started = applySharedAction(base, { type: 'start_timers', id: 'timers', at: 1000,
+      gameIds: base.runtime!.live!.map(game => sharedGameId(base, game.slot, game.court)) })!;
+    const next = structuredClone(started);
+    delete next.runtime!.waitingClock;
+    const committed = commitSharedSnapshot(started, started.revision!, next)!;
+    expect(committed.runtime!.waitingClock).toEqual(started.runtime!.waitingClock);
+    const reset = commitSharedSnapshot(committed, committed.revision!, { ...committed, planId: 'second', history: [], historyEpoch: 1 })!;
+    expect(reset.runtime!.waitingClock).toEqual({ since: {} });
+  });
   it('captures a Finish once in independent history and preserves it across a new plan', () => {
     const base = { ...session(), planId: 'first', history: [], historyEpoch: 0 };
     const action = { type: 'finish' as const, id: 'finish-1', gameId: sharedGameId(base, 1, 0) };
@@ -168,6 +197,12 @@ it.each([undefined, -1, 0.5, NaN, Infinity])('omits invalid or missing Finish re
 
 
 describe('shared session timer start', () => {
+  it('does not start waiting clocks from a stale timer request', () => {
+    const base = { ...session(), planId: 'new' };
+    const old = { ...base, planId: 'old' };
+    const saved = applySharedAction(base, { type: 'start_timers', id: 'stale', at: 1000, gameIds: [sharedGameId(old, 1, 0)] })!;
+    expect(saved.runtime?.waitingClock?.trackingStartedAt).toBeUndefined();
+  });
   it('starts requested unknown live clocks while preserving timed courts and history', () => {
     const base = session();
     base.runtime!.live![1]!.startedAt = 100;

@@ -1,3 +1,4 @@
+import type { WaitingClockState } from './utils/waitingClock';
 import type { RefObject } from 'react';
 import type { Player, SlotResult } from './algorithm/types';
 import type { GameRef } from './utils/liveQueue';
@@ -102,7 +103,7 @@ export interface SharePayload {
   q?: number[];
   cfg?: { g?: number; c?: number; totalMinutes?: number; sessionStart?: string; staggerMode?: StaggerMode; extraCourt?: ExtraCourt; courtOverrides?: Record<number, number> };
   availability?: Array<{ from: number; to: number; group?: string; leavesAt?: number | null }>;
-  runtime?: { live?: GameRef[]; completed?: GameRef[]; suspended?: string[] };
+  runtime?: { live?: GameRef[]; completed?: GameRef[]; suspended?: string[]; waitingClock?: WaitingClockState };
   actions?: SharedFinishAction[];
   receipts?: string[];
   scores?: Record<string, { a: string; b: string; applied?: boolean }>;
@@ -120,11 +121,13 @@ export interface SharedFinishAction {
   game: GameRef;
   promoted?: GameRef[];
   playedGameId?: string;
+  waitingClockBefore?: WaitingClockState;
 }
 
 export interface PlannerState extends QueueRuntimeState {
   playedGames: PlayedGame[];
   historyEpoch: number;
+  waitingClock: WaitingClockState;
   undoSnapshot: UndoSnapshot | null;
   players: Player[];
   playerHistory: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level' | 'quarantined'>>;
@@ -182,7 +185,7 @@ export interface PlannerState extends QueueRuntimeState {
 }
 
 export type UndoSnapshot = Pick<PlannerState,
-  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' | 'playedGames' | 'historyEpoch' |
+  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' | 'playedGames' | 'historyEpoch' | 'waitingClock' |
   'suspendedPlayerNames' | 'fromSlot' | 'fromSlotCourts' | 'courtOverrides' |
   'scheduleDirty' | 'copied' | 'isConfirmed' | 'loadedPlanId' | 'savedPlans' |
   'editingSlot' | 'editLayout' | 'pendingOverwrite' | 'isGenerating' | 'genSlot'
@@ -190,7 +193,7 @@ export type UndoSnapshot = Pick<PlannerState,
 
 /** State fields that may be changed by a runtime queue transition. */
 export type RuntimePatch = Pick<Partial<PlannerState>,
-  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' | 'playedGames' | 'historyEpoch' |
+  'result' | 'scores' | 'winLoss' | 'players' | 'liveGames' | 'completedGames' | 'playedGames' | 'historyEpoch' | 'waitingClock' |
   'suspendedPlayerNames' | 'fromSlot' | 'scheduleDirty' | 'copied' | 'isConfirmed' |
   'loadedPlanId' | 'editingSlot' | 'editLayout' | 'isGenerating' | 'genSlot' |
   'pendingOverwrite' | 'fromSlotCourts' | 'activeTab' | 'courtOverrides' | 'undoSnapshot' |
@@ -200,6 +203,7 @@ export type RuntimePatch = Pick<Partial<PlannerState>,
 export interface PlannerPersistedState {
   playedGames: PlayedGame[];
   historyEpoch: number;
+  waitingClock: WaitingClockState;
   activeTab: PlannerState['activeTab'];
   players: Player[];
   playerHistory: Array<Pick<Player, 'id' | 'aliases' | 'statsKey' | 'name' | 'gender' | 'level' | 'quarantined'>>;

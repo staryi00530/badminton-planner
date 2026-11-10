@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { SlotResult } from '../algorithm/types';
 import { C, FONT } from '../constants';
 import { liveQueueDebug } from '../utils/liveQueue';
@@ -20,6 +20,7 @@ interface LiveSessionBoardProps extends ScheduleGridProps {
   playedGames?: PlayedGame[];
   onStartSessionTimers?: () => void;
   sessionTimersDisabled?: boolean;
+  waitingPanel?: ReactNode;
 }
 
 const key = (slot: number, court: number) => `${slot}:${court}`;
@@ -132,7 +133,6 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
       } : null,
     });
   }, [capacity, changeSlot, completedGames, fromSlot, liveGames, queueAdjustment, result.schedule]);
-  const gameProps = { ...props, blockedPlayerNames };
   const actualHistory = props.playedGames ? historyCourts(props.playedGames) : completedGames.flatMap(ref => {
     const court = result.schedule.find(slot => slot.slot === ref.slot)?.courts[ref.court];
     return court ? [court] : [];
@@ -147,8 +147,12 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
     return { game, court, quality };
   });
   const projectedAverage = projections.length ? projections.reduce((sum, p) => sum + p.quality.score, 0) / projections.length : null;
+  const liveQualities = live.map(game => ({ game, quality: scoreGameQuality(game.slot.courts[game.court]!, { players: props.players, slot: game.slot.slot, history: actualHistory, preferredPairs: props.preferredQualityPairs }, qualityWeights) }));
+  const gameQualityScores = new Map([...projections, ...liveQualities].map(({ game, quality }) => [key(game.slot.slot, game.court), quality.score]));
+  const gameProps = { ...props, blockedPlayerNames, gameQualityScores };
   return <div ref={props.scheduleRef} role="region" aria-label="Live session board" style={{ minWidth: 0, marginBottom: 24 }}>
     <SessionSummary players={props.players} liveGames={liveGames} completedGames={completedGames} result={result} fromSlot={fromSlot} staggerMode={props.staggerMode ?? 'none'} />
+    {props.isAdmin && props.waitingPanel}
     {props.isAdmin && props.onStartSessionTimers && live.some(game => game.ref.startedAt == null) && (
       <section aria-label="Session timers" style={{ marginBottom: 16 }}>
         <p style={{ color: C.textDim, fontSize: 12 }}>During preparation, timers wait. Select Start session timers when play begins. Timers already running keep their start times.</p>
@@ -159,9 +163,7 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
       <summary>Game quality and weights</summary>
       <p style={{ fontSize: 12 }}>Higher matchup points mean a better fit. Rotation priority and play eligibility are separate. {props.onQualityWeightsChange ? 'Weights apply to future generated team splits and compare planned games; current lineups remain unchanged.' : 'These local weights compare planned games; they do not change lineups.'} Waiting counts eligible completed games since last play; unknown levels use 3.</p>
       <p>Projected average matchup: {projectedAverage == null ? 'No unplayed games' : `${projectedAverage.toFixed(1)} points across ${projections.length} unplayed games`}. Assumes retained completed history plus earlier projected games in plan order; waiting adds no points. {live.length} live games assessed separately.</p>
-      {live.map(game => {
-        const court = game.slot.courts[game.court]!;
-        const quality = scoreGameQuality(court, { players: props.players, slot: game.slot.slot, history: actualHistory, preferredPairs: props.preferredQualityPairs }, qualityWeights);
+      {liveQualities.map(({ game, quality }) => {
         return <p key={`live:${key(game.slot.slot, game.court)}`}>Live Court {game.displayCourt + 1}: {quality.score} matchup points · {quality.format}{quality.formatCompromise && ` · ${quality.formatCompromise}`}</p>;
       })}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>

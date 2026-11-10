@@ -32,6 +32,7 @@ export interface ScheduleGridProps {
   fromSlot: number;
   liveCapacity?: number;
   queueAdjustment?: QueueAdjustmentNotice | null;
+  gameQualityScores?: ReadonlyMap<string, number>;
 }
 
 export interface ScheduledGame {
@@ -73,6 +74,7 @@ export function ScheduleGame({ props, game, sessionActions = false, waitingReaso
     displayCourt={displayCourt}
     sessionActions={sessionActions}
     waitingReason={waitingReason}
+    qualityScore={props.gameQualityScores?.get(`${slot.slot}:${court}`)}
   />;
 }
 
