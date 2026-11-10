@@ -1,0 +1,5 @@
+# Slots waited display
+
+User approved replacing the waiting panel's per-court game-finish count with slots waited, alongside elapsed time. Derive from the existing played ledger without storage migration: count each eligible original session slot once since last participation; current live players show no accumulating wait. Multiple courts and recovery plans sharing the same original slot do not multiply the count. Slots a player participated in, and late completions of earlier slots, do not count as subsequent waits. Undo/history reset/refresh derive the result from the same retained ledger. Preserve the scheduler's existing selection behavior; this request changes the admin display metric.
+
+Tests cover same-slot courts/recovery plans, unavailability, playing reset, permanent-ID rename, late court finishes and Undo by removal of played ledger entry. Rename UI column, row field, explanation and browser assertion. Run full checks/build, independent review and beta-only deployment verification.

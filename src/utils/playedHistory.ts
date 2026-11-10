@@ -101,6 +101,25 @@ export function historyGamesWaited(history: PlayedGame[], players: Player[], liv
   return waited;
 }
 
+/** Display metric: each original session slot counts once, including recovery plans. */
+export function historySlotsWaited(history: PlayedGame[], players: Player[], live: GameRef[]=[]): Record<string,number> {
+  const records = mergePlayedGames([], history);
+  return Object.fromEntries(players.map(player => {
+    const playedSlots = new Set(records.filter(game => participants(game).some(record => matchesPlayer(record, player))).map(game => game.slot));
+    const waitingSlots = new Set<number>();
+    let latestPlayedSlot = 0;
+    for (const game of records) {
+      if (participants(game).some(record => matchesPlayer(record, player))) {
+        waitingSlots.clear();
+        latestPlayedSlot = Math.max(latestPlayedSlot, game.slot);
+      } else if (game.slot > latestPlayedSlot && !playedSlots.has(game.slot)
+        && game.waitingIds.some(id => matchesPlayer({ id, name: '', gender: 'M' }, player))) waitingSlots.add(game.slot);
+    }
+    const playing = live.some(game => (game.players ?? []).some(name => player.name === name || player.aliases?.includes(name)));
+    return [player.name, playing ? 0 : waitingSlots.size];
+  }));
+}
+
 export function historyScheduleState(history: PlayedGame[], players: Player[], keptSlots: SlotResult[]=[]): ScheduleState {
   const n=players.length, zeros=()=>Array<number>(n).fill(0);
   const state:ScheduleState={keptSlots,gamesPlayed:zeros(),consecutivePlayed:zeros(),consecutiveRested:zeros(),

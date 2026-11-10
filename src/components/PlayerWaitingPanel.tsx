@@ -6,7 +6,7 @@ export interface WaitingPlayerRow {
   name: string;
   status: 'playing' | 'waiting' | 'unavailable';
   since?: number;
-  gamesWaited: number;
+  slotsWaited: number;
   gamesPlayed: number;
 }
 
@@ -38,7 +38,7 @@ export default function PlayerWaitingPanel({ rows, trackingStartedAt }: {
   const statusOrder = { waiting: 0, playing: 1, unavailable: 2 };
   const sorted = [...rows].sort((a, b) => statusOrder[a.status] - statusOrder[b.status]
     || (a.status === 'waiting' && tracking ? (a.since ?? Infinity) - (b.since ?? Infinity) : 0)
-    || b.gamesWaited - a.gamesWaited || a.gamesPlayed - b.gamesPlayed || a.name.localeCompare(b.name));
+    || b.slotsWaited - a.slotsWaited || a.gamesPlayed - b.gamesPlayed || a.name.localeCompare(b.name));
   const waiting = rows.filter(row => row.status === 'waiting');
   const earliest = Math.min(...waiting.flatMap(row => tracking && row.since != null ? [row.since] : []));
   return <details aria-label="Player waiting times" onToggle={event => setExpanded(event.currentTarget.open)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 16 }}>
@@ -47,17 +47,17 @@ export default function PlayerWaitingPanel({ rows, trackingStartedAt }: {
     </summary>
     {expanded && <div style={{ padding: '0 16px 16px' }}>
       <p style={{ color: C.textDim, fontSize: 12, margin: '0 0 12px' }}>
-        {tracking ? 'Waiting time runs only while available and off court. Games waited counts eligible game finishes since last playing; each court finish counts once.'
+        {tracking ? 'Waiting time runs only while available and off court. Slots waited counts each eligible slot once since last playing, regardless of how many courts finish.'
           : 'Press Start session timers when play begins to track waiting time.'}
       </p>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-          <thead><tr>{['Player', 'Status', 'Wait time', 'Games waited', 'Games played'].map(label => <th key={label} scope="col" style={{ color: C.textDim, padding: '8px 10px', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{label}</th>)}</tr></thead>
+          <thead><tr>{['Player', 'Status', 'Wait time', 'Slots waited', 'Games played'].map(label => <th key={label} scope="col" style={{ color: C.textDim, padding: '8px 10px', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{label}</th>)}</tr></thead>
           <tbody>{sorted.map(row => <tr key={row.key}>
             <th scope="row" style={{ padding: '10px', borderBottom: `1px solid ${C.border}`, overflowWrap: 'anywhere' }}>{row.name}</th>
             <td style={{ padding: 10, color: row.status === 'waiting' ? C.amber : C.textDim }}>{row.status === 'playing' ? 'Playing' : row.status === 'unavailable' ? 'Unavailable' : 'Waiting'}</td>
             <td style={{ padding: 10, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{row.status !== 'waiting' ? '—' : !tracking ? 'Not started' : row.since == null ? <span title="Waiting start time was not recorded for this player">Time not recorded</span> : elapsed(row.since, now)}</td>
-            <td style={{ padding: 10 }}>{row.status === 'waiting' ? row.gamesWaited : '—'}</td>
+            <td style={{ padding: 10 }}>{row.status === 'waiting' ? row.slotsWaited : '—'}</td>
             <td style={{ padding: 10 }}>{row.gamesPlayed}</td>
           </tr>)}</tbody>
         </table>

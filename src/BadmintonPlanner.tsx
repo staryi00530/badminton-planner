@@ -35,7 +35,7 @@ import PlayerList from './components/PlayerList';
 import LiveSessionBoard from './components/LiveSessionBoard';
 import PlayerWaitingPanel from './components/PlayerWaitingPanel';
 import { waitingPlayerKey, waitingPlayerStatuses } from './utils/waitingClock';
-import { historyGamesWaited, historyScheduleState, migratePlayedGames } from './utils/playedHistory';
+import { historySlotsWaited, historyScheduleState, migratePlayedGames } from './utils/playedHistory';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
 import SessionStatusPanel from './components/SessionStatusPanel';
 import AboutTab from './components/AboutTab';
@@ -997,12 +997,12 @@ function BadmintonPlanner() {
     : 'Schedule edits stay in this browser.';
   const selectedTab = activeTab === 'live' && !result ? 'setup' : activeTab;
   const waitingHistory = isAdmin && result ? migratePlayedGames(result, players, completedGames, scores, playedGames) : [];
-  const gamesWaited = historyGamesWaited(waitingHistory, players, liveGames);
+  const slotsWaited = historySlotsWaited(waitingHistory, players, liveGames);
   const playedCounts = historyScheduleState(waitingHistory, players).gamesPlayed;
   const playedCountsById = new Map(players.map((player, index) => [waitingPlayerKey(player), playedCounts[index] ?? 0]));
   const waitingRows = isAdmin && result ? waitingPlayerStatuses({ players, result, liveGames, completedGames, staggerMode, suspendedPlayerNames })
     .map(({ player, key, status }) => ({ key, name: player.name, status, since: waitingClock?.since[key],
-      gamesWaited: gamesWaited[player.name] ?? 0, gamesPlayed: playedCountsById.get(key) ?? 0 })) : [];
+      slotsWaited: slotsWaited[player.name] ?? 0, gamesPlayed: playedCountsById.get(key) ?? 0 })) : [];
   const liveBoard = result && <LiveSessionBoard
     result={result}
     players={players}

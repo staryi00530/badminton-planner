@@ -201,7 +201,7 @@ async function verifyOrganizerHandoff(newContext) {
   assert.deepEqual((await read(target))['live-games'].map(g=>g.startedAt),imported['live-games'].map(g=>g.startedAt));
   assert.deepEqual((await read(target))['waiting-clock'],imported['waiting-clock']);
   await waitingPanel(target).locator('summary').click();
-  await expect(waitingPanel(target).getByRole('columnheader',{name:'Games waited',exact:true})).toBeVisible();
+  await expect(waitingPanel(target).getByRole('columnheader',{name:'Slots waited',exact:true})).toBeVisible();
   await finish(target,2);assert.equal((await read(source))['played-games'].length,1);
   assert.equal(await waitingPanel(target).locator('tbody tr td:last-child').evaluateAll(cells=>cells.reduce((sum,cell)=>sum+Number(cell.textContent),0)),8);
   assert.equal(creates,1);assert.equal(reads,1);assert.equal(JSON.stringify(records.get('private-copy')),storedEnvelope);

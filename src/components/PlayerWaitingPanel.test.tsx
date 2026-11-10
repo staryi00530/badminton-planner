@@ -7,10 +7,10 @@ describe('PlayerWaitingPanel', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000); });
   afterEach(() => { cleanup(); vi.useRealTimers(); });
   const rows = [
-    { key: 'a', name: 'Alice', status: 'waiting' as const, since: 940_000, gamesWaited: 2, gamesPlayed: 1 },
-    { key: 'b', name: 'Ben', status: 'waiting' as const, since: 880_000, gamesWaited: 3, gamesPlayed: 0 },
-    { key: 'c', name: 'Chris', status: 'playing' as const, gamesWaited: 0, gamesPlayed: 2 },
-    { key: 'd', name: 'Dani', status: 'unavailable' as const, gamesWaited: 4, gamesPlayed: 1 },
+    { key: 'a', name: 'Alice', status: 'waiting' as const, since: 940_000, slotsWaited: 2, gamesPlayed: 1 },
+    { key: 'b', name: 'Ben', status: 'waiting' as const, since: 880_000, slotsWaited: 3, gamesPlayed: 0 },
+    { key: 'c', name: 'Chris', status: 'playing' as const, slotsWaited: 0, gamesPlayed: 2 },
+    { key: 'd', name: 'Dani', status: 'unavailable' as const, slotsWaited: 4, gamesPlayed: 1 },
   ];
   const expand = () => {
     const panel = screen.getByLabelText('Player waiting times') as HTMLDetailsElement;

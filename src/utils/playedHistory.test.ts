@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { makePlayedGame, migratePlayedGames, mergePlayedGames, remainingCourtsPerSlot, historyScheduleState, historyGamesWaited, historyCourts } from './playedHistory';
+import { makePlayedGame, migratePlayedGames, mergePlayedGames, remainingCourtsPerSlot, historyScheduleState, historyGamesWaited, historySlotsWaited, historyCourts } from './playedHistory';
 import type { Player } from '../algorithm/types';
 const players: Player[] = ['A','B','C','D','E','F'].map((name,i)=>({id:name,name,gender:i%2?'F':'M',availFrom:0,availTo:10}));
 const result = {planId:'p1',schedule:[{slot:1,courts:[{court:1,teamA:[players[0]!,players[1]!] as [Player,Player],teamB:[players[2]!,players[3]!] as [Player,Player]}],sitting:players.slice(4),playerState:[],repeatedCourts:[]}],gamesPlayed:[]};
+it('counts a waiting slot once across courts and recovery plans, and excludes unavailable slots',()=>{
+ const base=makePlayedGame(result,players,{slot:1,court:0},{},[],1)!;
+ const history=[base,{...base,id:'court2',court:1,teamA:[{...base.teamA[1],id:'guest',name:'Guest'},base.teamA[0]] as typeof base.teamA},
+  {...base,id:'recovery',planId:'recovery'}, {...base,id:'next',slot:2}, {...base,id:'absent',slot:3,waitingIds:[]}];
+ expect(historySlotsWaited(history,players).E).toBe(2);
+ expect(historyGamesWaited(history,players).E).toBe(4);
+ expect(historySlotsWaited(history,players,[{slot:4,court:0,players:['E']}]).E).toBe(0);
+});
+it('resets slot waits after playing and never credits late finishes from played or earlier slots',()=>{
+ const base=makePlayedGame(result,players,{slot:1,court:0},{},[],1)!;
+ const play={...base,id:'play',slot:2,teamA:[{id:'E',name:'E',gender:'M' as const},base.teamA[1]] as typeof base.teamA};
+ const history=[base,play,{...base,id:'late-same-slot',slot:2},{...base,id:'late-older-slot',slot:1}, {...base,id:'future',slot:3}];
+ const renamed=players.map(p=>p.id==='E'?{...p,name:'Renamed'}:p);
+ expect(historySlotsWaited(history,renamed).Renamed).toBe(1);
+ expect(historySlotsWaited(history.slice(0,-1),renamed).Renamed).toBe(0);
+ expect(historySlotsWaited(history.filter(g=>g.id!=='play'),renamed).Renamed).toBe(3);
+});
 describe('played history',()=>{
  it('snapshots public identity and score and deduplicates migration',()=>{
  const scores={s1c0:{a:'21',b:'15',applied:true,teamA:['A','B'],teamB:['C','D']}};
