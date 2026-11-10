@@ -17,3 +17,5 @@ Admin panel is collapsible to keep Finish controls near the top. Summary shows w
 - [ ] Strict/full unit/browser checks, production build, fresh review, beta-only deployment and verify main unchanged.
 
 Validation: full Node 24 typecheck and 663 unit tests passed, then complete browser smoke (40 games, 2–5 courts, eight desktop/mobile workflows, 35-player private handoff and waiting-clock refresh). Final stale-timer-request regression added and 50 helper/shared tests passed. Production beta build passed. Independent review findings fixed and re-reviewed. Beta deployment verification follows push.
+
+Follow-up: first CI run hit the existing five-second Setup Apply/Undo UI test limit (663 other tests passed). Lazy-mount the waiting table only when expanded to reduce hidden DOM work. Independent delta review passed. Fresh full validation: 665 unit tests, complete browser smoke, and beta production build passed. Native details-toggle test flushes its browser event before asserting the single display interval.

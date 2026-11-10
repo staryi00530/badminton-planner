@@ -24,6 +24,7 @@ export default function PlayerWaitingPanel({ rows, trackingStartedAt }: {
   trackingStartedAt?: number;
 }) {
   const [now, setNow] = useState(Date.now);
+  const [expanded, setExpanded] = useState(false);
   const tracking = trackingStartedAt != null;
   const hasRecordedWait = tracking && rows.some(row => row.status === 'waiting' && row.since != null);
   useEffect(() => {
@@ -40,11 +41,11 @@ export default function PlayerWaitingPanel({ rows, trackingStartedAt }: {
     || b.gamesWaited - a.gamesWaited || a.gamesPlayed - b.gamesPlayed || a.name.localeCompare(b.name));
   const waiting = rows.filter(row => row.status === 'waiting');
   const earliest = Math.min(...waiting.flatMap(row => tracking && row.since != null ? [row.since] : []));
-  return <details aria-label="Player waiting times" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 16 }}>
+  return <details aria-label="Player waiting times" onToggle={event => setExpanded(event.currentTarget.open)} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 16 }}>
     <summary style={{ padding: '14px 16px', minHeight: 48, boxSizing: 'border-box', cursor: 'pointer', fontWeight: 700 }}>
       Player waiting times <span style={{ fontSize: 12, fontWeight: 400, color: C.textDim }}>· {waiting.length} waiting{Number.isFinite(earliest) ? ` · longest ${elapsed(earliest, now)}` : ''}</span>
     </summary>
-    <div style={{ padding: '0 16px 16px' }}>
+    {expanded && <div style={{ padding: '0 16px 16px' }}>
       <p style={{ color: C.textDim, fontSize: 12, margin: '0 0 12px' }}>
         {tracking ? 'Waiting time runs only while available and off court. Games waited counts eligible game finishes since last playing; each court finish counts once.'
           : 'Press Start session timers when play begins to track waiting time.'}
@@ -61,6 +62,6 @@ export default function PlayerWaitingPanel({ rows, trackingStartedAt }: {
           </tr>)}</tbody>
         </table>
       </div>
-    </div>
+    </div>}
   </details>;
 }

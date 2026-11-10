@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlayerWaitingPanel from './PlayerWaitingPanel';
 
@@ -12,8 +12,21 @@ describe('PlayerWaitingPanel', () => {
     { key: 'c', name: 'Chris', status: 'playing' as const, gamesWaited: 0, gamesPlayed: 2 },
     { key: 'd', name: 'Dani', status: 'unavailable' as const, gamesWaited: 4, gamesPlayed: 1 },
   ];
+  const expand = () => {
+    const panel = screen.getByLabelText('Player waiting times') as HTMLDetailsElement;
+    panel.open = true;
+    fireEvent(panel, new Event('toggle'));
+    act(() => vi.advanceTimersByTime(0)); // Flush the browser's queued native toggle event.
+  };
+  it('keeps the table out of the collapsed organizer view until expanded', () => {
+    render(<PlayerWaitingPanel rows={rows} trackingStartedAt={880_000} />);
+    expect(screen.queryByRole('table', { hidden: true })).not.toBeInTheDocument();
+    expand();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+  });
   it('sorts the longest recorded wait first and shows completed counts separately', () => {
     render(<PlayerWaitingPanel rows={rows} trackingStartedAt={880_000} />);
+    expand();
     expect(screen.getByText(/2 waiting.*longest 02:00/)).toBeInTheDocument();
     const tableRows = screen.getAllByRole('row', { hidden: true });
     expect(within(tableRows[1]!).getByText('Ben')).toBeInTheDocument();
@@ -25,6 +38,7 @@ describe('PlayerWaitingPanel', () => {
   });
   it('does not invent elapsed time before tracking or for legacy unknown waits', () => {
     const { rerender } = render(<PlayerWaitingPanel rows={rows} />);
+    expand();
     expect(screen.getAllByText('Not started').length).toBe(2);
     expect(screen.getByText(/Press Start session timers/)).toBeInTheDocument();
     rerender(<PlayerWaitingPanel rows={[{ ...rows[0]!, since: undefined }]} trackingStartedAt={900_000} />);
@@ -33,6 +47,7 @@ describe('PlayerWaitingPanel', () => {
   });
   it('ticks only its own display, catches up on return, and cleans up', () => {
     const { unmount } = render(<PlayerWaitingPanel rows={rows} trackingStartedAt={880_000} />);
+    expand();
     expect(vi.getTimerCount()).toBe(1);
     act(() => vi.advanceTimersByTime(1000));
     expect(screen.getByText('02:01')).toBeInTheDocument();
