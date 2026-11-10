@@ -149,7 +149,8 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
   const projectedAverage = projections.length ? projections.reduce((sum, p) => sum + p.quality.score, 0) / projections.length : null;
   const liveQualities = live.map(game => ({ game, quality: scoreGameQuality(game.slot.courts[game.court]!, { players: props.players, slot: game.slot.slot, history: actualHistory, preferredPairs: props.preferredQualityPairs }, qualityWeights) }));
   const gameQualityScores = new Map([...projections, ...liveQualities].map(({ game, quality }) => [key(game.slot.slot, game.court), quality.score]));
-  const gameProps = { ...props, blockedPlayerNames, gameQualityScores };
+  const gameQualityAssessments = new Map([...projections, ...liveQualities].map(({ game, quality }) => [key(game.slot.slot, game.court), quality]));
+  const gameProps = { ...props, blockedPlayerNames, gameQualityScores, gameQualityAssessments };
   return <div ref={props.scheduleRef} role="region" aria-label="Live session board" style={{ minWidth: 0, marginBottom: 24 }}>
     <SessionSummary players={props.players} liveGames={liveGames} completedGames={completedGames} result={result} fromSlot={fromSlot} staggerMode={props.staggerMode ?? 'none'} />
     {props.isAdmin && props.waitingPanel}

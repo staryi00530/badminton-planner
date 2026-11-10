@@ -6,6 +6,7 @@ import type { GameRef } from '../utils/liveQueue';
 import type { EditLayout, PlannerResult, ScoresMap } from '../types';
 import type { QueueAdjustmentNotice } from '../hooks/useLiveQueue';
 import SlotCard from './SlotCard';
+import type { GameQualityAssessment } from './GameQualityBreakdown';
 
 export interface ScheduleGridProps {
   result: PlannerResult;
@@ -33,6 +34,7 @@ export interface ScheduleGridProps {
   liveCapacity?: number;
   queueAdjustment?: QueueAdjustmentNotice | null;
   gameQualityScores?: ReadonlyMap<string, number>;
+  gameQualityAssessments?: ReadonlyMap<string, GameQualityAssessment>;
 }
 
 export interface ScheduledGame {
@@ -75,6 +77,7 @@ export function ScheduleGame({ props, game, sessionActions = false, waitingReaso
     sessionActions={sessionActions}
     waitingReason={waitingReason}
     qualityScore={props.gameQualityScores?.get(`${slot.slot}:${court}`)}
+    qualityAssessment={props.gameQualityAssessments?.get(`${slot.slot}:${court}`)}
   />;
 }
 

@@ -57,8 +57,10 @@ describe('LiveSessionBoard', () => {
     expect(within(lane(1)).getByLabelText('Matchup quality score')).toHaveTextContent('Quality: 15 points');
     expect(screen.getAllByLabelText('Matchup quality score').map(item => item.textContent)).toEqual(['Quality: 15 points', 'Quality: 15 points', 'Quality: 5 points']);
     expect(screen.getByText('Waiting panel fixture')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Game quality breakdown')).toHaveLength(3);
     rerender(<LiveSessionBoard {...setup} isAdmin={false} waitingPanel={<div>Waiting panel fixture</div>} />);
     expect(screen.queryAllByLabelText('Matchup quality score')).toHaveLength(0);
+    expect(screen.queryAllByLabelText('Game quality breakdown')).toHaveLength(0);
     expect(screen.queryByText('Waiting panel fixture')).not.toBeInTheDocument();
   });
   it('uses retained completions once when current slot numbers are reused', () => {

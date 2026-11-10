@@ -136,6 +136,11 @@ async function verifyOrganizerHandoff(newContext) {
   await source.getByRole('button',{name:'Start session timers',exact:true}).click();
   await expect(current(source).getByText('Elapsed 00:00',{exact:true})).toHaveCount(5);
   await expect(current(source).getByLabel('Matchup quality score')).toHaveCount(5);
+  const breakdown=current(source).getByLabel('Game quality breakdown',{exact:true}).first();
+  await breakdown.locator('summary').click();
+  await expect(breakdown.getByRole('columnheader',{name:'Points',exact:true})).toBeVisible();
+  await expect(breakdown).toContainText('Waiting priority is separate');
+  await breakdown.locator('summary').click();
   const waitingPanel=page=>page.getByLabel('Player waiting times',{exact:true});
   await waitingPanel(source).locator('summary').click();
   await expect(waitingPanel(source).getByText('00:00',{exact:true})).toHaveCount(15);
