@@ -91,9 +91,9 @@ function validate(value: unknown, now: number): OrganizerSetup {
     if (d.players.length !== players.length || d.players.some((v, i) => v.name !== players[i]!.name || v.id !== (players[i]!.id ?? `legacy:${players[i]!.name.toLocaleLowerCase()}`)))
         throw invalid();
     const forecast = forecastSnapshot(s.forecast, p);
-    const refs = (games: typeof d.liveGames) => games.map(g => ({ slot: g.slot, court: g.court, ...(g.id ? { id: g.id } : {}), ...(g.displayCourt !== undefined ? { displayCourt: g.displayCourt } : {}), ...(g.players ? { players: [...g.players] } : {}) }));
+    const refs = (games: typeof d.liveGames) => games.map(g => ({ slot: g.slot, court: g.court, ...(g.id ? { id: g.id } : {}), ...(g.startedAt !== undefined ? { startedAt: g.startedAt } : {}), ...(g.displayCourt !== undefined ? { displayCourt: g.displayCourt } : {}), ...(g.players ? { players: [...g.players] } : {}) }));
     for (const g of [...d.liveGames, ...d.completedGames])
-        if ((g.id !== undefined && !text(g.id)) || (g.displayCourt !== undefined && !int(g.displayCourt, 0, 4)) || (g.players !== undefined && (!Array.isArray(g.players) || g.players.length !== 4 || !g.players.every(text))))
+        if ((g.startedAt !== undefined && (typeof g.startedAt !== 'number' || !Number.isInteger(g.startedAt) || g.startedAt < 0)) || (g.id !== undefined && !text(g.id)) || (g.displayCourt !== undefined && !int(g.displayCourt, 0, 4)) || (g.players !== undefined && (!Array.isArray(g.players) || g.players.length !== 4 || !g.players.every(text))))
             throw invalid();
     const publicSession = buildSharePayload({ result: d.result, playersWithAvailability: d.players, gameMinutes: d.gameMinutes, numCourts: d.numCourts, scores: d.scores, isConfirmed: d.isConfirmed,
         settings: { totalMinutes: d.totalMinutes, sessionStart: d.sessionStart, staggerMode: d.staggerMode, extraCourt: { enabled: d.extraCourt.enabled, startMin: d.extraCourt.startMin, durationMin: d.extraCourt.durationMin }, courtOverrides: { ...d.courtOverrides } },

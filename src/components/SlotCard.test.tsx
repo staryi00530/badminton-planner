@@ -211,3 +211,21 @@ function required<T>(value: T | null | undefined): T {
   if (value == null) throw new Error('Expected test element to exist');
   return value;
 }
+
+describe('SlotCard — live elapsed time', () => {
+  it('shows independent elapsed times on five live courts', () => {
+    const now = Date.now();
+    renderSlotCard(makeSlot(5), { liveGames: Array.from({ length: 5 }, (_, court) => ({ slot: 1, court, startedAt: now - court * 60_000 })) });
+    for (let court = 0; court < 5; court++) expect(screen.getByText(`Elapsed 0${court}:00`)).toBeInTheDocument();
+  });
+
+  it('shows unknown elapsed time for legacy live games even without actions', () => {
+    renderSlotCard(makeSlot(1), { liveGames: [{ slot: 1, court: 0 }], onToggleLive: undefined });
+    expect(screen.getByText('Elapsed —')).toBeInTheDocument();
+  });
+
+  it('hides elapsed time for queued and completed games', () => {
+    renderSlotCard(makeSlot(2), { liveGames: [], completedGames: [{ slot: 1, court: 0 }], canStartGame: false });
+    expect(screen.queryByText(/Elapsed/)).not.toBeInTheDocument();
+  });
+});

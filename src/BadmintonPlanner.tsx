@@ -23,7 +23,7 @@ import { computeCourtsPerSlot } from './utils/courtsPerSlot';
 import { applyAvailability as applyAvailabilityUtil } from './utils/availability';
 import { formatSlotTime } from './utils/slotTime';
 import { isValidBadmintonScore } from './utils/scoreValidation';
-import { exportLiveQueueLogs, gameMatches, keepGamesBeforeSlot, liveQueueDebug } from './utils/liveQueue';
+import { exportLiveQueueLogs, startUntimedLiveGames, gameMatches, keepGamesBeforeSlot, liveQueueDebug } from './utils/liveQueue';
 import type { GameRef } from './utils/liveQueue';
 import { useLiveQueue } from './hooks/useLiveQueue';
 import { useScheduleActions, regenerationState, remainingPlanCourts } from './hooks/useScheduleActions';
@@ -899,12 +899,28 @@ function BadmintonPlanner() {
     const rendered = { ...payload, ...(!sharedSync.latest?.ids ? { ids: undefined } : {}), ...(!sharedSync.latest?.planId ? { planId: undefined } : {}) };
     void sharedSync.performAction({ type, at: Date.now(), id: crypto.randomUUID(), gameId: sharedGameId(rendered, slot, court), ...(displayCourt != null ? { displayCourt } : {}) });
   };
+  const startSessionTimers = () => {
+    if (!isAdmin || isGenerating || !liveGames.length) return;
+    const now = Date.now();
+    if (!sharedTarget) {
+      recordUndo();
+      patchState({ liveGames: startUntimedLiveGames(liveGames, now) });
+      return;
+    }
+    if (sharedSync.status !== 'saved') { patchState({ sessionChangeNotice: 'Wait for the shared session to finish saving before starting its timers.' }); return; }
+    const payload = buildSharePayload();
+    if (!payload) return;
+    const rendered = { ...payload, ...(!sharedSync.latest?.ids ? { ids: undefined } : {}), ...(!sharedSync.latest?.planId ? { planId: undefined } : {}) };
+    void sharedSync.performAction({ type: 'start_timers', id: crypto.randomUUID(), at: now,
+      gameIds: liveGames.map(game => sharedGameId(rendered, game.slot, game.court)),
+    });
+  };
   const resolveSessionPromotion = (choice: 'lookahead' | 'substitute') => {
     if (!sharedTarget) { resolveQueuePromotion(choice); return; }
     if (!queuePromotionPrompt || !sharedSync.latest) return;
     const selected = choice === 'lookahead' ? queuePromotionPrompt.lookaheadGame : queuePromotionPrompt.prompt.firstGame;
     if (!selected) return;
-    void sharedSync.performAction({ type: 'start', id: crypto.randomUUID(), gameId: sharedGameId(sharedSync.latest, selected.slot, selected.court),
+    void sharedSync.performAction({ type: 'start', at: Date.now(), id: crypto.randomUUID(), gameId: sharedGameId(sharedSync.latest, selected.slot, selected.court),
       displayCourt: queuePromotionPrompt.prompt.completedCourt - 1,
       ...(choice === 'substitute' ? { replacements: queuePromotionPrompt.prompt.replacements.map(({ replacee, replacer }) => ({ replacee, replacer })) } : {}),
     }).then(saved => { if (saved) patchState({ queuePromotionPrompt: null }); });
@@ -998,6 +1014,8 @@ function BadmintonPlanner() {
     changeCapacity={liveCapacity}
     queueAdjustment={queueAdjustment}
     staggerMode={staggerMode}
+    onStartSessionTimers={startSessionTimers}
+    sessionTimersDisabled={isGenerating || Boolean(sharedTarget && sharedSync.status !== 'saved')}
     preferredQualityPairs={preferredPairs}
     qualityWeights={qualityWeights}
     onQualityWeightsChange={setQualityWeights}

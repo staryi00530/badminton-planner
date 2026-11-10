@@ -18,6 +18,8 @@ interface LiveSessionBoardProps extends ScheduleGridProps {
   qualityWeights?: QualityWeights;
   onQualityWeightsChange?: (weights: QualityWeights) => void;
   playedGames?: PlayedGame[];
+  onStartSessionTimers?: () => void;
+  sessionTimersDisabled?: boolean;
 }
 
 const key = (slot: number, court: number) => `${slot}:${court}`;
@@ -147,6 +149,12 @@ export default function LiveSessionBoard(props: LiveSessionBoardProps) {
   const projectedAverage = projections.length ? projections.reduce((sum, p) => sum + p.quality.score, 0) / projections.length : null;
   return <div ref={props.scheduleRef} role="region" aria-label="Live session board" style={{ minWidth: 0, marginBottom: 24 }}>
     <SessionSummary players={props.players} liveGames={liveGames} completedGames={completedGames} result={result} fromSlot={fromSlot} staggerMode={props.staggerMode ?? 'none'} />
+    {props.isAdmin && props.onStartSessionTimers && live.some(game => game.ref.startedAt == null) && (
+      <section aria-label="Session timers" style={{ marginBottom: 16 }}>
+        <p style={{ color: C.textDim, fontSize: 12 }}>During preparation, timers wait. Select Start session timers when play begins. Timers already running keep their start times.</p>
+        <button type="button" onClick={() => props.onStartSessionTimers?.()} disabled={props.sessionTimersDisabled} style={{ background: C.accentDim, color: '#fff', border: 'none', borderRadius: 6, padding: '10px 16px', minHeight: 44, fontSize: 14, fontWeight: 700, fontFamily: FONT, cursor: props.sessionTimersDisabled ? 'not-allowed' : 'pointer', opacity: props.sessionTimersDisabled ? 0.6 : 1 }}>Start session timers</button>
+      </section>
+    )}
     {props.isAdmin && <section aria-label="Game quality" style={{ marginBottom: 16 }}><details>
       <summary>Game quality and weights</summary>
       <p style={{ fontSize: 12 }}>Higher matchup points mean a better fit. Rotation priority and play eligibility are separate. {props.onQualityWeightsChange ? 'Weights apply to future generated team splits and compare planned games; current lineups remain unchanged.' : 'These local weights compare planned games; they do not change lineups.'} Waiting counts eligible completed games since last play; unknown levels use 3.</p>

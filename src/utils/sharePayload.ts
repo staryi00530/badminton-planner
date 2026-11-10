@@ -154,6 +154,7 @@ export function reconstructScheduleFromSharePayload(
     if (!Array.isArray(games ?? [])) throw invalid();
     return (games ?? []).map(game => {
       if (!Number.isInteger(game.slot) || !Number.isInteger(game.court) || !newSchedule.find(slot => slot.slot === game.slot)?.courts[game.court]) throw invalid();
+      if (game.startedAt !== undefined && (typeof game.startedAt !== 'number' || !Number.isInteger(game.startedAt) || game.startedAt < 0)) throw invalid();
       return game;
     });
   };

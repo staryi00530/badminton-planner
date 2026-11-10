@@ -7,6 +7,7 @@ import { publicPlayedGames } from './playedHistoryCodec';
 
 export type SharedAction =
   | { type: 'finish' | 'start'; id: string; gameId: string; at?: number; displayCourt?: number; replacements?: Array<{ replacee: string; replacer: string }> }
+  | { type: 'start_timers'; id: string; at: number; gameIds: string[] }
   | { type: 'undo'; id: string; target: string; confirmDependents?: boolean };
 
 const same = (a: GameRef, b: GameRef) => a.slot === b.slot && a.court === b.court;
@@ -31,14 +32,31 @@ export function commitSharedSnapshot(current: SharePayload | null, expectedRevis
     const changed = incoming.find(item => item.id === game.id);
     return changed?.score ? { ...game, score: changed.score } : game;
   });
+  const runtime = next.runtime && { ...next.runtime, live: next.runtime.live?.map(game => {
+    const active = !newPlan && current.runtime?.live?.find(item => same(item, game)
+      && sharedGameId(current, item.slot, item.court) === sharedGameId(next, game.slot, game.court));
+    if (!active) return game;
+    const { startedAt: _incomingStart, ...rest } = game;
+    return { ...rest, ...(active.startedAt !== undefined ? { startedAt: active.startedAt } : {}) };
+  }) };
   // Receipts outlive replaced plans so delayed requests cannot replay an undone action.
-  return { ...next, history, historyEpoch: nextEpoch, actions: newPlan ? [] : current.actions ?? [], receipts: current.receipts ?? [], revision: expectedRevision + 1, schema: 3 };
+  return { ...next, ...(runtime ? { runtime } : {}), history, historyEpoch: nextEpoch, actions: newPlan ? [] : current.actions ?? [], receipts: current.receipts ?? [], revision: expectedRevision + 1, schema: 3 };
 }
 
 /** Pure RTDB transaction reducer; no random IDs, side effects or client clocks. */
 export function applySharedAction(current: SharePayload | null, action: SharedAction): SharePayload | null {
   if (!current) return null;
   if (current.receipts?.includes(action.id)) return current;
+  if (action.type === 'start_timers') {
+    if (typeof action.at !== 'number' || !Number.isInteger(action.at) || action.at < 0
+      || !Array.isArray(action.gameIds) || !action.gameIds.every(id => typeof id === 'string')) return null;
+    const requested = new Set(action.gameIds);
+    const live = current.runtime?.live?.map(game => game.startedAt === undefined && requested.has(sharedGameId(current, game.slot, game.court))
+      ? { ...game, startedAt: action.at } : game);
+    return { ...current, ...(current.runtime ? { runtime: { ...current.runtime, ...(live ? { live } : {}) } } : {}),
+      receipts: [...(current.receipts ?? []), action.id].slice(-1000), revision: (current.revision ?? 0) + 1, schema: 3 };
+  }
+  const activation = action.type !== 'undo' && action.at !== undefined && Number.isInteger(action.at) && action.at >= 0 ? { startedAt: action.at } : {};
   const data = structuredClone(current);
   const decoded = reconstructScheduleFromSharePayload(data, { currentGameMinutes: 15, currentNumCourts: 1 });
   data.history = decoded.playedGames;
@@ -98,7 +116,7 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
       const used = new Set(live.map(g => g.displayCourt ?? g.court));
       const finishingLane = active.displayCourt ?? active.court;
       const lane = finishingLane < capacity && !used.has(finishingLane) ? finishingLane : Array.from({ length: capacity }, (_, i) => i).find(i => !used.has(i));
-      const promoted: GameRef[] = next && live.length < capacity && lane != null ? [{ ...next, id: sharedGameId(data, next.slot, next.court), displayCourt: lane, players: indices(data, next).map(i => data.p[i]![0]) }] : [];
+      const promoted: GameRef[] = next && live.length < capacity && lane != null ? [{ ...next, ...activation, id: sharedGameId(data, next.slot, next.court), displayCourt: lane, players: indices(data, next).map(i => data.p[i]![0]) }] : [];
       live = [...live, ...promoted];
       data.actions = [...history, { id: action.id, gameId: action.gameId, game: active, promoted, playedGameId: played.id }].slice(-20);
     } else {
@@ -121,7 +139,7 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
       const used = new Set(live.map(item => item.displayCourt ?? item.court));
       const lane = action.displayCourt ?? Array.from({ length: capacity }, (_, i) => i).find(i => !used.has(i));
       if (lane == null || lane < 0 || lane >= capacity || used.has(lane)) return null;
-      const started = { ...game, id: sharedGameId(data, game.slot, game.court), displayCourt: lane, players: indices(data, game).map(i => data.p[i]![0]) };
+      const started = { ...game, ...activation, id: sharedGameId(data, game.slot, game.court), displayCourt: lane, players: indices(data, game).map(i => data.p[i]![0]) };
       live = [...live, started];
       // An explicitly accepted substitution fills the free lane left by this Finish.
       const priorFinish = [...history].reverse().find(item => (item.game.displayCourt ?? item.game.court) === lane && !(item.promoted?.length) && completed.some(done => same(done, item.game)));

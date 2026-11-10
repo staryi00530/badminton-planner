@@ -111,3 +111,85 @@ describe('shared session transactions', () => {
     expect(finished.runtime?.live).toHaveLength(1);
   });
 });
+
+
+describe('shared court activation timestamps', () => {
+  it('stamps Finish promotion, preserves other courts and restores Undo time', () => {
+    const base = session();
+    base.runtime!.live![0]!.startedAt = 100;
+    base.runtime!.live![1]!.startedAt = 200;
+    const action = { type: 'finish' as const, id: 'timed', gameId: sharedGameId(base, 1, 0), at: 1000 };
+    const done = applySharedAction(base, action)!;
+    expect(done.runtime?.live?.map(g => g.startedAt)).toEqual([200, 1000]);
+    expect(applySharedAction(done, action)).toEqual(done);
+    expect(applySharedAction(done, { ...action, id: 'duplicate', at: 2000 })?.runtime).toEqual(done.runtime);
+    const undone = applySharedAction(done, { type: 'undo', id: 'undo-time', target: 'timed', confirmDependents: true })!;
+    expect(undone.runtime?.live?.find(g => g.court === 0)?.startedAt).toBe(100);
+  });
+  it.each([0, 1234, undefined, -1, 1.5, NaN, Infinity])('uses only valid explicit activation time %s', at => {
+    const base = session();
+    base.runtime!.live = [{ slot: 1, court: 1 }];
+    const action = { type: 'start' as const, id: 'start-time', gameId: sharedGameId(base, 1, 0), at };
+    const started = applySharedAction(base, action)!;
+    const active = started.runtime!.live!.find(g => g.court === 0)!;
+    expect(active.startedAt).toBe(at !== undefined && Number.isInteger(at) && at >= 0 ? at : undefined);
+    expect(applySharedAction(started, { ...action, id: 'retry', at: 9000 })?.runtime).toEqual(started.runtime);
+  });
+  it('keeps authoritative active time across ordinary commits including legacy unknown time', () => {
+    const base = session();
+    base.runtime!.live![0]!.startedAt = 100;
+    const next = structuredClone(base);
+    delete next.runtime!.live![0]!.startedAt;
+    next.runtime!.live![1]!.startedAt = 9000;
+    expect(commitSharedSnapshot(base, 0, next)?.runtime?.live?.map(g => g.startedAt)).toEqual([100, undefined]);
+    next.runtime!.live![0]!.startedAt = 5000;
+    expect(commitSharedSnapshot(base, 0, next)?.runtime?.live?.[0]?.startedAt).toBe(100);
+    next.planId = 'new';
+    expect(commitSharedSnapshot(base, 0, next)?.runtime?.live?.[0]?.startedAt).toBe(5000);
+  });
+});
+
+
+it('accepts fresh timestamps for new live games or changed lineups in snapshot commits', () => {
+  const base = session();
+  base.runtime!.live![0]!.startedAt = 100;
+  const next = structuredClone(base);
+  next.slots[0]!.c[0] = [[0, 1], [2, 8]];
+  next.runtime!.live![0]!.startedAt = 5000;
+  next.runtime!.live!.push({ slot: 2, court: 0, startedAt: 6000 });
+  const committed = commitSharedSnapshot(base, 0, next)!;
+  expect(committed.runtime?.live?.map(g => g.startedAt)).toEqual([5000, undefined, 6000]);
+});
+it.each([undefined, -1, 0.5, NaN, Infinity])('omits invalid or missing Finish replacement time %s', at => {
+  const base = session();
+  const done = applySharedAction(base, { type: 'finish', id: 'legacy', gameId: sharedGameId(base, 1, 0), at })!;
+  expect(done.runtime?.live?.find(g => g.slot === 2)).not.toHaveProperty('startedAt');
+});
+
+
+describe('shared session timer start', () => {
+  it('starts requested unknown live clocks while preserving timed courts and history', () => {
+    const base = session();
+    base.runtime!.live![1]!.startedAt = 100;
+    const action = { type: 'start_timers' as const, id: 'timers', at: 1000, gameIds: base.runtime!.live!.map(g => sharedGameId(base, g.slot, g.court)) };
+    const started = applySharedAction(base, action)!;
+    expect(started.runtime?.live?.map(g => g.startedAt)).toEqual([1000, 100]);
+    expect(started.actions).toEqual(base.actions);
+    expect(applySharedAction(started, { ...action, at: 2000 })).toEqual(started);
+    expect(applySharedAction(started, { ...action, id: 'timers-2', at: 3000 })?.runtime).toEqual(started.runtime);
+  });
+  it('only starts selected currently live identities and rejects old plan identities', () => {
+    const base = { ...session(), planId: 'new' };
+    const old = { ...base, planId: 'old' };
+    const started = applySharedAction(base, { type: 'start_timers', id: 'select', at: 1000, gameIds: [sharedGameId(base, 1, 0), sharedGameId(old, 1, 1), sharedGameId(base, 2, 0)] })!;
+    expect(started.runtime?.live?.map(g => g.startedAt)).toEqual([1000, undefined]);
+  });
+  it.each([-1, 0.5, NaN, Infinity, undefined, '123', null])('rejects invalid bulk start time %s', at => {
+    const base = session();
+    expect(applySharedAction(base, { type: 'start_timers', id: 'bad', at, gameIds: [sharedGameId(base, 1, 0)] } as any)).toBeNull();
+    expect(base.runtime?.live?.[0]).not.toHaveProperty('startedAt');
+  });
+  it.each([undefined, null, 'not-array', [12], [{}]])('rejects malformed game identities %s', gameIds => {
+    expect(applySharedAction(session(), { type: 'start_timers', id: 'bad', at: 1000, gameIds } as any)).toBeNull();
+  });
+});

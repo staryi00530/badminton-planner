@@ -298,3 +298,30 @@ describe('LiveSessionBoard', () => {
     expect(guidance().getByText(/Finish game.*when.*over/i)).toBeInTheDocument();
   });
 });
+
+describe('LiveSessionBoard session timer start', () => {
+  it('offers the admin a preparation start action and delegates without mutating live games', async () => {
+    const liveGames = [{ slot: 1, court: 0 }, { slot: 1, court: 1, startedAt: 1000 }];
+    const start = vi.fn();
+    render(<LiveSessionBoard {...props({ isAdmin: true, liveGames, onStartSessionTimers: start })} />);
+    expect(screen.getByText(/During preparation.*when play begins/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Start session timers' }));
+    expect(start).toHaveBeenCalledExactlyOnceWith();
+    expect(liveGames).toEqual([{ slot: 1, court: 0 }, { slot: 1, court: 1, startedAt: 1000 }]);
+  });
+
+  it('disables timer start while the session is busy', () => {
+    render(<LiveSessionBoard {...props({ isAdmin: true, liveGames: [{ slot: 1, court: 0 }], onStartSessionTimers: vi.fn(), sessionTimersDisabled: true })} />);
+    expect(screen.getByRole('button', { name: 'Start session timers' })).toBeDisabled();
+  });
+
+  it.each([
+    { isAdmin: false, liveGames: [{ slot: 1, court: 0 }] },
+    { isAdmin: true, liveGames: [{ slot: 1, court: 0, startedAt: 1000 }] },
+    { isAdmin: true, liveGames: [] },
+    { isAdmin: true, liveGames: [{ slot: 99, court: 0 }] },
+  ])('hides start unless an admin has a current live game without a timestamp: %j', input => {
+    render(<LiveSessionBoard {...props({ ...input, onStartSessionTimers: vi.fn() })} />);
+    expect(screen.queryByRole('button', { name: 'Start session timers' })).not.toBeInTheDocument();
+  });
+});

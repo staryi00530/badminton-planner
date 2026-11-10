@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { act, renderHook, render, screen } from '@testing-library/react';
 import { QueuePromotionModal } from '../components/PlannerModals';
@@ -37,7 +37,7 @@ function session(courts = 3, players = roster, regenerationFails = false) {
     });
     return { ...planner, ...queue, actions };
   });
-  act(() => hook.result.current.patchState({ liveGames: initialLiveGamesForSchedule(plan, courts).map((game, displayCourt) => ({ ...game, displayCourt })) }));
+  act(() => hook.result.current.patchState({ liveGames: initialLiveGamesForSchedule(plan, courts, Date.now()).map((game, displayCourt) => ({ ...game, displayCourt })) }));
   return hook;
 }
 
@@ -419,4 +419,37 @@ it('preserves ongoing games across different slots during quarantine', () => {
   expect(live.players).toEqual(later.players);
   expect([...afterCourt.teamA, ...afterCourt.teamB].map(p => p.name)).toEqual(later.players);
   expect(result.current.state.scores[`s2c${live.court}`]).toMatchObject({ a: '17', b: '15', applied: false, teamA: [], teamB: [] });
+});
+
+it('starts replacement timers once, keeps other court timers and restores start times on Undo and refresh',()=>{
+ const clock=vi.spyOn(Date,'now').mockReturnValue(1000);
+ try {
+  const hook=session(2);const before=hook.result.current.state.liveGames;
+  expect(before.map(g=>g.startedAt)).toEqual([1000,1000]);
+  clock.mockReturnValue(5000);
+  act(()=>hook.result.current.toggleLiveGame(before[0]!.slot,before[0]!.court));
+  if(hook.result.current.state.queuePromotionPrompt) act(()=>hook.result.current.resolveQueuePromotion('lookahead'));
+  const after=hook.result.current.state.liveGames;
+  expect(after).toHaveLength(2);
+  expect(after.find(g=>g.slot===before[1]!.slot&&g.court===before[1]!.court)?.startedAt).toBe(1000);
+  expect(after.find(g=>!before.some(old=>old.slot===g.slot&&old.court===g.court))?.startedAt).toBe(5000);
+  expect(hook.result.current.state.completedGames[0]?.startedAt).toBe(1000);
+  act(()=>hook.result.current.restoreUndo());
+  expect(hook.result.current.state.liveGames).toEqual(before);
+  hook.unmount();clock.mockReturnValue(9000);
+  const restored=renderHook(()=>usePlannerState());
+  expect(restored.result.current.state.liveGames.map(g=>g.startedAt)).toEqual([1000,1000]);
+  restored.unmount();
+ }finally{clock.mockRestore();}
+});
+it('starts a timer for an explicit local Start without assigning a time to an old live game',()=>{
+ const clock=vi.spyOn(Date,'now').mockReturnValue(2000);
+ try{
+  const hook=session(2);
+  act(()=>hook.result.current.patchState({liveGames:[{slot:1,court:1}]}));
+  act(()=>hook.result.current.toggleLiveGame(1,0));
+  expect(hook.result.current.state.liveGames.find(g=>g.court===0)?.startedAt).toBe(2000);
+  expect(hook.result.current.state.liveGames.find(g=>g.court===1)?.startedAt).toBeUndefined();
+  hook.unmount();
+ }finally{clock.mockRestore();}
 });

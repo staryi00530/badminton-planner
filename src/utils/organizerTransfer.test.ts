@@ -24,8 +24,8 @@ describe('organizer transfer', () => {
         s.result = generateSchedule(s.players, 2, [4, 4], 0, null, null, {})!;
         s.result.planId = 'plan';
         s.scores = { s1c0: { a: '12', b: '9', applied: false, teamA: s.result.schedule[0]!.courts[0]!.teamA.map(p => p.name), teamB: s.result.schedule[0]!.courts[0]!.teamB.map(p => p.name) } };
-        s.liveGames = [{ slot: 1, court: 0, displayCourt: 2 }];
-        s.completedGames = [{ slot: 1, court: 1 }];
+        s.liveGames = [{ slot: 1, court: 0, displayCourt: 2, startedAt: 12345 }];
+        s.completedGames = [{ slot: 1, court: 1, startedAt: 0 }];
         const c = s.result.schedule[0]!.courts[1]!;
         s.playedGames = [{ id: 'played', planId: 'old-plan', slot: 1, court: 1, completedAt: 123, teamA: c.teamA.map(p => ({ id: p.id!, name: p.name, gender: p.gender })) as any, teamB: c.teamB.map(p => ({ id: p.id!, name: p.name, gender: p.gender })) as any, waitingIds: ['id-0'] }];
         const setup = buildOrganizerSetup(s, DEFAULT_QUALITY_WEIGHTS, now), encrypted = await encryptOrganizerSetup(setup);
@@ -114,4 +114,12 @@ describe('organizer transfer', () => {
         expect(organizerSetupPatch(setup)).not.toHaveProperty('winLoss');
         expect(organizerSetupPatch(setup)).not.toHaveProperty('savedPlans');
     });
+});
+
+
+it.each([-1, 0.5, NaN, Infinity, '123', null])('rejects private runtime invalid activation time %s', at => {
+  const s = state();
+  s.result = generateSchedule(s.players, 1, [4], 0, null, null, {})!;
+  s.liveGames = [{ slot: 1, court: 0, startedAt: at }] as any;
+  expect(() => buildOrganizerSetup(s, DEFAULT_QUALITY_WEIGHTS, now)).toThrow();
 });

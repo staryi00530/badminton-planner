@@ -1,4 +1,6 @@
 export interface GameRef {
+  /** Actual activation time, independent of nominal slot time. */
+  startedAt?: number;
   id?: string;
   slot: number;
   court: number;
@@ -35,6 +37,7 @@ export function addUniqueGame(games: GameRef[], game: GameRef) {
 export function initialLiveGamesForSchedule(
   result: { planId?: string; schedule: Array<{ slot: number; courts: Array<{ teamA: Array<{ id?: string; name: string }>; teamB: Array<{ id?: string; name: string }> }> }> },
   capacity: number,
+  startedAt?: number,
 ): GameRef[] {
   const games: GameRef[] = [], busy = new Set<string>();
   for (const slot of result.schedule) for (const [court, lineup] of slot.courts.entries()) {
@@ -42,7 +45,7 @@ export function initialLiveGamesForSchedule(
     const players = [...lineup.teamA, ...lineup.teamB];
     if (players.length !== 4 || players.some(p => busy.has(p.name))) continue;
     players.forEach(p => busy.add(p.name));
-    games.push({ slot: slot.slot, court, players: players.map(p => p.name), ...(result.planId ? {
+    games.push({ ...(validStartTime(startedAt) ? { startedAt } : {}), slot: slot.slot, court, players: players.map(p => p.name), ...(result.planId ? {
       displayCourt: games.length,
       id: JSON.stringify([result.planId, slot.slot, court, players.map(p => p.id ?? `legacy:${p.name.toLowerCase()}`)]),
     } : {}) });
@@ -68,10 +71,30 @@ export function normalizeGameRefs(
       court: game.court,
       ...(game.players ? { players: [...game.players] } : {}),
       ...(game.displayCourt != null ? { displayCourt: game.displayCourt } : {}),
+      ...(validStartTime(game.startedAt) ? { startedAt: game.startedAt } : {}),
     });
     if (normalized.length >= maxCount) break;
   }
   return normalized;
+}
+
+function validStartTime(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+/** Start the prepared courts together without restarting any already-running clock. */
+export function startUntimedLiveGames(games: GameRef[], now = Date.now()): GameRef[] {
+  return games.map(game => validStartTime(game.startedAt) ? game : { ...game, startedAt: now });
+}
+
+/** Only activation creates a timer; legacy already-live games keep an unknown start. */
+export function stampNewLiveGames(games: GameRef[], previous: GameRef[], now = Date.now()): GameRef[] {
+  return games.map(game => {
+    const before = previous.find(old => gameMatches(old, game.slot, game.court));
+    const startedAt = validStartTime(before?.startedAt) ? before.startedAt
+      : validStartTime(game.startedAt) ? game.startedAt : before ? undefined : now;
+    return { ...game, ...(validStartTime(startedAt) ? { startedAt } : {}) };
+  });
 }
 
 export function contiguousGamesForSlot(games: GameRef[], slotNum: number) {

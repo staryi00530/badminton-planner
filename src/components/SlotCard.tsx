@@ -1,4 +1,5 @@
 import { C, COURT_BG, COURT_COLORS, FONT } from '../constants';
+import CourtElapsedTime from './CourtElapsedTime';
 import type { CSSProperties } from 'react';
 import type { Court, Player, SlotResult } from '../algorithm/types';
 import type { EditLayout, ScoresMap } from '../types';
@@ -167,7 +168,8 @@ export default function SlotCard({
       })()}
 
       {!editing && visibleCourts.map(({ court, ci }, visibleIdx) => {
-        const isLive = liveGames?.some(lg => lg.slot === slot.slot && lg.court === ci) ?? false;
+        const liveGame = liveGames?.find(lg => lg.slot === slot.slot && lg.court === ci);
+        const isLive = liveGame != null;
         const isCompleted = completedGames?.some(game => game.slot === slot.slot && game.court === ci) ?? false;
         const hasBlockedPlayer = blockedPlayerNames && blockedPlayerNames.size > 0 &&
           [...court.teamA, ...court.teamB].some(p => blockedPlayerNames.has(p.name));
@@ -184,11 +186,12 @@ export default function SlotCard({
         const actionTitle = isLive ? 'Mark game as finished' : isWaiting ? 'Waiting for players still on court' : isQueued ? 'Queued until a court is free' : isCompleted ? 'Restart this game' : 'Start this game';
         return (
         <div key={ci} style={{ background: COURT_BG[ci], borderLeft: `3px solid ${isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci]}`, borderRadius: 6, padding: '8px 10px', marginBottom: visibleIdx < visibleCourts.length - 1 ? 6 : 0 }}>
-          {(slot.courts.length > 1 || isSingleCourtView || slot.repeatedCourts?.includes(ci) || onToggleLive || isReady || isWaiting) && (
-            <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {(slot.courts.length > 1 || isSingleCourtView || slot.repeatedCourts?.includes(ci) || onToggleLive || isLive || isReady || isWaiting) && (
+            <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               {(slot.courts.length > 1 || isSingleCourtView) && <span style={{ color: isLive ? '#ef4444' : isCompleted ? C.green : isWaiting ? C.amber : COURT_COLORS[ci] }}>Court {displayCourt != null ? displayCourt + 1 : court.court}</span>}
               {slot.repeatedCourts?.includes(ci) && <span style={{ color: C.amber }}>⚠ repeat group</span>}
               {isLive && <span style={{ color: '#ef4444' }}>● LIVE</span>}
+              {isLive && <CourtElapsedTime startedAt={liveGame.startedAt} />}
               {isCompleted && !isLive && <span style={{ color: C.green }}>✓ DONE</span>}
               {isWaiting && <span style={{ color: C.amber }}>⏳ WAITING</span>}
               {isReady && <span style={{ color: C.green }} title="Everyone on this court is free to start">✓ Ready</span>}

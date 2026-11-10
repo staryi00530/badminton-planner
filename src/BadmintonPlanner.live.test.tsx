@@ -54,6 +54,8 @@ function expandPlayers() {
   if (!(summary.closest('details') as HTMLDetailsElement).open) fireEvent.click(summary);
 }
 
+function stableCourtText(element: HTMLElement) { return element.textContent?.replace(/Elapsed (?:—|\d+(?::\d{2}){1,2})/g, 'Elapsed'); }
+
 function sectionFor(title: string) {
   return screen.getByRole('heading', { name: title }).closest('section')!;
 }
@@ -397,7 +399,7 @@ describe('BadmintonPlanner live game flow', () => {
       seed(2, Array.from({ length: 24 }, (_, i) => ({ name: `P${i + 1}`, gender: 'M', availFrom: i === 23 ? 4 : 0, availTo: 5 })));
       render(<BadmintonPlanner />);
       await start(user, 2);
-      const current = [lane(1).textContent, lane(2).textContent];
+      const current = [stableCourtText(lane(1)), stableCourtText(lane(2))];
       const firstSlot = stored('bp-result').schedule[0];
       await user.click(screen.getByRole('button', { name: 'Add court' }));
       await user.click(availability('P24').getByRole('button', { name: 'Here now' }));
@@ -416,7 +418,7 @@ describe('BadmintonPlanner live game flow', () => {
       expect(stored('bp-players')).toEqual(arrivedPlayers);
       expect(stored('bp-courtOverrides')).toEqual({ 2: 3 });
       await user.click(screen.getByRole('button', { name: 'Live session' }));
-      expect([lane(1).textContent, lane(2).textContent]).toEqual(current);
+      expect([stableCourtText(lane(1)), stableCourtText(lane(2))]).toEqual(current);
       expect(stored('bp-result').schedule[0]).toEqual(firstSlot);
       expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(3);
       expect(availability('P1').getByRole('button', { name: 'Leaving' })).toBeEnabled();
@@ -433,7 +435,7 @@ describe('BadmintonPlanner live game flow', () => {
         await start(user, 2);
         const keys = ['bp-result', 'bp-players', 'bp-courtOverrides', 'bp-scores', 'bp-saved-plans', 'bp-is-confirmed'];
         const before = keys.map(stored);
-        const lanes = [lane(1).textContent, lane(2).textContent];
+        const lanes = [stableCourtText(lane(1)), stableCourtText(lane(2))];
         if (command === 'Setup Apply') {
           await user.click(screen.getByRole('button', { name: 'Setup' }));
           await user.click(screen.getByRole('button', { name: '3C' }));
@@ -450,7 +452,7 @@ describe('BadmintonPlanner live game flow', () => {
         // Undo restores the pending confirmation as well as the session data.
         await user.click(screen.getByRole('button', { name: 'Cancel' }));
         await user.click(screen.getByRole('button', { name: 'Live session' }));
-        expect([lane(1).textContent, lane(2).textContent]).toEqual(lanes);
+        expect([stableCourtText(lane(1)), stableCourtText(lane(2))]).toEqual(lanes);
       },
     );
 
@@ -461,14 +463,14 @@ describe('BadmintonPlanner live game flow', () => {
       localStorage.setItem('bp-scores', JSON.stringify({ s1c0: score }));
       render(<BadmintonPlanner />);
       await start(user, courts);
-      const lineups = Array.from({ length: courts }, (_, i) => lane(i + 1).textContent);
+      const lineups = Array.from({ length: courts }, (_, i) => stableCourtText(lane(i + 1)));
       const target = courts === 5 ? 4 : courts + 1;
       await user.click(screen.getByRole('button', { name: courts === 5 ? 'Remove court' : 'Add court' }));
       expect(stored('bp-courtOverrides')).toEqual({ 2: target });
       expect(stored('bp-numCourts')).toBe(courts);
       expect(stored('bp-result').schedule[0]).toEqual(original.schedule[0]);
       expect(stored('bp-scores')).toEqual({ s1c0: score });
-      for (let i = 0; i < courts; i++) expect(lane(i + 1).textContent).toBe(lineups[i]);
+      for (let i = 0; i < courts; i++) expect(stableCourtText(lane(i + 1))).toBe(lineups[i]);
       expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(target);
       expect(screen.getByRole('status', { name: 'Session change' })).toHaveTextContent(`slot 2. ${target} courts`);
       await user.click(screen.getByRole('button', { name: 'Setup' }));
@@ -486,15 +488,15 @@ describe('BadmintonPlanner live game flow', () => {
       render(<BadmintonPlanner />);
       await start(user, 2);
       const before = stored('bp-result').schedule[0];
-      const current = [lane(1).textContent, lane(2).textContent];
+      const current = [stableCourtText(lane(1)), stableCourtText(lane(2))];
       await user.click(availability('P12').getByRole('button', { name: 'Here now' }));
       expect(stored('bp-result').schedule[0]).toEqual(before);
       expect(stored('bp-result').schedule[1].courts).toHaveLength(3);
       expect(stored('bp-result').schedule[1].courts.flatMap((c: any) => [...c.teamA, ...c.teamB]).map((p: any) => p.name)).toContain('P12');
       await user.click(availability('P1').getByRole('button', { name: 'Leaving' }));
       expect(stored('bp-result').schedule.slice(1).flatMap((s: any) => s.courts.flatMap((c: any) => [...c.teamA, ...c.teamB])).some((p: any) => p.name === 'P1')).toBe(false);
-      expect(lane(1).textContent).toBe(current[0]);
-      expect(lane(2).textContent).toBe(current[1]);
+      expect(stableCourtText(lane(1))).toBe(current[0]);
+      expect(stableCourtText(lane(2))).toBe(current[1]);
       expect(stored('bp-scores')).toEqual({ s1c0: score });
       expect(screen.getByRole('status', { name: 'Session change' })).toHaveTextContent(/P1 leaving from slot 2/);
       await user.click(availability('P1').getByTitle('Restore player to session'));
@@ -514,12 +516,12 @@ describe('BadmintonPlanner live game flow', () => {
       if (substitute) await user.click(substitute);
       expect(screen.getByRole('button', { name: 'Past games (1)' })).toBeInTheDocument();
       const before = stored('bp-result');
-      const lineups = [lane(1).textContent, lane(2).textContent];
+      const lineups = [stableCourtText(lane(1)), stableCourtText(lane(2))];
       await user.click(screen.getByRole('button', { name: 'Add court' }));
       expect(stored('bp-courtOverrides')).toEqual({ 3: 3 });
       expect(stored('bp-result').schedule.slice(0, 2)).toEqual(before.schedule.slice(0, 2));
-      expect(lane(1).textContent).toBe(lineups[0]);
-      expect(lane(2).textContent).toBe(lineups[1]);
+      expect(stableCourtText(lane(1))).toBe(lineups[0]);
+      expect(stableCourtText(lane(2))).toBe(lineups[1]);
       expect(stored('bp-scores')).toEqual({ s1c0: score });
       expect(sectionFor('Next game').querySelectorAll('.schedule-grid > div')).toHaveLength(3);
       await user.click(screen.getByRole('button', { name: 'Past games (1)' }));
@@ -564,7 +566,7 @@ describe('BadmintonPlanner live game flow', () => {
         localStorage.setItem('bp-is-confirmed', 'true');
         render(<BadmintonPlanner />);
         await start(user, 2);
-        const liveBefore = [lane(1).textContent, lane(2).textContent];
+        const liveBefore = [stableCourtText(lane(1)), stableCourtText(lane(2))];
         const request = async () => {
           if (command === 'Setup Apply') {
             await user.click(screen.getByRole('button', { name: 'Setup' }));
@@ -597,8 +599,8 @@ describe('BadmintonPlanner live game flow', () => {
         expect(stored('bp-is-confirmed')).toBe(false);
         expect(stored('bp-result').schedule[0]).toEqual(original.schedule[0]);
         expect(stored('bp-courtOverrides')).toEqual({ 2: command === 'Remove court' ? 1 : 3 });
-        expect(lane(1).textContent).toBe(liveBefore[0]);
-        expect(lane(2).textContent).toBe(liveBefore[1]);
+        expect(stableCourtText(lane(1))).toBe(liveBefore[0]);
+        expect(stableCourtText(lane(2))).toBe(liveBefore[1]);
         expect(screen.getByRole('button', { name: 'Saved plans (2)' })).toBeInTheDocument();
         // Subsequent unconfirmed updates must not archive again.
         await request();
@@ -794,6 +796,25 @@ describe('BadmintonPlanner live game flow', () => {
     expect(screen.getByRole('button',{name:'Past games (1)'})).toBeInTheDocument();
   });
 
+  it('keeps preparation untimed, starts court clocks together and restores them after refresh', async () => {
+    const clock=vi.spyOn(Date,'now').mockReturnValue(1000000);
+    try {
+      localStorage.removeItem('bp-result');
+      const {unmount}=render(<BadmintonPlanner/>);
+      fireEvent.click(screen.getByRole('button',{name:/Generate/}));
+      const start=await screen.findByRole('button',{name:'Start session timers'});
+      expect(JSON.parse(localStorage.getItem('bp-live-games')!).every((g:{startedAt?:number})=>g.startedAt===undefined)).toBe(true);
+      clock.mockReturnValue(2000000);fireEvent.click(start);
+      expect(screen.queryByRole('button',{name:'Start session timers'})).not.toBeInTheDocument();
+      expect(JSON.parse(localStorage.getItem('bp-live-games')!).map((g:{startedAt:number})=>g.startedAt)).toEqual([2000000,2000000]);
+      clock.mockReturnValue(2065000);fireEvent(document,new Event('visibilitychange'));
+      expect(within(sectionFor('Current game')).getAllByText('Elapsed 01:05')).toHaveLength(2);
+      unmount();render(<BadmintonPlanner/>);
+      expect(within(sectionFor('Current game')).getAllByText('Elapsed 01:05')).toHaveLength(2);
+      expect(JSON.parse(localStorage.getItem('bp-live-games')!)[0].startedAt).toBe(2000000);
+    } finally {clock.mockRestore();}
+  });
+
   it('shows level controls on admin unlock and refresh, and hides them on lock', async () => {
     window.ADMIN_PIN='1234';
     const {unmount}=render(<BadmintonPlanner/>);
@@ -853,6 +874,19 @@ describe('BadmintonPlanner live game flow', () => {
       window.history.replaceState(null, '', '/?share=test-session');
       return { read: () => current };
     }
+    it('starts shared session timers once without completing games or autosaving every tick',async()=>{
+      const cloud=sharedCloud();const clock=vi.spyOn(Date,'now').mockReturnValue(2000000);
+      try{
+        render(<BadmintonPlanner/>);await screen.findByText('Shared session saved');
+        const calls=vi.mocked(commitShare).mock.calls.length;
+        fireEvent.click(screen.getByRole('button',{name:'Start session timers'}));
+        await waitFor(()=>expect(cloud.read().runtime?.live?.map(g=>g.startedAt)).toEqual([2000000,2000000]));
+        expect(cloud.read().runtime?.completed).toHaveLength(0);
+        clock.mockReturnValue(2065000);fireEvent(document,new Event('visibilitychange'));
+        expect(within(sectionFor('Current game')).getAllByText('Elapsed 01:05')).toHaveLength(2);
+        expect(vi.mocked(commitShare).mock.calls.length).toBe(calls);
+      }finally{clock.mockRestore();}
+    });
     it('lets an unlocked shared-session admin edit private levels without publishing them', async () => {
       const cloud=sharedCloud();
       const existing=cloud.read().p.map(([name,gender],i)=>({id:cloud.read().ids![i],name,gender,level:2,availFrom:0,availTo:5}));

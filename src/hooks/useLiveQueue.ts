@@ -1,3 +1,4 @@
+import { stampNewLiveGames } from '../utils/liveQueue';
 import { excludeQuarantinedGames } from '../utils/quarantine';
 import { actualGamesWaited } from '../utils/gamesWaited';
 import { useCallback, useMemo } from 'react';
@@ -517,7 +518,7 @@ export function useLiveQueue({
     }
 
     nextLiveGames = assignDisplayCourts(normalizeGameRefs(nextLiveGames, nextResult?.schedule ?? null, targetLiveCount), displayCapacity);
-    patch.liveGames = nextLiveGames;
+    patch.liveGames = stampNewLiveGames(nextLiveGames, liveGames);
     patch.completedGames = nextCompletedGames;
     patch.suspendedPlayerNames = nextSuspendedPlayerNames;
     patch.fromSlot = firstIncomplete(nextCompletedGames, nextResult);
@@ -540,7 +541,7 @@ export function useLiveQueue({
       regenerated: Boolean(patch.result),
     });
     patchState(patch);
-  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, fromSlot, getCourtsPerSlot, livePlayerNamesFor, regenerate, result, scores, suspendedPlayerNames, totalSlots, patchState, recordUndo]);
+  }, [completedGames, describeGames, firstIncomplete, forcedLiveCourtsForSlot, fromSlot, getCourtsPerSlot, liveGames, livePlayerNamesFor, regenerate, result, scores, suspendedPlayerNames, totalSlots, patchState, recordUndo]);
 
   const toggleLiveGame = useCallback((slotNum: number, court: number, displayCourt?: number) => {
     const flowId = nextQueueFlowId();

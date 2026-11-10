@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { contiguousGamesForSlot, exportLiveQueueLogs, firstIncompleteSlot, initialLiveGamesForSchedule, keepGamesBeforeSlot, isSlotCompleted, liveQueueDebug, normalizeGameRefs } from './liveQueue';
+import { startUntimedLiveGames, stampNewLiveGames, contiguousGamesForSlot, exportLiveQueueLogs, firstIncompleteSlot, initialLiveGamesForSchedule, keepGamesBeforeSlot, isSlotCompleted, liveQueueDebug, normalizeGameRefs } from './liveQueue';
 
 const schedule = [
   { slot: 1, courts: [{}, {}] },
@@ -70,10 +70,34 @@ describe('live queue helpers', () => {
       }],
     };
 
-    expect(initialLiveGamesForSchedule(result, 3)).toEqual([
-      { slot: 1, court: 0, players: ['A', 'B', 'C', 'D'] },
-      { slot: 1, court: 1, players: ['E', 'F', 'G', 'H'] },
-      { slot: 1, court: 2, players: ['I', 'J', 'K', 'L'] },
+    expect(initialLiveGamesForSchedule(result, 3, 123)).toEqual([
+      { slot: 1, court: 0, startedAt: 123, players: ['A', 'B', 'C', 'D'] },
+      { slot: 1, court: 1, startedAt: 123, players: ['E', 'F', 'G', 'H'] },
+      { slot: 1, court: 2, startedAt: 123, players: ['I', 'J', 'K', 'L'] },
     ]);
   });
+});
+
+it('records one start instant for generated courts and preserves it through normalization',()=>{
+ const p=(name:string)=>({name});
+ const plan={schedule:[{slot:1,courts:[{teamA:[p('A'),p('B')],teamB:[p('C'),p('D')]},{teamA:[p('E'),p('F')],teamB:[p('G'),p('H')]}]}]};
+ const games=initialLiveGamesForSchedule(plan,2,123456);
+ expect(games.map(g=>g.startedAt)).toEqual([123456,123456]);
+ expect(normalizeGameRefs(games,plan.schedule).map(g=>g.startedAt)).toEqual([123456,123456]);
+});
+it('stamps only newly activated games, preserving old and unknown starts',()=>{
+ const previous=[{slot:1,court:0,startedAt:100},{slot:1,court:1}];
+ const result=stampNewLiveGames([{slot:1,court:0,startedAt:999},{slot:1,court:1},{slot:2,court:0}],previous,500);
+ expect(result[0]!.startedAt).toBe(100);
+ expect(result[1]!.startedAt).toBeUndefined();
+ expect(result[2]!.startedAt).toBe(500);
+ expect(stampNewLiveGames(result,result,900)).toEqual(result);
+});
+it('keeps prepared initial courts untimed until the organizer starts clocks',()=>{
+ const p=(name:string)=>({name});
+ const plan={schedule:[{slot:1,courts:[{teamA:[p('A'),p('B')],teamB:[p('C'),p('D')]}]}]};
+ const prepared=initialLiveGamesForSchedule(plan,1);
+ expect(prepared[0]?.startedAt).toBeUndefined();
+ expect(startUntimedLiveGames(prepared,123)[0]?.startedAt).toBe(123);
+ expect(startUntimedLiveGames([{slot:1,court:0,startedAt:10},{slot:2,court:0}],123).map(g=>g.startedAt)).toEqual([10,123]);
 });

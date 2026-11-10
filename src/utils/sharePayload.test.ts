@@ -110,7 +110,7 @@ describe('buildSharePayload -> reconstructScheduleFromSharePayload roundtrip', (
   it('loads a Firebase slot whose empty sitting list was omitted', () => {
     const decoded = reconstructScheduleFromSharePayload({
       p: [['A', 'M'], ['B', 'M'], ['C', 'F'], ['D', 'F']],
-      slots: [{ s: 1, c: [[[0, 1], [2, 3]]] }],
+      slots: [{ s: 1, c: [[[0, 1], [2, 3]]], sit: [] }],
     }, { currentGameMinutes: 15, currentNumCourts: 1 });
     expect(decoded.result.schedule[0]!.sitting).toEqual([]);
     expect(decoded.result.schedule[0]!.courts[0]!.teamA.map(player => player.name)).toEqual(['A', 'B']);
@@ -229,4 +229,22 @@ it('accepts empty waiting lists omitted by Firebase in played history', () => {
   const p = (id: string) => ({ id, name: id, gender: 'M' as const });
   const decoded = reconstructScheduleFromSharePayload({ p: [], slots: [], history: [{ id: 'done', planId: 'old', slot: 1, court: 0, completedAt: 1, teamA: [p('a'),p('b')], teamB: [p('c'),p('d')] }] } as unknown as SharePayload, { currentGameMinutes: 15, currentNumCourts: 1 });
   expect(decoded.playedGames[0]?.waitingIds).toEqual([]);
+});
+
+describe('shared runtime activation timestamps', () => {
+  const payload = (startedAt: unknown): SharePayload => ({ v: 1, p: [['A', 'M'], ['B', 'M'], ['C', 'M'], ['D', 'M']], slots: [{ s: 1, c: [[[0, 1], [2, 3]]], sit: [] }], runtime: { live: [{ slot: 1, court: 0, startedAt }], completed: [] } } as SharePayload);
+  it.each([0, 123456, undefined])('retains valid or legacy time %s', at => {
+    const decoded = reconstructScheduleFromSharePayload(payload(at), { currentGameMinutes: 15, currentNumCourts: 1 });
+    const encoded = buildSharePayload({ result: decoded.result, playersWithAvailability: decoded.players, gameMinutes: 15, numCourts: 1, scores: {}, isConfirmed: false, runtime: { live: decoded.liveGames, completed: decoded.completedGames } })!;
+    expect(encoded.runtime?.live?.[0]?.startedAt).toBe(at);
+  });
+  it.each([-1, 0.5, NaN, Infinity, '123', null])('rejects invalid activation time %s', at => {
+    expect(() => reconstructScheduleFromSharePayload(payload(at), { currentGameMinutes: 15, currentNumCourts: 1 })).toThrow();
+  });
+});
+
+
+it('rejects invalid completed-game activation time', () => {
+  const payload = { v: 1, p: [['A', 'M'], ['B', 'M'], ['C', 'M'], ['D', 'M']], slots: [{ s: 1, c: [[[0, 1], [2, 3]]], sit: [] }], runtime: { completed: [{ slot: 1, court: 0, startedAt: -1 }] } } as SharePayload;
+  expect(() => reconstructScheduleFromSharePayload(payload, { currentGameMinutes: 15, currentNumCourts: 1 })).toThrow();
 });
