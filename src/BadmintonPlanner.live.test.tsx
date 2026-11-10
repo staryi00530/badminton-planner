@@ -752,6 +752,19 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('keeps the device-only mode and level guidance visible across Live and Setup', async () => {
+    const user = userEvent.setup();
+    render(<BadmintonPlanner />);
+    const mode = screen.getByRole('region', { name: 'Session mode' });
+    expect(mode).toHaveTextContent('This device only');
+    expect(mode).toHaveTextContent('Schedule edits stay in this browser');
+    expect(mode).toHaveTextContent('Private levels: Setup → Admin view → Players');
+    await user.click(screen.getByRole('button', { name: 'Setup' }));
+    expect(mode).toBeVisible();
+    expect(mode).toHaveTextContent('This device only');
+    expect(mode).not.toHaveTextContent('autosave to the shared session');
+  });
+
   describe('shared session autosave and controls', () => {
     function sharedCloud() {
       const players: Player[] = Array.from({ length: 12 }, (_, i) => ({ id: `shared-${i}`, name: `Shared ${i + 1}`, gender: 'M', availFrom: 0, availTo: 5 }));
@@ -777,6 +790,32 @@ describe('BadmintonPlanner live game flow', () => {
       window.history.replaceState(null, '', '/?share=test-session');
       return { read: () => current };
     }
+    it('keeps shared mode, autosave and private-level restrictions explicit after a remembered-share refresh', async () => {
+      sharedCloud();
+      const { unmount } = render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      let mode = screen.getByRole('region', { name: 'Session mode' });
+      expect(mode).toHaveTextContent('Shared session');
+      expect(mode).toHaveTextContent('Organizer edits autosave to this shared session');
+      expect(mode).toHaveTextContent('Private player levels are hidden in shared sessions');
+      unmount();
+      window.history.replaceState(null, '', '/');
+      render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      mode = screen.getByRole('region', { name: 'Session mode' });
+      expect(mode).toHaveTextContent('Shared session');
+      expect(mode).not.toHaveTextContent('This device only');
+    });
+    it('labels a one-time shared snapshot without promising live autosave', async () => {
+      const cloud = sharedCloud();
+      vi.mocked(isFirebaseConfigured).mockReturnValue(false);
+      window.history.replaceState(null, '', '/#share=' + btoa(JSON.stringify(cloud.read())));
+      render(<BadmintonPlanner />);
+      const mode = screen.getByRole('region', { name: 'Session mode' });
+      await waitFor(() => expect(mode).toHaveTextContent('Shared snapshot'));
+      expect(mode).toHaveTextContent('Changes stay in this browser until you publish them');
+      expect(mode).not.toHaveTextContent('autosave');
+    });
     it('opens the explicit URL share instead of a different share remembered in the same tab', async () => {
       sessionStorage.setItem('bp-share-id', JSON.stringify('previous-share'));
       sessionStorage.setItem('bp-is-shared-session', 'true');
@@ -856,6 +895,10 @@ describe('BadmintonPlanner live game flow', () => {
       window.history.replaceState(null, '', '/?share=private-link-id');
       render(<BadmintonPlanner />);
       await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/share link|shared schedule/i));
+      const mode = screen.getByRole('region', { name: 'Session mode' });
+      expect(mode).toHaveTextContent('Shared saving is paused');
+      expect(mode).not.toHaveTextContent('Organizer edits autosave');
+      expect(mode).not.toHaveTextContent('levels are hidden');
       expect(window.location.search).toBe('?share=private-link-id');
       expect(localStorage.getItem('bp-result')).toBe(personal);
       expect(JSON.stringify(log.mock.calls)).toContain('share.load');

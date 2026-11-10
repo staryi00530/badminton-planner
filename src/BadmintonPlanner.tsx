@@ -912,6 +912,20 @@ function BadmintonPlanner() {
     }).then(saved => { if (saved) patchState({ queuePromotionPrompt: null }); });
   };
 
+  const sharedMode = Boolean(sharedTarget || initialShareId || isSharedSession);
+  const sharedWritesPaused = ['offline', 'conflict', 'error', 'not_found', 'expired'].includes(sharedSync.status);
+  const sessionModeTitle = sharedTarget ? 'Shared session'
+    : isSharedSession ? 'Shared snapshot'
+    : initialShareId ? (shareNotice === 'error' ? 'Shared link unavailable' : 'Opening shared link')
+    : 'This device only';
+  const sessionModeDetail = sharedTarget
+    ? sharedSync.status === 'loading' ? 'Connecting to the shared session. Wait for loading to finish before editing.'
+      : sharedWritesPaused ? 'Shared saving is paused. Check the connection status below; keep this tab open to retain your changes.'
+      : isAdmin ? 'Organizer edits autosave to this shared session and sync to other devices.'
+      : 'Game progress syncs across devices. Organizer edits require admin access.'
+    : isSharedSession ? 'Changes stay in this browser until you publish them.'
+    : initialShareId ? 'This page was opened with a shared link. Check its loading status below.'
+    : 'Schedule edits stay in this browser.';
   const selectedTab = activeTab === 'live' && !result ? 'setup' : activeTab;
   const liveBoard = result && <LiveSessionBoard
     result={result}
@@ -1001,6 +1015,14 @@ function BadmintonPlanner() {
             )}
           </div>
         </div>
+
+        <section role="region" aria-label="Session mode" style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${sharedMode ? C.accent : C.textMuted}`, borderRadius: 8, padding: '12px 14px', marginBottom: 16, overflowWrap: 'anywhere' }}>
+          <strong style={{ display: 'block', color: sharedMode ? C.accent : C.text, fontSize: 15 }}>{sessionModeTitle}</strong>
+          <p style={{ margin: '5px 0 0', color: C.textDim, fontSize: 13 }}>{sessionModeDetail}</p>
+          <p style={{ margin: '5px 0 0', color: C.textDim, fontSize: 12 }}>
+            {isSharedSession ? 'Private player levels are hidden in shared sessions, including admin view.' : sharedMode ? 'Private player levels stay on this device.' : 'Private levels: Setup → Admin view → Players.'}
+          </p>
+        </section>
 
         {shareNotice && (
           <div role={['loading', 'loaded', 'saved'].includes(shareNotice) ? 'status' : 'alert'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16, background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '10px 14px' }}>
