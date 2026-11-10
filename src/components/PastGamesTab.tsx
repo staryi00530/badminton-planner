@@ -5,6 +5,8 @@ import type { GameRef } from '../utils/liveQueue';
 import { historyScheduleState, mergePlayedGames, migratePlayedGames } from '../utils/playedHistory';
 import type { PlayedGame } from '../utils/playedHistory';
 import PlayerStatsPanel from './PlayerStatsPanel';
+import PlayingTimePanel from './PlayingTimePanel';
+import { formatPlayingDuration, recordedPlayingDuration } from '../utils/playingTime';
 
 interface PastGamesTabProps {
   result: PlannerResult | null;
@@ -15,9 +17,10 @@ interface PastGamesTabProps {
   winLoss: WinLossMap;
   playedGames?: PlayedGame[];
   onDownloadBackup?: (json: string) => void;
+  isAdmin?: boolean;
 }
 
-export default function PastGamesTab({ result, completedGames, liveGames, scores, players, winLoss, playedGames, onDownloadBackup }: PastGamesTabProps) {
+export default function PastGamesTab({ result, completedGames, liveGames, scores, players, winLoss, playedGames, onDownloadBackup, isAdmin = false }: PastGamesTabProps) {
   const games = playedGames === undefined ? migratePlayedGames(result,players,completedGames,scores) : mergePlayedGames([],playedGames);
   const state = historyScheduleState(games,players);
   const download = () => {
@@ -31,6 +34,7 @@ export default function PastGamesTab({ result, completedGames, liveGames, scores
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 }}>
       <h2 style={{ margin: '0 0 6px', fontSize: 16 }}>Past games</h2>
       <p style={{ margin: '0 0 16px', color: C.textDim, fontSize: 12 }}>Completed games in the order they were recorded.</p>
+      {isAdmin && <PlayingTimePanel players={players} games={games} liveGames={liveGames} result={result} />}
       {games.length > 0 && <button type="button" onClick={download} style={{marginBottom:12,color:C.text,background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:'6px 10px'}}>Download history backup</button>}
       {games.length === 0 ? <p style={{ color: C.textMuted, fontSize: 13 }}>No completed games yet.</p> : (
         <div style={{ display: 'grid', gap: 8 }}>
@@ -43,6 +47,7 @@ export default function PastGamesTab({ result, completedGames, liveGames, scores
               <div style={{ marginTop: 6, fontSize: 14, color: C.text }}>
                 <span>{game.teamA.map(p=>p.name).join(' · ')}</span> <span style={{ color: C.textMuted }}>VS</span> <span>{game.teamB.map(p=>p.name).join(' · ')}</span>
               </div>
+              <p style={{margin:'8px 0 0',fontSize:12,color:C.textDim}}>{recordedPlayingDuration(game) == null ? 'Duration unknown · complete timing was not recorded' : `Played ${formatPlayingDuration(recordedPlayingDuration(game)!)}`}</p>
             </div>
           ))}
         </div>

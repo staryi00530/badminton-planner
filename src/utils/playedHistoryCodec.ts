@@ -25,9 +25,14 @@ export function publicPlayedGames(value: unknown): PlayedGame[] {
     if (new Set([...teamA, ...teamB].map(p => p.id)).size !== 4) throw invalid();
     if (g.displayCourt != null && (!Number.isInteger(g.displayCourt) || g.displayCourt < 0 || g.displayCourt > 4)) throw invalid();
     if (g.score && (typeof g.score.a !== 'string' || typeof g.score.b !== 'string' || typeof g.score.applied !== 'boolean')) throw invalid();
+    const hasTiming = g.startedAt !== undefined || g.durationMs !== undefined;
+    if (hasTiming && (!Number.isSafeInteger(g.startedAt) || g.startedAt! < 0
+      || !Number.isSafeInteger(g.durationMs) || g.durationMs! < 0 || !Number.isSafeInteger(g.completedAt)
+      || g.startedAt! > g.completedAt! || g.durationMs !== g.completedAt! - g.startedAt!)) throw invalid();
     return { id: g.id, planId: g.planId, slot: g.slot!, court: g.court!, completedAt: g.completedAt!, teamA, teamB,
       waitingIds: [...new Set(g.waitingIds ?? [])], ...(g.displayCourt != null ? { displayCourt: g.displayCourt } : {}),
       ...(g.score ? { score: { a: g.score.a, b: g.score.b, applied: g.score.applied } } : {}),
+      ...(hasTiming ? { startedAt: g.startedAt!, durationMs: g.durationMs! } : {}),
     };
   });
 }

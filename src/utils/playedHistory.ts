@@ -10,6 +10,9 @@ export interface PlayedGame {
   court: number;
   displayCourt?: number;
   completedAt: number;
+  /** Actual captured court timing; both absent for games whose start was unknown. */
+  startedAt?: number;
+  durationMs?: number;
   teamA: [PlayedPlayer, PlayedPlayer];
   teamB: [PlayedPlayer, PlayedPlayer];
   score?: { a: string; b: string; applied: boolean };
@@ -17,7 +20,7 @@ export interface PlayedGame {
 }
 const identity = (player: {id?: string; name: string}) => player.id || `legacy:${player.name.trim().toLowerCase()}`;
 /** Only name-derived historical IDs may fall back to names; permanent IDs never merge by name. */
-const matchesPlayer = (record: PlayedPlayer, player: Player) => record.id === identity(player) ||
+export const matchesPlayer = (record: PlayedPlayer, player: Player) => record.id === identity(player) ||
   (record.id.startsWith('legacy:') && [player.name,...(player.aliases ?? [])].some(name =>
     `legacy:${name.trim().toLowerCase()}` === record.id));
 const participants = (game: PlayedGame) => [...game.teamA, ...game.teamB];
@@ -53,6 +56,19 @@ export function makePlayedGame(
     return {id:player.id || roster?.id || identity(player),name,gender:player.gender};
   });
   if(new Set(lineup.map(p=>p.id)).size!==4) return null;
+  const lineupIds = lineup.map(p => p.id).sort();
+  const live = liveBefore.find(game => {
+    if (game.slot !== ref.slot || game.court !== ref.court) return false;
+    const ids = (game.players ?? original.map(p => p.name)).map(name => {
+      const snapshot = original.find(p => p.name === name);
+      const roster = players.find(p => p.name === name || p.aliases?.includes(name));
+      return snapshot?.id || roster?.id || identity(snapshot ?? roster ?? { name });
+    }).sort();
+    return ids.length === 4 && ids.every((id, index) => id === lineupIds[index]);
+  });
+  const validStart = (start: unknown): start is number => typeof start === 'number' && Number.isSafeInteger(start)
+    && start >= 0 && Number.isSafeInteger(completedAt) && start <= completedAt;
+  const startedAt = validStart(live?.startedAt) ? live.startedAt : validStart(ref.startedAt) ? ref.startedAt : undefined;
   const planId=result.planId || 'legacy';
   const busy=new Set([...lineup.map(p=>p.id),...liveBefore.flatMap(game=>{
     const scheduled=result.schedule.find(slot=>slot.slot===game.slot)?.courts[game.court];
@@ -63,6 +79,7 @@ export function makePlayedGame(
   return {
     id: ref.id || JSON.stringify([planId,ref.slot,ref.court,lineup.map(p=>p.id)]), planId,
     slot:ref.slot,court:ref.court,...(ref.displayCourt!=null?{displayCourt:ref.displayCourt}:{}),completedAt,
+    ...(startedAt !== undefined ? { startedAt, durationMs: completedAt - startedAt } : {}),
     teamA:[lineup[0]!,lineup[1]!],teamB:[lineup[2]!,lineup[3]!],
     ...(score?{score:{a:score.a,b:score.b,applied:score.applied}}:{}),
     waitingIds:players.filter(p=>!p.quarantined && p.availFrom<=ref.slot-1 && p.availTo>=ref.slot-1 &&
@@ -74,7 +91,10 @@ export function migratePlayedGames(
   result: (PlannerResult & {planId?:string}) | null, players: Player[], completed: GameRef[], scores: ScoresMap, existing: PlayedGame[]=[],
 ): PlayedGame[] {
   const records=completed.flatMap((ref,index)=>{
-    const record=makePlayedGame(result,players,ref,scores,[],index);
+    // Migration has no actual finish epoch. Its synthetic ordering timestamp must
+    // never turn an old court start into a fabricated measured duration.
+    const { startedAt: _unknownFinishStart, ...legacyRef } = ref;
+    const record=makePlayedGame(result,players,legacyRef,scores,[],index);
     return record?[record]:[];
   });
   return mergePlayedGames(existing,records);

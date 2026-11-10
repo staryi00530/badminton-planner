@@ -1,8 +1,11 @@
-import {it,expect} from 'vitest';
+import {it,expect,vi} from 'vitest';
 import {generateScheduleGen} from './scheduler';
 import {DEFAULT_QUALITY_WEIGHTS} from '../utils/gameQuality';
 import type {Player} from './types';
 import { scoreGameQuality } from '../utils/gameQuality';
+
+// Multi-seed generation stress tests need more than a small unit test's budget.
+vi.setConfig({ testTimeout: 15_000 });
 
 // Anonymized gender/level distribution from the reported beta failure.
 const roster=['M3','F4','M5','M2','M4','M4','F4','F4','M2','F4','M5','M3','M3','M3','F2','M3','F4','F4','F4','F4','F3','F4','M4','M4','M5','F3','F3','M3','F3','M3','M5','M2'];

@@ -158,6 +158,9 @@ async function verifyOrganizerHandoff(newContext) {
     await expect(past).toBeVisible();
   }
   await finish(source,1);
+  const sourceHistory=await source.evaluate(prefix=>JSON.parse(localStorage.getItem(`${prefix}bp-played-games`)),storagePrefix);
+  assert.deepEqual({startedAt:sourceHistory[0].startedAt,completedAt:sourceHistory[0].completedAt,durationMs:sourceHistory[0].durationMs},
+    {startedAt:timerEpoch,completedAt:timerEpoch+45000,durationMs:45000});
   assert.equal(await waitingPanel(source).locator('tbody tr td:last-child').evaluateAll(cells=>cells.reduce((sum,cell)=>sum+Number(cell.textContent),0)),4);
   await source.getByRole('button',{name:'Setup',exact:true}).click();
   await source.getByRole('button',{name:'Transfer organizer setup',exact:true}).click();
@@ -188,6 +191,7 @@ async function verifyOrganizerHandoff(newContext) {
   assert.equal(imported['quality-weights'].levels,7);assert.deepEqual(imported['preferred-pairs'],[['Organizer Player 1','Organizer Player 15']]);
   assert.ok(imported['player-history'].some(p=>p.name==='Target-only player'&&p.level===4));assert.ok(imported['player-history'].some(p=>p.name==='Bank-only friend'&&p.level===2));
   assert.equal(imported['played-games'].length,1);assert.equal(imported['live-games'].length,5);
+  assert.deepEqual(imported['played-games'],sourceHistory);
   assert.deepEqual(imported['live-games'].map(g=>g.startedAt),(await sourceStarts()).map(g=>g.startedAt));
   assert.deepEqual(imported['waiting-clock'],(await read(source))['waiting-clock']);
   assert.equal(imported['waiting-clock'].trackingStartedAt,timerEpoch);
@@ -204,6 +208,16 @@ async function verifyOrganizerHandoff(newContext) {
   await expect(waitingPanel(target).getByRole('columnheader',{name:'Slots waited',exact:true})).toBeVisible();
   await finish(target,2);assert.equal((await read(source))['played-games'].length,1);
   assert.equal(await waitingPanel(target).locator('tbody tr td:last-child').evaluateAll(cells=>cells.reduce((sum,cell)=>sum+Number(cell.textContent),0)),8);
+  const finishedHistory=(await read(target))['played-games'];
+  assert.ok(finishedHistory.every(game=>game.durationMs===game.completedAt-game.startedAt));
+  await target.getByRole('button',{name:'Undo last action',exact:true}).click();
+  await expect(target.getByRole('button',{name:'Past games (1)',exact:true})).toBeVisible();
+  assert.deepEqual((await read(target))['played-games'],imported['played-games']);
+  assert.deepEqual((await read(target))['live-games'].map(game=>game.startedAt),imported['live-games'].map(game=>game.startedAt));
+  await target.getByRole('button',{name:'Past games (1)',exact:true}).click();
+  await expect(target.getByRole('region',{name:'Playing time statistics',exact:true})).toBeVisible();
+  await expect(target.getByText('Played 00:45',{exact:true})).toBeVisible();
+  await target.getByRole('button',{name:'Live session',exact:true}).click();
   assert.equal(creates,1);assert.equal(reads,1);assert.equal(JSON.stringify(records.get('private-copy')),storedEnvelope);
   await assertLayout(target,'iPad organizer handoff');assert.deepEqual(failures,[]);
   await target.screenshot({path:join(artifacts,'organizer-handoff-ipad.png'),fullPage:true});

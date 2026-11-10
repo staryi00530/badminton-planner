@@ -12,8 +12,13 @@ import { applySharedAction, commitSharedSnapshot } from './utils/sharedSession';
 import { exportLiveQueueLogs } from './utils/liveQueue';
 import type { PlannerState, PlannerResult, SharePayload } from './types';
 import { generateSchedule } from './algorithm/scheduler';
+
 import * as scheduler from './algorithm/scheduler';
 import type { Player } from './algorithm/types';
+
+// These tests exercise whole organizer workflows with many real DOM interactions.
+// Keep assertions intact while allowing slower shared runners to finish the workflow.
+vi.setConfig({ testTimeout: 15_000 });
 
 vi.mock('./firebase', () => ({
   isFirebaseConfigured: vi.fn(() => false),

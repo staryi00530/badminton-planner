@@ -1157,7 +1157,7 @@ function BadmintonPlanner() {
           <ArchiveTab savedPlans={savedPlans} loadPlan={loadPlan} deletePlan={deletePlan} />
         )}
 
-        {activeTab === 'past' && <PastGamesTab playedGames={playedGames} result={result} completedGames={completedGames} liveGames={liveGames} scores={scores} players={players} winLoss={winLoss} />}
+        {activeTab === 'past' && <PastGamesTab isAdmin={isAdmin} playedGames={playedGames} result={result} completedGames={completedGames} liveGames={liveGames} scores={scores} players={players} winLoss={winLoss} />}
 
         {activeTab === 'pairings' && <PairingsTab players={players} result={result} completedGames={completedGames} scores={scores} />}
 
