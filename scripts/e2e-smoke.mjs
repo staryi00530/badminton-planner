@@ -87,6 +87,96 @@ async function assertLayout(page, step) {
   assert.deepEqual(problems, [], `clipping/overlap at ${step}`);
 }
 
+async function verifyOrganizerHandoff(newContext) {
+  stage='private organizer handoff';
+  const records=new Map();let creates=0,reads=0;
+  const moduleCode=`
+    export const isFirebaseConfigured=()=>true;
+    export const loadWinLoss=async()=>({});
+    export const saveWinLoss=async()=>{};
+    export const createShare=async data=>(await(await fetch('/__organizer_test',{method:'POST',body:JSON.stringify(data)})).json()).id;
+    export const fetchShare=async id=>await(await fetch('/__organizer_test?id='+encodeURIComponent(id))).json();
+    export const subscribeShare=()=>{throw new Error('Unexpected live subscription during handoff')};
+    export const commitShare=()=>{throw new Error('Unexpected live commit during handoff')};
+    export const performShareAction=()=>{throw new Error('Unexpected remote action during handoff')};
+    export const updateShare=()=>{throw new Error('Unexpected update during handoff')};
+  `;
+  async function localTransport(context) {
+    await context.addInitScript(()=>Object.defineProperty(window,'ADMIN_PIN',{configurable:true,get:()=>null,set:()=>{}}));
+    await context.route(/\/src\/firebase\.ts(?:\?|$)/,route=>route.fulfill({contentType:'text/javascript',body:moduleCode}));
+    await context.route(/\/__organizer_test(?:\?|$)/,async route=>{
+      const request=route.request();
+      if(request.method()==='POST'){
+        creates++;const data=JSON.parse(request.postData());records.set('private-copy',data);
+        await route.fulfill({contentType:'application/json',body:JSON.stringify({id:'private-copy'})});
+      }else{reads++;const id=new URL(request.url()).searchParams.get('id');await route.fulfill({contentType:'application/json',body:JSON.stringify({status:'ok',data:records.get(id)})});}
+    });
+  }
+  const sourceContext=await newContext(1280);await localTransport(sourceContext);
+  await sourceContext.addInitScript(prefix=>{
+    if(window!==window.top||localStorage.getItem('handoff-source'))return;
+    localStorage.clear();sessionStorage.clear();
+    const players=Array.from({length:35},(_,i)=>({id:`organizer-${i}`,name:`Organizer Player ${i+1}`,gender:i<14?'F':'M',level:i===0?5:3,aliases:i===0?['Private alias']:[],availFrom:0,availTo:11}));
+    const values={players,'player-history':[{id:'bank-friend',name:'Bank-only friend',gender:'F',level:2}],numCourts:5,totalMinutes:180,gameMinutes:15,sessionStart:'20:30',staggerMode:'custom','prefer-mixed-teams':true,'preferred-pairs':[[players[0].name,players[14].name]],'quality-weights':{gender:15,levels:7,partners:3,opponents:1,preferred:12,waiting:0},'player-level-scale':5,'bank-level-scale':5};
+    for(const[key,value]of Object.entries(values))localStorage.setItem(`${prefix}bp-${key}`,JSON.stringify(value));
+    if(prefix)localStorage.setItem(`${prefix}bp-storage-seeded`,'1');localStorage.setItem('handoff-source','1');
+  },storagePrefix);
+  const source=await sourceContext.newPage();activePage=source;source.setDefaultTimeout(10000);
+  const failures=[];source.on('pageerror',error=>failures.push(error.message));
+  await source.goto(baseUrl,{waitUntil:'domcontentloaded'});
+  await source.getByRole('button',{name:/Generate/}).click();
+  const current=page=>page.getByRole('heading',{name:'Current game',exact:true}).locator('..');
+  await expect(current(source).getByRole('button',{name:'Finish game',exact:true})).toHaveCount(5);
+  async function finish(page,count){
+    await current(page).getByRole('button',{name:'Finish game',exact:true}).first().click();
+    const past=page.getByRole('button',{name:`Past games (${count})`,exact:true});
+    const lookahead=page.getByRole('button',{name:'Use next playable game',exact:true});
+    const substitute=page.getByRole('button',{name:'Substitute unavailable players',exact:true});
+    await expect.poll(async()=>await past.count()>0||await lookahead.count()>0||await substitute.count()>0).toBe(true);
+    if(await lookahead.count())await lookahead.click();else if(await substitute.count())await substitute.click();
+    await expect(past).toBeVisible();
+  }
+  await finish(source,1);
+  await source.getByRole('button',{name:'Setup',exact:true}).click();
+  await source.getByRole('button',{name:'Transfer organizer setup',exact:true}).click();
+  const field=source.getByRole('textbox',{name:'Private transfer link',exact:true});await expect(field).toBeVisible();
+  const transferUrl=await field.inputValue();const key=new URL(transferUrl).hash;
+  assert.ok(key.startsWith('#key='));assert.equal(new URL(transferUrl).searchParams.has('key'),false);
+  const storedEnvelope=JSON.stringify(records.get('private-copy'));
+  assert.ok(!storedEnvelope.includes('Organizer Player'));assert.ok(!storedEnvelope.includes('Private alias'));assert.ok(!storedEnvelope.includes(key.slice(5)));
+  const targetContext=await newContext(1024);await localTransport(targetContext);
+  await targetContext.addInitScript(prefix=>{
+    if(window!==window.top||localStorage.getItem('handoff-target'))return;
+    localStorage.clear();sessionStorage.clear();
+    const p={id:'target-only',name:'Target-only player',gender:'M',level:4,availFrom:0,availTo:11};
+    localStorage.setItem(`${prefix}bp-players`,JSON.stringify([p]));localStorage.setItem(`${prefix}bp-player-history`,JSON.stringify([p]));
+    localStorage.setItem(`${prefix}bp-player-level-scale`,'5');localStorage.setItem(`${prefix}bp-bank-level-scale`,'5');
+    if(prefix)localStorage.setItem(`${prefix}bp-storage-seeded`,'1');localStorage.setItem('handoff-target','1');
+  },storagePrefix);
+  const target=await targetContext.newPage();activePage=target;target.setDefaultTimeout(10000);target.on('pageerror',e=>failures.push(e.message));
+  await target.goto(transferUrl,{waitUntil:'domcontentloaded'});
+  await expect(target.getByRole('button',{name:'Use on this device',exact:true})).toBeVisible();
+  const read=async page=>page.evaluate(prefix=>Object.fromEntries(['players','player-history','preferred-pairs','quality-weights','played-games','live-games'].map(k=>[k,JSON.parse(localStorage.getItem(`${prefix}bp-${k}`))])),storagePrefix);
+  assert.equal((await read(target)).players[0].name,'Target-only player');
+  await target.getByRole('button',{name:'Use on this device',exact:true}).click();
+  await expect(target.getByRole('region',{name:'Session mode'})).toContainText('This device only');
+  let imported=await read(target);
+  assert.equal(imported.players.length,35);assert.equal(imported.players[0].level,5);assert.deepEqual(imported.players[0].aliases,['Private alias']);
+  assert.equal(imported['quality-weights'].levels,7);assert.deepEqual(imported['preferred-pairs'],[['Organizer Player 1','Organizer Player 15']]);
+  assert.ok(imported['player-history'].some(p=>p.name==='Target-only player'&&p.level===4));assert.ok(imported['player-history'].some(p=>p.name==='Bank-only friend'&&p.level===2));
+  assert.equal(imported['played-games'].length,1);assert.equal(imported['live-games'].length,5);
+  assert.equal(new URL(target.url()).search,'');assert.equal(new URL(target.url()).hash,'');
+  await target.reload({waitUntil:'domcontentloaded'});
+  await expect(target.getByRole('button',{name:'Past games (1)',exact:true})).toBeVisible();
+  assert.equal((await read(target)).players[0].level,5);
+  await finish(target,2);assert.equal((await read(source))['played-games'].length,1);
+  assert.equal(creates,1);assert.equal(reads,1);assert.equal(JSON.stringify(records.get('private-copy')),storedEnvelope);
+  await assertLayout(target,'iPad organizer handoff');assert.deepEqual(failures,[]);
+  await target.screenshot({path:join(artifacts,'organizer-handoff-ipad.png'),fullPage:true});
+  await sourceContext.close();await targetContext.close();
+  console.log('PASS: private organizer transfer; 35 players, levels/preferences/history, explicit import, target bank, refresh and independent Finish; encrypted transport only');
+}
+
 async function verifyHistoryRecovery(newContext) {
   stage = 'five-court history recovery';
   const context = await newContext(1280);
@@ -463,6 +553,7 @@ try {
   await verifySessionWorkflows(newContext);
   await verifyQuarantine(newContext);
   await verifyHistoryRecovery(newContext);
+  await verifyOrganizerHandoff(newContext);
   assert.equal(timedOut, false, 'E2E deadline exceeded');
   console.log(`E2E smoke passed: ${completed} games, max ${maxLive} live courts; 8 desktop/mobile workflows. Screenshots: ${artifacts}`);
 } catch (error) {

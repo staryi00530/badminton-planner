@@ -1,3 +1,7 @@
+import { plannerStorageKey } from './utils/plannerStorage';
+import OrganizerHandoff, { type TransferTarget } from './components/OrganizerHandoff';
+import { buildOrganizerSetup, organizerSetupPatch, type OrganizerSetup } from './utils/organizerTransfer';
+import { createDeviceSessionBackup, persistDeviceSessionCopy, downloadDeviceSessionBackup, hasDeviceSessionBackup } from './utils/deviceSessionBackup';
 import QuarantinePanel from './components/QuarantinePanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSharedSessionSync } from './hooks/useSharedSessionSync';
@@ -49,7 +53,7 @@ import {
   updateShare,
   fetchShare,
 } from './firebase';
-import type { EditLayout, PlannerResult, SavedPlan, ScoresMap, SharePayload, WinLossMap } from './types';
+import type { EditLayout, PlannerState, PlannerResult, SavedPlan, ScoresMap, SharePayload, WinLossMap } from './types';
 
 function normalizeApiBase(base: string | null | undefined) {
   return base ? base.replace(/\/+$/, '') : null;
@@ -98,6 +102,7 @@ function BadmintonPlanner() {
   const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
   const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
   const [initialShareId, setInitialShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
+  const [transferTarget, setTransferTarget] = useState<TransferTarget | null>(() => { const id = new URLSearchParams(window.location.search).get('transfer'); return id ? { id, key: new URLSearchParams(window.location.hash.slice(1)).get('key') ?? '' } : null; });
   const [qualityWeights, setQualityWeights] = useState<QualityWeights>(loadQualityWeights);
   useEffect(() => { saveQualityWeights(qualityWeights); }, [qualityWeights]);
   const [pendingSharedUndo, setPendingSharedUndo] = useState<string | null>(null);
@@ -873,7 +878,7 @@ function BadmintonPlanner() {
     })!;
   }, [gameMinutes, numCourts, savedPlans, players, playerHistory, isSharedSession]);
 
-  const sharedTarget = isFirebaseConfigured() ? (initialShareId ?? (isSharedSession ? shareId : null)) : null;
+  const sharedTarget = !transferTarget && isFirebaseConfigured() ? (initialShareId ?? (isSharedSession ? shareId : null)) : null;
   const sharedSync = useSharedSessionSync({ shareId: sharedTarget, payload: buildSharePayload(), isAdmin, planEditing: isGenerating,
     applyRemote: data => applySharePayload(data, sharedTarget ?? undefined),
   });
@@ -912,13 +917,60 @@ function BadmintonPlanner() {
     }).then(saved => { if (saved) patchState({ queuePromotionPrompt: null }); });
   };
 
+  const leaveSharedMode = () => {
+    setInitialShareId(null);
+    setTransferTarget(null);
+    hydratedShare.current = null;
+    window.history.replaceState(null, '', window.location.pathname);
+  };
+  const hasUnresolvedSharedAction = () => [shareId, initialShareId].some(id => id && sessionStorage.getItem(plannerStorageKey(`bp-share-action:${id}`)));
+  const useSessionOnThisDevice = () => {
+    try {
+      if (hasUnresolvedSharedAction()) { patchState({ sessionChangeNotice: 'Confirm the pending Finish action before making a local copy. Retry the shared connection first.' }); return; }
+      createDeviceSessionBackup();
+      const rollback = persistDeviceSessionCopy(state, qualityWeights, [shareId, initialShareId].filter((id): id is string => Boolean(id)));
+      if (!sharedSync.disconnect()) { rollback(); patchState({ sessionChangeNotice: 'Wait for any pending save or Finish action to be confirmed before making a local copy.' }); return; }
+      leaveSharedMode();
+      patchState({ isSharedSession: false, shareId: null, shareToken: null, shareNotice: null, sharedUrl: '',
+        loadedPlanId: null, undoSnapshot: null, editingSlot: null, editLayout: null,
+        pendingSessionChange: null, queuePromotionPrompt: null, queueAdjustment: null,
+        playedGames, historyEpoch, sessionChangeNotice: 'This session is now saved on this device. Live shared updates are disconnected.' });
+      if (isAdmin) setPrivateLevelsVisible(true);
+    } catch { patchState({ sessionChangeNotice: 'Could not preserve a device backup. Free some browser storage before making a local copy.' }); }
+  };
+  const importOrganizerSetup = (setup: OrganizerSetup): boolean => {
+    try {
+      if (hasUnresolvedSharedAction()) return false;
+      const incoming = organizerSetupPatch(setup);
+      const bank = new Map<string, PlannerState['playerHistory'][number]>();
+      for (const p of [...(incoming.players ?? []), ...(incoming.playerHistory ?? []), ...playerHistory]) {
+        const key = p.id ?? `legacy:${p.name.trim().toLowerCase()}`;
+        if (!bank.has(key)) bank.set(key, { id: p.id, name: p.name, gender: p.gender, level: p.level, aliases: p.aliases, statsKey: p.statsKey, ...(p.quarantined ? { quarantined: true } : {}) });
+      }
+      const imported: Partial<PlannerState> = { ...incoming, playerHistory: [...bank.values()], isSharedSession: false, shareId: null, shareToken: null,
+        shareNotice: null, sharedUrl: '', activeTab: incoming.result ? 'live' : 'setup',
+        sessionChangeNotice: 'Organizer setup imported. This independent copy is saved on this device.' };
+      createDeviceSessionBackup();
+      const rollback = persistDeviceSessionCopy({ ...state, ...imported }, setup.qualityWeights, [shareId, initialShareId].filter((id): id is string => Boolean(id)));
+      if (!sharedSync.disconnect()) { rollback(); return false; }
+      leaveSharedMode();
+      setQualityWeights(setup.qualityWeights);
+      patchState(imported);
+      if (isAdmin) setPrivateLevelsVisible(true);
+      return true;
+    } catch { return false; }
+  };
+  const cancelOrganizerTransfer = () => {
+    setTransferTarget(null);
+    window.history.replaceState(null, '', window.location.pathname);
+  };
   const sharedMode = Boolean(sharedTarget || initialShareId || isSharedSession);
   const sharedWritesPaused = ['offline', 'conflict', 'error', 'not_found', 'expired'].includes(sharedSync.status);
-  const sessionModeTitle = sharedTarget ? 'Shared session'
+  const sessionModeTitle = transferTarget ? 'Organizer setup transfer' : sharedTarget ? 'Shared session'
     : isSharedSession ? 'Shared snapshot'
     : initialShareId ? (shareNotice === 'error' ? 'Shared link unavailable' : 'Opening shared link')
     : 'This device only';
-  const sessionModeDetail = sharedTarget
+  const sessionModeDetail = transferTarget ? 'Previewing a private handoff. Accept it to create an independent copy on this device.' : sharedTarget
     ? sharedSync.status === 'loading' ? 'Connecting to the shared session. Wait for loading to finish before editing.'
       : sharedWritesPaused ? 'Shared saving is paused. Check the connection status below; keep this tab open to retain your changes.'
       : isAdmin ? 'Organizer edits autosave to this shared session and sync to other devices.'
@@ -1023,6 +1075,15 @@ function BadmintonPlanner() {
             {isSharedSession ? 'Private player levels are hidden in shared sessions, including admin view.' : sharedMode ? 'Private player levels stay on this device.' : 'Private levels: Setup → Admin view → Players.'}
           </p>
         </section>
+
+        {isSharedSession && !transferTarget && <div style={{marginBottom:16}}>
+          <button onClick={useSessionOnThisDevice} disabled={isGenerating || sharedSync.status === 'saving' || Boolean(sharedTarget && sharedSync.status === 'loading')} style={{minHeight:44,background:C.accentDim,color:'#fff',border:`1px solid ${C.border}`,borderRadius:6,padding:'10px 14px',fontFamily:FONT}}>Use on this device</button>
+          <p style={{fontSize:12,color:C.textDim,marginTop:4}}>Keep this session here and disconnect live updates. A backup of this device’s previous setup is retained.</p>
+        </div>}
+        <OrganizerHandoff target={transferTarget} canExport={isAdmin && selectedTab === 'setup' && players.length > 0 && !isGenerating}
+          createSetup={() => buildOrganizerSetup(state, qualityWeights)} onImport={importOrganizerSetup} onCancel={cancelOrganizerTransfer}
+          onCopy={url => copyText(url)} />
+        {hasDeviceSessionBackup() && <button onClick={downloadDeviceSessionBackup} style={{minHeight:44,background:C.card,color:C.textDim,border:`1px solid ${C.border}`,borderRadius:6,padding:'8px 12px',marginBottom:16,fontFamily:FONT}}>Download previous device setup</button>}
 
         {shareNotice && (
           <div role={['loading', 'loaded', 'saved'].includes(shareNotice) ? 'status' : 'alert'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16, background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '10px 14px' }}>

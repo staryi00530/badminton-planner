@@ -237,3 +237,79 @@ it('keeps a generation draft when the initial cloud fetch resolves after editing
  expect(apply).not.toHaveBeenCalled();
  expect(sessionStorage.getItem(plannerStorageKey('bp-share-draft:one'))).not.toBeNull();
 });
+
+ describe('disconnect', () => {
+  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
+  it('invalidates a late initial fetch without subscribing', async () => {
+    let resolve!: (value: any) => void;
+    const t = transport(); const subscribe = vi.spyOn(t.api, 'subscribe');
+    t.api.fetch = () => new Promise(r => { resolve = r; });
+    const apply = vi.fn((p: SharePayload) => p);
+    const { result } = renderHook(() => useSharedSessionSync({ shareId: 'one', payload: data(), isAdmin: true, applyRemote: apply, transport: t.api }));
+    act(() => expect(result.current.disconnect()).toBe(true));
+    await act(async () => { resolve({ status: 'ok', data: data() }); });
+    expect(apply).not.toHaveBeenCalled(); expect(subscribe).not.toHaveBeenCalled();
+  });
+  it('cancels scheduled writes and ignores late subscription and loadLatest callbacks', async () => {
+    const t = transport(); let receive!: (p: SharePayload | null) => void;
+    const stop = vi.fn(); t.api.subscribe = (_, next) => { receive = next; return stop; };
+    const commit = vi.spyOn(t.api, 'commit'); const action = vi.spyOn(t.api, 'action');
+    const apply = vi.fn((p: SharePayload) => p);
+    const { result, rerender } = renderHook(({ payload }) => useSharedSessionSync({ shareId: 'one', payload, isAdmin: true, applyRemote: apply, transport: t.api }), { initialProps: { payload: data() } });
+    await waitFor(() => expect(result.current.status).toBe('saved'));
+    let resolve!: (value: any) => void; t.api.fetch = () => new Promise(r => { resolve = r; });
+    let loading!: Promise<void>; act(() => { loading = result.current.loadLatest(); });
+    rerender({ payload: { ...data(), confirmed: true } });
+    const backups = Object.keys(localStorage).filter(k => k.includes(':recovery:'));
+    act(() => expect(result.current.disconnect()).toBe(true));
+    await act(async () => { receive({ ...data(), revision: 3 }); resolve({ status: 'ok', data: { ...data(), revision: 4 } }); await loading; await new Promise(r => setTimeout(r, 400)); });
+    expect(apply).toHaveBeenCalledTimes(1); expect(stop).toHaveBeenCalledTimes(1); expect(commit).not.toHaveBeenCalled();
+    await act(async () => { expect(await result.current.performAction({ type: 'finish', id: 'a', gameId: 'x' })).toBe(false); result.current.retry(); });
+    expect(action).not.toHaveBeenCalled(); expect(sessionStorage.getItem(plannerStorageKey('bp-share-draft:one'))).toBeNull();
+    expect(backups.length).toBeGreaterThan(0); expect(backups.every(k => localStorage.getItem(k))).toBe(true);
+  });
+  it('refuses unresolved Finish and plan generation', async () => {
+    const t = transport(); t.api.action = async () => { throw new Error('offline'); };
+    const { result, rerender } = renderHook(({ editing }) => useSharedSessionSync({ shareId: 'one', payload: data(), isAdmin: true, planEditing: editing, applyRemote: p => p, transport: t.api }), { initialProps: { editing: false } });
+    await waitFor(() => expect(result.current.status).toBe('saved'));
+    rerender({ editing: true }); act(() => expect(result.current.disconnect()).toBe(false));
+    rerender({ editing: false });
+    await act(async () => { await result.current.performAction({ type: 'finish', id: 'a', gameId: 'x' }); });
+    act(() => expect(result.current.disconnect()).toBe(false)); expect(result.current.message).toMatch(/action|Finish/i);
+  });
+ });
+
+it('refuses disconnect while a cloud commit is active', async () => {
+  localStorage.clear(); sessionStorage.clear();
+  const t = transport(); let resolve!: (p: SharePayload) => void;
+  t.api.commit = () => new Promise(r => { resolve = r; });
+  const { result, rerender } = renderHook(({ payload }) => useSharedSessionSync({ shareId: 'one', payload, isAdmin: true, applyRemote: p => p, transport: t.api }), { initialProps: { payload: data() } });
+  await waitFor(() => expect(result.current.status).toBe('saved'));
+  rerender({ payload: { ...data(), confirmed: true } });
+  let saving!: Promise<boolean>; act(() => { saving = result.current.saveNow(); });
+  act(() => expect(result.current.disconnect()).toBe(false));
+  await act(async () => { resolve({ ...data(), confirmed: true, revision: 1 }); await saving; });
+  act(() => expect(result.current.disconnect()).toBe(true));
+});
+it('does not create recovery journals for detached local edits', async () => {
+  localStorage.clear(); sessionStorage.clear();
+  const t = transport(); const commit = vi.spyOn(t.api, 'commit');
+  const { result, rerender } = renderHook(({ shareId, payload }: { shareId: string | null; payload: SharePayload }) => useSharedSessionSync({ shareId, payload, isAdmin: true, applyRemote: p => p, transport: t.api }), { initialProps: { shareId: 'one' as string | null, payload: data() } });
+  await waitFor(() => expect(result.current.status).toBe('saved'));
+  act(() => expect(result.current.disconnect()).toBe(true));
+  rerender({ shareId: null, payload: { ...data(), confirmed: true } });
+  await act(async () => { await new Promise(r => setTimeout(r, 400)); });
+  expect(commit).not.toHaveBeenCalled(); expect(sessionStorage.length).toBe(0); expect(localStorage.length).toBe(0);
+});
+
+it('keeps its live connection when recovery journal removal fails', async () => {
+  localStorage.clear(); sessionStorage.clear();
+  const t = transport(); const apply = vi.fn((p: SharePayload) => p);
+  const { result } = renderHook(() => useSharedSessionSync({ shareId: 'one', payload: data(), isAdmin: false, applyRemote: apply, transport: t.api }));
+  await waitFor(() => expect(result.current.status).toBe('saved'));
+  const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('blocked'); });
+  try { act(() => expect(result.current.disconnect()).toBe(false)); expect(result.current.message).toMatch(/storage|recovery/i); }
+  finally { remove.mockRestore(); }
+  act(() => t.remote({ ...data(), revision: 1 }));
+  expect(apply).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 1 }));
+});

@@ -1,3 +1,6 @@
+import * as organizerTransfer from './utils/organizerTransfer';
+import { DEFAULT_QUALITY_WEIGHTS } from './utils/gameQuality';
+import { migratePlayedGames } from './utils/playedHistory';
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -7,7 +10,7 @@ import { createShare, fetchShare, isFirebaseConfigured, commitShare, subscribeSh
 import { buildSharePayload } from './utils/sharePayload';
 import { applySharedAction, commitSharedSnapshot } from './utils/sharedSession';
 import { exportLiveQueueLogs } from './utils/liveQueue';
-import type { PlannerResult, SharePayload } from './types';
+import type { PlannerState, PlannerResult, SharePayload } from './types';
 import { generateSchedule } from './algorithm/scheduler';
 import * as scheduler from './algorithm/scheduler';
 import type { Player } from './algorithm/types';
@@ -752,6 +755,40 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
+  it('imports complete organizer setup as a local session without joining or crediting its source', async () => {
+    const transferred:Player[]=Array.from({length:12},(_,i)=>({id:`transfer-${i}`,name:`Transferred ${i+1}`,gender:i<4?'F':'M',level:i===0?5:3,availFrom:0,availTo:5,aliases:i===0?['Alias']:[]}));
+    const plan={...generateSchedule(transferred,6,[3,3,3,3,3,3])!,planId:'computer-plan'};
+    const completed=[{slot:1,court:0}];
+    const source={players:transferred,playerHistory:[{id:'friend',name:'Friend',gender:'F',level:2}],result:plan,totalMinutes:90,gameMinutes:15,numCourts:3,extraCourt:{enabled:false,startMin:30,durationMin:60},courtOverrides:{},staggerMode:'custom',sessionStart:'20:30',scores:{},isConfirmed:true,liveGames:[{slot:1,court:1},{slot:1,court:2}],completedGames:completed,playedGames:migratePlayedGames(plan,transferred,completed,{}),historyEpoch:2,suspendedPlayerNames:[],preferMixedTeams:true,preferredPairs:[[transferred[0]!.name,transferred[4]!.name]],fromSlot:2,fromSlotCourts:0} as unknown as PlannerState;
+    const setup=organizerTransfer.buildOrganizerSetup(source,{...DEFAULT_QUALITY_WEIGHTS,levels:7});
+    vi.spyOn(organizerTransfer,'decryptOrganizerSetup').mockResolvedValue(setup);
+    vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+    vi.mocked(fetchShare).mockResolvedValue({status:'ok',data:{ciphertext:'private'}});
+    vi.mocked(subscribeShare).mockClear();vi.mocked(commitShare).mockClear();
+    localStorage.setItem('bp-player-history',JSON.stringify([{id:'local',name:'Local friend',gender:'M',level:4}]));
+    window.history.replaceState(null,'','/?transfer=computer-copy#key=private-key');
+    const {unmount}=render(<BadmintonPlanner/>);
+    await screen.findByRole('button',{name:'Use on this device'});
+    expect(JSON.parse(localStorage.getItem('bp-players')!)[0].name).toBe('P1');
+    fireEvent.click(screen.getByRole('button',{name:'Use on this device'}));
+    await waitFor(()=>expect(screen.getByRole('region',{name:'Session mode'})).toHaveTextContent('This device only'));
+    expect(window.location.search+window.location.hash).toBe('');
+    await waitFor(()=>expect(JSON.parse(localStorage.getItem('bp-players')!)[0]).toMatchObject({name:'Transferred 1',level:5,aliases:['Alias']}));
+    expect(JSON.parse(localStorage.getItem('bp-preferred-pairs')!)).toEqual(source.preferredPairs);
+    expect(JSON.parse(localStorage.getItem('bp-quality-weights')!).levels).toBe(7);
+    expect(JSON.parse(localStorage.getItem('bp-played-games')!)).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem('bp-live-games')!)).toHaveLength(2);
+    const bank=JSON.parse(localStorage.getItem('bp-player-history')!);
+    expect(bank.some((p:Player)=>p.name==='Friend'&&p.level===2)).toBe(true);
+    expect(bank.some((p:Player)=>p.name==='Local friend'&&p.level===4)).toBe(true);
+    expect(JSON.parse(localStorage.getItem('bp-winloss')!)).toEqual({});
+    expect(subscribeShare).not.toHaveBeenCalled();expect(commitShare).not.toHaveBeenCalled();
+    unmount();vi.mocked(fetchShare).mockClear();render(<BadmintonPlanner/>);
+    expect(screen.getByRole('region',{name:'Session mode'})).toHaveTextContent('This device only');
+    expect(fetchShare).not.toHaveBeenCalled();
+    expect(screen.getByRole('button',{name:'Past games (1)'})).toBeInTheDocument();
+  });
+
   it('keeps the device-only mode and level guidance visible across Live and Setup', async () => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
@@ -815,6 +852,43 @@ describe('BadmintonPlanner live game flow', () => {
       await waitFor(() => expect(mode).toHaveTextContent('Shared snapshot'));
       expect(mode).toHaveTextContent('Changes stay in this browser until you publish them');
       expect(mode).not.toHaveTextContent('autosave');
+    });
+    it('does not discard a retained Finish when a cold shared-session connection fails', async () => {
+      const cloud=sharedCloud();
+      sessionStorage.setItem('bp-share-draft:test-session',JSON.stringify({base:cloud.read(),draft:cloud.read()}));
+      const pending=JSON.stringify({type:'finish',id:'unconfirmed',gameId:'pending-game'});
+      sessionStorage.setItem('bp-share-action:test-session',pending);
+      vi.mocked(fetchShare).mockRejectedValue(new Error('offline'));
+      render(<BadmintonPlanner/>);
+      await waitFor(()=>expect(screen.getByText('Offline — changes retained on this device')).toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button',{name:'Use on this device'}));
+      expect(screen.getByRole('region',{name:'Session mode'})).toHaveTextContent('Shared session');
+      expect(sessionStorage.getItem('bp-share-action:test-session')).toBe(pending);
+      expect(window.location.search).toBe('?share=test-session');
+    });
+    it('keeps the loaded session as a durable local copy and stops shared updates', async () => {
+      sharedCloud();
+      const { unmount } = render(<BadmintonPlanner />);
+      await waitFor(() => expect(screen.getByText('Shared session saved')).toBeInTheDocument());
+      const names=JSON.parse(localStorage.getItem('bp-players')!).map((p:Player)=>p.name);
+      expect(names[0]).toBe('P1');
+      const commits=vi.mocked(commitShare).mock.calls.length;
+      fireEvent.click(screen.getByRole('button',{name:'Use on this device'}));
+      await waitFor(()=>expect(screen.getByRole('region',{name:'Session mode'})).toHaveTextContent('This device only'));
+      expect(window.location.search).toBe('');
+      expect(sessionStorage.getItem('bp-is-shared-session')).toBe('false');
+      expect(sessionStorage.getItem('bp-share-id')).toBeNull();
+      fireEvent.click(screen.getByRole('button',{name:'Setup'}));
+      fireEvent.click(screen.getByText(/^Players \(/));
+      expect(screen.getByTitle('Private level used for balancing')).toBeVisible();
+      await waitFor(()=>expect(JSON.parse(localStorage.getItem('bp-players')!)[0].name).toBe('Shared 1'));
+      expect(screen.getByRole('button',{name:'Download previous device setup'})).toBeInTheDocument();
+      unmount();vi.mocked(fetchShare).mockClear();vi.mocked(subscribeShare).mockClear();
+      render(<BadmintonPlanner />);
+      expect(screen.getByRole('region',{name:'Session mode'})).toHaveTextContent('This device only');
+      expect(fetchShare).not.toHaveBeenCalled();expect(subscribeShare).not.toHaveBeenCalled();
+      expect(vi.mocked(commitShare).mock.calls.length).toBe(commits);
+      expect(JSON.parse(localStorage.getItem('bp-live-games')!)).toHaveLength(2);
     });
     it('opens the explicit URL share instead of a different share remembered in the same tab', async () => {
       sessionStorage.setItem('bp-share-id', JSON.stringify('previous-share'));
