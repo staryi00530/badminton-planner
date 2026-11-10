@@ -351,9 +351,14 @@ async function verifyQuarantine(newContext) {
     await page.reload({ waitUntil: 'domcontentloaded' });
     const stored = key => page.evaluate(({ key, prefix }) => JSON.parse(localStorage.getItem(`${prefix}bp-${key}`)), { key, prefix: storagePrefix });
     await expect.poll(async () => (await stored('players')).slice(0, 3).map(p => p.level)).toEqual([1, 3, 5]);
-    await page.getByRole('button', { name: 'Admin view', exact: true }).click();
+    await expect(page.getByRole('group', { name: 'Level for Arm', exact: true })).toBeVisible();
     const armRow = page.getByText('Arm', { exact: true }).locator('..');
     await armRow.getByRole('button', { name: '4', exact: true }).click();
+    const levelButton=page.getByRole('group',{name:'Level for Arm',exact:true}).getByRole('button',{name:'4',exact:true});
+    await expect(levelButton).toHaveAttribute('aria-pressed','true');
+    const bounds=await levelButton.boundingBox();assert.ok(bounds.width>=44&&bounds.height>=44,'level controls need touch-sized targets');
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'admin roster must fit the viewport');
+    await page.screenshot({path:join(artifacts,`admin-levels-${width}.png`),fullPage:true});
     for (const name of ['Arm', 'Sitan', 'Eamon']) await page.getByRole('button', { name: `Quarantine ${name}`, exact: true }).click();
     const box = page.getByRole('region', { name: 'Quarantine', exact: true });
     await expect(box.getByRole('button', { name: /^Return .* to available$/ })).toHaveCount(3);

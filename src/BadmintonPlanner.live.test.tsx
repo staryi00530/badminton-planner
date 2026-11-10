@@ -49,6 +49,11 @@ function makeSlot(slotNum: number, courts: string[][], sitting: string[] = []) {
   };
 }
 
+function expandPlayers() {
+  const summary=screen.getByText(/^Players \(/);
+  if (!(summary.closest('details') as HTMLDetailsElement).open) fireEvent.click(summary);
+}
+
 function sectionFor(title: string) {
   return screen.getByRole('heading', { name: title }).closest('section')!;
 }
@@ -190,7 +195,7 @@ describe('BadmintonPlanner live game flow', () => {
       await startNextVisibleGame(user);
       expect(undo()).toBeEnabled();
       await user.click(screen.getByRole('button', { name: 'Setup' }));
-      await user.click(screen.getByText('Players (12)'));
+      expandPlayers();
       await user.type(screen.getByPlaceholderText('Player name'), 'Keep guest');
       await user.click(screen.getByRole('button', { name: 'ADD' }));
       expect(stored('bp-players')).toHaveLength(13);
@@ -789,13 +794,34 @@ describe('BadmintonPlanner live game flow', () => {
     expect(screen.getByRole('button',{name:'Past games (1)'})).toBeInTheDocument();
   });
 
+  it('shows level controls on admin unlock and refresh, and hides them on lock', async () => {
+    window.ADMIN_PIN='1234';
+    const {unmount}=render(<BadmintonPlanner/>);
+    fireEvent.click(screen.getByRole('button',{name:'Setup'}));
+    expect(screen.queryByRole('group',{name:'Level for P1'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Click to unlock score entry'));
+    fireEvent.change(screen.getByPlaceholderText('PIN'),{target:{value:'1234'}});
+    fireEvent.click(screen.getByRole('button',{name:'Unlock'}));
+    const levels=screen.getByRole('group',{name:'Level for P1'});
+    expect(levels).toBeVisible();
+    const plan=JSON.parse(localStorage.getItem('bp-result')!);
+    fireEvent.click(within(levels).getByRole('button',{name:'5'}));
+    expect(within(levels).getByRole('button',{name:'5'})).toHaveAttribute('aria-pressed','true');
+    expect(JSON.parse(localStorage.getItem('bp-result')!)).toEqual(plan);
+    unmount();render(<BadmintonPlanner/>);
+    expect(screen.getByRole('group',{name:'Level for P1'})).toBeVisible();
+    expect(within(screen.getByRole('group',{name:'Level for P1'})).getByRole('button',{name:'5'})).toHaveAttribute('aria-pressed','true');
+    fireEvent.click(screen.getByTitle('Click to lock score entry'));
+    expect(screen.queryByRole('group',{name:'Level for P1'})).not.toBeInTheDocument();
+  });
+
   it('keeps the device-only mode and level guidance visible across Live and Setup', async () => {
     const user = userEvent.setup();
     render(<BadmintonPlanner />);
     const mode = screen.getByRole('region', { name: 'Session mode' });
     expect(mode).toHaveTextContent('This device only');
     expect(mode).toHaveTextContent('Schedule edits stay in this browser');
-    expect(mode).toHaveTextContent('Private levels: Setup → Admin view → Players');
+    expect(mode).toHaveTextContent('Private levels: Setup → Players');
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     expect(mode).toBeVisible();
     expect(mode).toHaveTextContent('This device only');
@@ -827,6 +853,29 @@ describe('BadmintonPlanner live game flow', () => {
       window.history.replaceState(null, '', '/?share=test-session');
       return { read: () => current };
     }
+    it('lets an unlocked shared-session admin edit private levels without publishing them', async () => {
+      const cloud=sharedCloud();
+      const existing=cloud.read().p.map(([name,gender],i)=>({id:cloud.read().ids![i],name,gender,level:2,availFrom:0,availTo:5}));
+      localStorage.setItem('bp-players',JSON.stringify(existing));localStorage.setItem('bp-player-history',JSON.stringify(existing));
+      localStorage.setItem('bp-player-level-scale','5');localStorage.setItem('bp-bank-level-scale','5');
+      const {unmount}=render(<BadmintonPlanner/>);
+      await screen.findByText('Shared session saved');
+      fireEvent.click(screen.getByRole('button',{name:'Setup'}));
+      const levels=screen.getByRole('group',{name:'Level for Shared 1'});
+      expect(levels).toBeVisible();
+      const commits=vi.mocked(commitShare).mock.calls.length;
+      fireEvent.click(within(levels).getByRole('button',{name:'5'}));
+      expect(within(levels).getByRole('button',{name:'5'})).toHaveAttribute('aria-pressed','true');
+      expect(JSON.parse(localStorage.getItem('bp-player-history')!).some((p:Player)=>p.name==='Shared 1'&&p.level===5)).toBe(true);
+      await new Promise(resolve=>setTimeout(resolve,450));
+      expect(vi.mocked(commitShare).mock.calls.length).toBe(commits);
+      expect(JSON.stringify(cloud.read())).not.toMatch(/"level"|"levels"/);
+      expect(JSON.parse(localStorage.getItem('bp-players')!)[0].level).toBe(2);
+      unmount();render(<BadmintonPlanner/>);
+      await screen.findByText('Shared session saved');
+      fireEvent.click(screen.getByRole('button',{name:'Setup'}));
+      expect(within(screen.getByRole('group',{name:'Level for Shared 1'})).getByRole('button',{name:'5'})).toHaveAttribute('aria-pressed','true');
+    });
     it('keeps shared mode, autosave and private-level restrictions explicit after a remembered-share refresh', async () => {
       sharedCloud();
       const { unmount } = render(<BadmintonPlanner />);
@@ -834,7 +883,7 @@ describe('BadmintonPlanner live game flow', () => {
       let mode = screen.getByRole('region', { name: 'Session mode' });
       expect(mode).toHaveTextContent('Shared session');
       expect(mode).toHaveTextContent('Organizer edits autosave to this shared session');
-      expect(mode).toHaveTextContent('Private player levels are hidden in shared sessions');
+      expect(mode).toHaveTextContent('Level changes stay on this device');
       unmount();
       window.history.replaceState(null, '', '/');
       render(<BadmintonPlanner />);
@@ -879,7 +928,7 @@ describe('BadmintonPlanner live game flow', () => {
       expect(sessionStorage.getItem('bp-is-shared-session')).toBe('false');
       expect(sessionStorage.getItem('bp-share-id')).toBeNull();
       fireEvent.click(screen.getByRole('button',{name:'Setup'}));
-      fireEvent.click(screen.getByText(/^Players \(/));
+      expandPlayers();
       expect(screen.getByTitle('Private level used for balancing')).toBeVisible();
       await waitFor(()=>expect(JSON.parse(localStorage.getItem('bp-players')!)[0].name).toBe('Shared 1'));
       expect(screen.getByRole('button',{name:'Download previous device setup'})).toBeInTheDocument();
@@ -1086,7 +1135,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveAttribute('aria-current', 'page');
-    for (const name of ['Re-roll', 'Import', 'Clear', 'Admin view']) {
+    for (const name of ['Re-roll', 'Import', 'Clear']) {
       expect(screen.getByRole('button', { name: new RegExp('^' + name + '$') })).toBeVisible();
     }
     expect(screen.getByText('Re-generate from slot')).toBeVisible();
@@ -1095,10 +1144,8 @@ describe('BadmintonPlanner live game flow', () => {
     await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'P1');
     await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'P2');
     await user.click(screen.getByRole('button', { name: 'Add' }));
-    await user.click(screen.getByText('Players (12)'));
+    expandPlayers();
     expect(screen.getByPlaceholderText('Player name')).toBeVisible();
-    expect(screen.queryByTitle('Private level used for balancing')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Admin view' }));
     expect(screen.getByTitle('Private level used for balancing')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Live session' }));
@@ -1117,7 +1164,7 @@ describe('BadmintonPlanner live game flow', () => {
     await user.click(screen.getByText('Session settings'));
     await user.selectOptions(screen.getByLabelText('Preferred pairing first player'), 'P1');
     await user.selectOptions(screen.getByLabelText('Preferred pairing second player'), 'P2');
-    await user.click(screen.getByText('Players (12)'));
+    expandPlayers();
     await user.click(screen.getByTitle('Select Bank guest'));
     const bankDraft = screen.getByPlaceholderText("Add to bank (not today's roster)");
     await user.type(bankDraft, 'Draft guest');
@@ -1133,7 +1180,7 @@ describe('BadmintonPlanner live game flow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Setup' }));
     await user.click(screen.getByText('Session settings'));
-    await user.click(screen.getByText('Players (12)'));
+    expandPlayers();
     expect.soft(screen.getByLabelText('Preferred pairing first player')).toHaveValue('P1');
     expect.soft(screen.getByLabelText('Preferred pairing second player')).toHaveValue('P2');
     expect.soft(screen.getByPlaceholderText("Add to bank (not today's roster)")).toHaveValue('Draft guest');

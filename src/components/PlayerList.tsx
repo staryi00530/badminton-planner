@@ -219,7 +219,7 @@ export default function PlayerList({
   const importCount=new Set(importPreview.filter(row=>row.mapping!=='ignore').map(row=>row.mapping.startsWith('existing:')?row.mapping:rosterNameKey(row.name))).size;
   const mappingOptions=[...new Map([...playerHistory,...players].map(p=>[p.id??p.name,p])).values()];
   return (
-    <details open={!scheduleActive} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
+    <details open={!scheduleActive || showPrivateFields} style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 16, marginBottom: 20 }}>
       <summary style={{ fontSize: 14, color: C.text, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>Players ({players.length})</summary>
       {players.length === 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '24px 20px', marginBottom: 20, boxShadow: C.shadow }}>
@@ -485,10 +485,10 @@ export default function PlayerList({
               )}
               {editingNameIdx===i && nameError && <span role="alert" style={{fontSize:12,color:C.amber}}>{nameError}</span>}
               <select aria-label={`Gender for roster ${p.name}`} value={p.gender} onChange={e=>updatePlayer(i,'gender',e.target.value)} style={{ ...rosterSelectStyle, color: p.gender === 'F' ? C.pink : C.accent }}><option value="M">♂</option><option value="F">♀</option></select>
-              {showPrivateFields && <div title="Private balancing level" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <span style={{ fontSize: 10, color: C.textMuted }}>L</span>
+              {showPrivateFields && <div role="group" aria-label={`Level for ${p.name}`} title="Private balancing level" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <span style={{ fontSize: 10, color: C.textMuted }}>Level</span>
                 {([1, 2, 3, 4, 5] as const).map(level => (
-                  <button key={level} onClick={() => updatePlayer(i, 'level', level)} style={{ background: (p.level ?? 3) === level ? C.accentDim : 'transparent', color: (p.level ?? 3) === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 3, padding: '2px 4px', fontSize: 10, fontWeight: 700, fontFamily: FONT }}>{level}</button>
+                  <button key={level} aria-pressed={(p.level ?? 3) === level} onClick={() => updatePlayer(i, 'level', level)} style={{ background: (p.level ?? 3) === level ? C.accentDim : 'transparent', color: (p.level ?? 3) === level ? '#fff' : C.textMuted, border: 'none', borderRadius: 5, minWidth: 44, minHeight: 44, padding: '6px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}>{level}</button>
                 ))}
               </div>}
               {winLoss[p.statsKey ?? p.name] && (() => {

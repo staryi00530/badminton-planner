@@ -99,8 +99,6 @@ function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, e
 function BadmintonPlanner() {
   const { state, setField, patchState, recordUndo, restoreUndo } = usePlannerState();
   const scheduleRef = useRef<HTMLDivElement | null>(null);
-  const [privateLevelsVisible, setPrivateLevelsVisible] = useState(false);
-  const [privateLevelUnlockRequested, setPrivateLevelUnlockRequested] = useState(false);
   const [initialShareId, setInitialShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
   const [transferTarget, setTransferTarget] = useState<TransferTarget | null>(() => { const id = new URLSearchParams(window.location.search).get('transfer'); return id ? { id, key: new URLSearchParams(window.location.hash.slice(1)).get('key') ?? '' } : null; });
   const [qualityWeights, setQualityWeights] = useState<QualityWeights>(loadQualityWeights);
@@ -173,12 +171,6 @@ function BadmintonPlanner() {
   const allDefaultsLoaded = DEFAULT_PLAYERS.every(dp => players.some(p => p.name.toLowerCase() === dp.name.toLowerCase()));
 
   const { isAdmin, submitPin, toggleAdminLock } = useAdminAuth({ pinInput, patchState });
-  useEffect(() => {
-    if (isAdmin && privateLevelUnlockRequested) {
-      setPrivateLevelsVisible(true);
-      setPrivateLevelUnlockRequested(false);
-    }
-  }, [isAdmin, privateLevelUnlockRequested]);
   const {
     loadDefaults,
     resetPlayers,
@@ -841,7 +833,8 @@ function BadmintonPlanner() {
 
     // Reuse local private metadata by permanent ID. Public shares never contain levels.
     const nextPlayers = normalizePlayerIdentities(decoded.players.map(player => {
-      const saved = [...players, ...playerHistory].find(p => player.id ? p.id === player.id : p.name === player.name);
+      const privateMetadata = firstLoad ? [...playerHistory, ...players] : [...players, ...playerHistory];
+      const saved = privateMetadata.find(p => player.id ? p.id === player.id : p.name === player.name);
       return { ...player, gender: player.gender === 'F' ? 'F' as const : 'M' as const, ...(saved?.level ? { level: saved.level } : {}), ...(saved?.statsKey ? { statsKey: saved.statsKey } : {}) } as Player;
     }), playerHistory).players as Player[];
     patchState({
@@ -935,7 +928,6 @@ function BadmintonPlanner() {
         loadedPlanId: null, undoSnapshot: null, editingSlot: null, editLayout: null,
         pendingSessionChange: null, queuePromotionPrompt: null, queueAdjustment: null,
         playedGames, historyEpoch, sessionChangeNotice: 'This session is now saved on this device. Live shared updates are disconnected.' });
-      if (isAdmin) setPrivateLevelsVisible(true);
     } catch { patchState({ sessionChangeNotice: 'Could not preserve a device backup. Free some browser storage before making a local copy.' }); }
   };
   const importOrganizerSetup = (setup: OrganizerSetup): boolean => {
@@ -956,7 +948,6 @@ function BadmintonPlanner() {
       leaveSharedMode();
       setQualityWeights(setup.qualityWeights);
       patchState(imported);
-      if (isAdmin) setPrivateLevelsVisible(true);
       return true;
     } catch { return false; }
   };
@@ -1046,23 +1037,10 @@ function BadmintonPlanner() {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0, maxWidth: '100%', marginLeft: 'auto', alignItems: 'center' }}>
             <button onClick={exportDebugLogs} title="Download debug logs" aria-label="Download debug logs" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, width: 30, height: 28, padding: 0 }}><LucideIcon name="download" size={14} /></button>
-            {selectedTab === 'setup' && <>
-            {!isSharedSession && <button onClick={() => {
-              if (privateLevelsVisible) {
-                setPrivateLevelsVisible(false);
-                return;
-              }
-              setPrivateLevelUnlockRequested(true);
-              if (isAdmin) setPrivateLevelsVisible(true);
-              else toggleAdminLock();
-            }} title={privateLevelsVisible ? 'Exit admin view' : 'Open admin view with the admin PIN'} style={{ background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, fontFamily: FONT }}>
-              {privateLevelsVisible ? 'Exit admin view' : 'Admin view'}
-            </button>}
-            </>}
             {isFirebaseConfigured() && <span title={dbSynced === 'synced' ? 'Win-loss synced to cloud' : dbSynced === 'syncing' ? 'Syncing…' : dbSynced === 'error' ? 'Sync failed' : 'Cloud sync ready'} style={{ fontSize: 13, color: dbSynced === 'synced' ? C.green : dbSynced === 'error' ? '#ef4444' : C.textMuted }}>{dbSynced === 'synced' ? '☁ Synced' : dbSynced === 'syncing' ? '⟳' : dbSynced === 'error' ? '☁ ✗' : '☁'}</span>}
             {window.ADMIN_PIN && (
               <button onClick={toggleAdminLock} title={isAdmin ? 'Click to lock score entry' : 'Click to unlock score entry'} style={{ background: isAdmin ? C.accentDim : C.card, color: isAdmin ? '#fff' : C.textMuted, border: `1px solid ${isAdmin ? 'transparent' : C.border}`, borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, fontFamily: FONT }}>
-                {isAdmin ? '🔓 Admin' : '🔒 Lock'}
+                {isAdmin ? '🔓 Admin' : '🔒 Unlock admin'}
               </button>
             )}
           </div>
@@ -1072,7 +1050,7 @@ function BadmintonPlanner() {
           <strong style={{ display: 'block', color: sharedMode ? C.accent : C.text, fontSize: 15 }}>{sessionModeTitle}</strong>
           <p style={{ margin: '5px 0 0', color: C.textDim, fontSize: 13 }}>{sessionModeDetail}</p>
           <p style={{ margin: '5px 0 0', color: C.textDim, fontSize: 12 }}>
-            {isSharedSession ? 'Private player levels are hidden in shared sessions, including admin view.' : sharedMode ? 'Private player levels stay on this device.' : 'Private levels: Setup → Admin view → Players.'}
+            {isSharedSession ? 'Private levels: Setup → Players with admin unlocked. Level changes stay on this device and are excluded from public links.' : 'Private levels: Setup → Players (admin unlocked).'}
           </p>
         </section>
 
@@ -1180,7 +1158,7 @@ function BadmintonPlanner() {
           levelInput={levelInput}
           allDefaultsLoaded={allDefaultsLoaded}
           scheduleActive={Boolean(result)}
-          showPrivateFields={!isSharedSession && privateLevelsVisible}
+          showPrivateFields={isAdmin}
           setNameInput={value => setField('nameInput', value)}
           setGenderInput={value => setField('genderInput', value)}
           setLevelInput={value => setField('levelInput', value)}
