@@ -37,7 +37,8 @@ jobs:
         working-directory: site-main
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          # Hosted Ubuntu already has the browser libraries; smoke tests verify launch.
+          npx playwright install chromium
           npm test
           npm run build
 
@@ -47,7 +48,7 @@ jobs:
           VITE_BETA: 'true'
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
           npm test
           npx vite build --base=/badminton-planner/beta/ --outDir=dist-beta
 
