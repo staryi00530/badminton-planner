@@ -120,7 +120,9 @@ describe('shared autosave and recovery', () => {
     await waitFor(() => expect(result.current.status).toBe('saved'));
     const draft = { ...data(), confirmed: true };
     rerender({ payload: draft });
+    expect(result.current.hasPendingChanges).toBe(true);
     await waitFor(() => expect(t.read().confirmed).toBe(true));
+    await waitFor(() => expect(result.current.hasPendingChanges).toBe(false));
     expect(t.read().revision).toBe(1);
     unmount();
     renderHook(() => useSharedSessionSync({ shareId: 'one', payload: data(), isAdmin: true, applyRemote: apply, transport: t.api }));

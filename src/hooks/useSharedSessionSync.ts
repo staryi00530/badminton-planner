@@ -310,5 +310,6 @@ export function useSharedSessionSync({ shareId, payload, isAdmin, planEditing = 
     const link = document.createElement('a'); link.href = url; link.download = 'shared-session-draft.json'; link.click(); URL.revokeObjectURL(url);
   }, [journalKey, recoveryStorage]);
   const hasRecovery = Boolean(journalKey && (recoveryStorage.getItem(journalKey) || recoveryStorage.getItem(`${journalKey}:recovery`) || Object.keys(localStorage).some(key => key.startsWith(`${journalKey}:recovery:`))));
-  return { status, message, disconnect, saveNow, performAction, retry, loadLatest, downloadDraft, hasRecovery, latest: remote.current };
+  const hasPendingChanges = Boolean(shareId && payload && localKey !== canonicalKey.current);
+  return { status, message, disconnect, saveNow, performAction, retry, loadLatest, downloadDraft, hasRecovery, hasPendingChanges, latest: remote.current };
 }

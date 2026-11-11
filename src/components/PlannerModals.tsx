@@ -193,21 +193,36 @@ export function SavePlanModal({ needsPin, pinInput, pinError, setPinInput, submi
   );
 }
 
-export function ShareLinkModal({ copiedShareUrl, sharedUrl, shareIsUpdate, hasExisting, copyShareUrl, newShareLink, close }: { copiedShareUrl: boolean; sharedUrl: string; shareIsUpdate: boolean; hasExisting: boolean; copyShareUrl: () => void; newShareLink: () => void; close: () => void }) {
-  const statusText = shareIsUpdate ? '✓ Schedule updated — same link reflects your latest changes.'
-    : 'Link copied to clipboard. Anyone who opens it sees this schedule. Hit Save after editing to push your changes to the same link.';
+export function ShareLinkModal({ copiedShareUrl, sharedUrl, shareIsUpdate, hasExisting, copyShareUrl, copyOrganizerUrl, publicationStatus = 'live', newShareLink, close }: { copiedShareUrl: boolean; sharedUrl: string; shareIsUpdate: boolean; hasExisting: boolean; copyShareUrl: () => void; copyOrganizerUrl?: (url: string) => void; publicationStatus?: 'live' | 'pending' | 'connecting' | 'paused'; newShareLink: () => void; close: () => void }) {
+  const url = new URL(sharedUrl);
+  const isPlayerLink = url.searchParams.get('view') === 'players';
+  const organizerUrl = new URL(url);
+  organizerUrl.searchParams.delete('view');
+  const statusText = isPlayerLink ? 'Players can browse All games or choose My games. Game progress and organizer edits publish automatically while this device stays in the shared session.'
+    : 'This is a published snapshot. It does not receive live game updates. Publish again after changes.';
   return (
     <ModalShell maxWidth={480}>
-      <p style={{ fontWeight: 700, marginBottom: 4 }}>{shareIsUpdate ? 'Schedule updated' : 'Share link'}</p>
+      <p style={{ fontWeight: 700, marginBottom: 4 }}>{isPlayerLink ? 'Player link' : 'Published snapshot'}</p>
       <p style={{ fontSize: 12, color: copiedShareUrl ? C.green : C.textDim, marginBottom: 12 }}>
         {copiedShareUrl ? (shareIsUpdate ? '✓ Updated! Link copied.' : '✓ Copied!') : statusText}
       </p>
+      {isPlayerLink && publicationStatus !== 'live' && <p role={publicationStatus === 'paused' ? 'alert' : 'status'} style={{color:C.amber,fontSize:12}}>
+        {publicationStatus === 'paused' ? 'Latest changes are not published. This link shows the last saved session; retry the organizer connection.'
+          : publicationStatus === 'connecting' ? 'The player link is created. Connecting this device to publish further updates…'
+          : 'Publishing latest changes. Players see the last saved session until saving completes.'}
+      </p>}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input readOnly value={sharedUrl} onFocus={e => e.target.select()} style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 10px', color: C.textDim, fontSize: 11, fontFamily: 'monospace', minWidth: 0 }} />
+        <input aria-label={isPlayerLink ? 'Player link' : 'Snapshot link'} readOnly value={sharedUrl} onFocus={e => e.target.select()} style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 10px', color: C.textDim, fontSize: 11, fontFamily: 'monospace', minWidth: 0 }} />
         <button onClick={copyShareUrl} style={{ background: copiedShareUrl ? C.green : C.accentDim, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 12px', fontWeight: 700, fontFamily: FONT, whiteSpace: 'nowrap' }}>
           {copiedShareUrl ? '✓ Copied' : 'Copy'}
         </button>
       </div>
+      {isPlayerLink && <div style={{ marginTop: 16 }}>
+        <p style={{ fontWeight: 700, fontSize: 13, margin: '0 0 6px' }}>Organizer session link</p>
+        <p style={{ color: C.textDim, fontSize: 12 }}>Use this on your organizing iPad to keep publishing live updates. For private levels and preferences, use Transfer organizer setup separately.</p>
+        <input aria-label="Organizer session link" readOnly value={organizerUrl.toString()} onFocus={event => event.target.select()} style={{ width: '100%', boxSizing: 'border-box', minHeight: 44, background: C.bg, color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace' }} />
+        {copyOrganizerUrl && <button onClick={() => copyOrganizerUrl(organizerUrl.toString())} style={{ minHeight: 44, width: '100%', marginTop: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, fontFamily: FONT }}>Copy organizer link</button>}
+      </div>}
       {hasExisting && (
         <button onClick={() => { close(); newShareLink(); }} style={{ marginTop: 8, width: '100%', background: 'transparent', color: C.textMuted, border: `1px dashed ${C.border}`, borderRadius: 6, padding: '7px', fontFamily: FONT, fontSize: 12 }}>
           Generate a fresh link instead

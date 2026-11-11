@@ -4,9 +4,10 @@ import { buildOrganizerSetup, organizerSetupPatch, type OrganizerSetup } from '.
 import { createDeviceSessionBackup, persistDeviceSessionCopy, downloadDeviceSessionBackup, hasDeviceSessionBackup } from './utils/deviceSessionBackup';
 import QuarantinePanel from './components/QuarantinePanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSharedSessionSync } from './hooks/useSharedSessionSync';
+import { sharedContentKey, useSharedSessionSync } from './hooks/useSharedSessionSync';
 import { loadQualityWeights, saveQualityWeights } from './utils/qualityPreferences';
 import { sharedGameId } from './utils/sharedSession';
+import { playerViewUrl } from './utils/playerView';
 import { type QualityWeights } from './utils/gameQuality';
 import { normalizePlayerIdentities } from './utils/playerIdentity';
 import { playerMetadataPatch } from './utils/playerMetadataPatch';
@@ -70,8 +71,7 @@ function copyText(text: string, onCopied?: () => void) {
   document.body.appendChild(ta);
   ta.select();
   try {
-    document.execCommand('copy');
-    onCopied?.();
+    if (document.execCommand('copy')) onCopied?.();
   } catch {}
   document.body.removeChild(ta);
 }
@@ -101,6 +101,11 @@ function preserveLiveGamesAtEditedSlot(games: GameRef[], after: PlannerResult, e
 
 function BadmintonPlanner() {
   const { state, setField, patchState, recordUndo, restoreUndo } = usePlannerState();
+  const publishingPlayerLink = useRef(false);
+  const publicationEpoch = useRef(0);
+  const [isPublishingPlayerLink, setIsPublishingPlayerLink] = useState(false);
+  const publicationSnapshot = useRef<{ payload: SharePayload | null; status: string; source: string }>({ payload: null, status: 'loading', source: '' });
+  useEffect(() => () => { ++publicationEpoch.current; }, []);
   const scheduleRef = useRef<HTMLDivElement | null>(null);
   const [initialShareId, setInitialShareId] = useState(() => new URLSearchParams(window.location.search).get('share'));
   const [transferTarget, setTransferTarget] = useState<TransferTarget | null>(() => { const id = new URLSearchParams(window.location.search).get('transfer'); return id ? { id, key: new URLSearchParams(window.location.hash.slice(1)).get('key') ?? '' } : null; });
@@ -743,6 +748,7 @@ function BadmintonPlanner() {
   }, [buildSharePayload, isSharedSession, loadedPlanId, result, saveTag, savedPlans, shareId]);
 
   const loadPlan = useCallback((plan: SavedPlan) => {
+    ++publicationEpoch.current;
     setInitialShareId(null);
     window.history.replaceState(null, '', window.location.pathname);
     resetSessionChanges();
@@ -758,29 +764,52 @@ function BadmintonPlanner() {
   }, [loadedPlanId, savedPlans]);
 
   const shareLink = useCallback(async (forceNew = false) => {
+    if (publishingPlayerLink.current || isGenerating) return;
     const data = buildSharePayload();
     if (!data) return;
+    const startingEpoch = publicationEpoch.current;
+    const startingSource = publicationSnapshot.current.source;
+    const sourceChanged = () => startingEpoch !== publicationEpoch.current || startingSource !== publicationSnapshot.current.source;
 
     if (isFirebaseConfigured()) {
+      publishingPlayerLink.current = true;
+      setIsPublishingPlayerLink(true);
       try {
-      const existingId = !forceNew ? shareId : null;
-      const id = existingId || await createShare(data);
-      if (existingId && !await sharedSync.saveNow()) return;
-      if (id) {
+        const existingId = !forceNew ? shareId : null;
+        if (existingId && ['loading', 'offline', 'conflict', 'not_found', 'expired', 'error'].includes(publicationSnapshot.current.status)) {
+          patchState({ shareNotice: 'save_error' });
+          return;
+        }
+        const id = existingId || await createShare(data);
+        if (sourceChanged()) return;
+        if (existingId && !await sharedSync.saveNow()) {
+          if (!sourceChanged()) patchState({ shareNotice: 'save_error' });
+          return;
+        }
+        if (sourceChanged()) return;
+        if (!id) throw Object.assign(new Error('Live share was not created'), { code: 'share/not-created' });
+        if (sharedContentKey(data) !== sharedContentKey(publicationSnapshot.current.payload)) {
+          // Never connect an acknowledged older snapshot over edits made while publishing.
+          patchState({ shareNotice: 'save_error' });
+          return;
+        }
         setInitialShareId(id);
         window.history.replaceState(null, '', `${window.location.pathname}?share=${encodeURIComponent(id)}`);
         patchState({ shareId: id, shareToken: null, isSharedSession: true, shareNotice: null });
-        const url = `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(id)}`;
+        const url = playerViewUrl(`${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(id)}`);
+        patchState({ sharedUrl: url, copiedShareUrl: false, showShareModal: true, shareIsUpdate: !!existingId });
         copyText(url, () => {
-          patchState({ sharedUrl: url, copiedShareUrl: true, showShareModal: true, shareIsUpdate: !!existingId });
+          patchState({ copiedShareUrl: true });
           setTimeout(() => patchState({ copiedShareUrl: false }), 2000);
         });
         return;
-      }
       } catch (error) {
         cloudDiagnostic('share.publish', 'failed', error);
-        patchState({ shareNotice: 'save_error' });
+        if (!sourceChanged()) patchState({ shareNotice: 'save_error' });
         return;
+      } finally {
+        publishingPlayerLink.current = false;
+        setIsPublishingPlayerLink(false);
       }
     }
 
@@ -801,12 +830,14 @@ function BadmintonPlanner() {
         );
         if (!response.ok) throw new Error(`Share ${isUpdate ? 'update' : 'save'} failed: ${response.status}`);
         const payload = await response.json();
+        if (sourceChanged()) return;
         const id = isUpdate ? existingId! : payload?.id;
         const token = isUpdate ? existingToken! : payload?.token;
         if (id) {
           const url = `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(id)}`;
+          patchState({ sharedUrl: url, copiedShareUrl: false, showShareModal: true, shareIsUpdate: isUpdate, shareId: id, shareToken: token });
           copyText(url, () => {
-            patchState({ sharedUrl: url, copiedShareUrl: true, showShareModal: true, shareIsUpdate: isUpdate, shareId: id, shareToken: token });
+            patchState({ copiedShareUrl: true });
             setTimeout(() => patchState({ copiedShareUrl: false }), 2000);
           });
           return;
@@ -815,12 +846,14 @@ function BadmintonPlanner() {
     }
 
     // Fallback: encode full schedule in URL hash (no token, always new)
+    if (sourceChanged()) return;
     const fallbackUrl = `${window.location.origin}${window.location.pathname}#share=${btoa(JSON.stringify(data))}`;
+    patchState({ sharedUrl: fallbackUrl, copiedShareUrl: false, showShareModal: true, shareIsUpdate: false });
     copyText(fallbackUrl, () => {
-      patchState({ sharedUrl: fallbackUrl, copiedShareUrl: true, showShareModal: true, shareIsUpdate: false });
+      patchState({ copiedShareUrl: true });
       setTimeout(() => patchState({ copiedShareUrl: false }), 2000);
     });
-  }, [buildSharePayload, shareId, shareToken]);
+  }, [buildSharePayload, shareId, shareToken, isGenerating]);
 
   const copyShareUrl = useCallback(() => {
     copyText(sharedUrl, () => {
@@ -885,6 +918,8 @@ function BadmintonPlanner() {
   const sharedSync = useSharedSessionSync({ shareId: sharedTarget, payload: buildSharePayload(), isAdmin, planEditing: isGenerating,
     applyRemote: data => applySharePayload(data, sharedTarget ?? undefined),
   });
+  publicationSnapshot.current = { payload: buildSharePayload(), status: sharedSync.status,
+    source: JSON.stringify([initialShareId, shareId, isSharedSession, transferTarget?.id ?? null]) };
   useEffect(() => {
     if (!sharedTarget || !['not_found', 'expired', 'error'].includes(sharedSync.status)) return;
     if (!initialShareId) setInitialShareId(sharedTarget);
@@ -937,6 +972,7 @@ function BadmintonPlanner() {
   };
 
   const leaveSharedMode = () => {
+    ++publicationEpoch.current;
     setInitialShareId(null);
     setTransferTarget(null);
     hydratedShare.current = null;
@@ -978,6 +1014,7 @@ function BadmintonPlanner() {
     } catch { return false; }
   };
   const cancelOrganizerTransfer = () => {
+    ++publicationEpoch.current;
     setTransferTarget(null);
     window.history.replaceState(null, '', window.location.pathname);
   };
@@ -1044,7 +1081,7 @@ function BadmintonPlanner() {
       <div style={{ maxWidth: 780, margin: '0 auto' }}>
         {showPinPrompt && <PinPromptModal pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} close={() => patchState({ showPinPrompt: false, pinInput: '', pinError: false })} />}
         {showSavePlan && <SavePlanModal needsPin={Boolean(window.ADMIN_PIN && !isAdmin)} pinInput={pinInput} pinError={pinError} setPinInput={value => patchState({ pinInput: value, pinError: false })} submitPin={submitPin} saveTag={saveTag} setSaveTag={value => patchState({ saveTag: value })} savePlan={savePlan} canUpdate={loadedPlanId != null && savedPlans.some(p => p.id === loadedPlanId)} savedPlans={savedPlans} isSharedSession={isSharedSession} close={() => patchState({ showSavePlan: false, pinInput: '', pinError: false })} />}
-        {showShareModal && <ShareLinkModal copiedShareUrl={copiedShareUrl} sharedUrl={sharedUrl} shareIsUpdate={shareIsUpdate} hasExisting={isFirebaseConfigured() ? !!shareId : !!(shareId && shareToken)} copyShareUrl={copyShareUrl} newShareLink={() => shareLink(true)} close={() => patchState({ showShareModal: false })} />}
+        {showShareModal && <ShareLinkModal copiedShareUrl={copiedShareUrl} sharedUrl={sharedUrl} shareIsUpdate={shareIsUpdate} hasExisting={isFirebaseConfigured() ? !!shareId : !!(shareId && shareToken)} copyShareUrl={copyShareUrl} copyOrganizerUrl={url => copyText(url)} publicationStatus={sharedSync.status === 'loading' ? 'connecting' : sharedSync.status === 'saving' ? 'pending' : sharedSync.status === 'saved' ? sharedSync.hasPendingChanges ? 'pending' : 'live' : 'paused'} newShareLink={() => shareLink(true)} close={() => patchState({ showShareModal: false })} />}
         {showImport && <ImportModal importText={importText} importError={importError} setImportText={value => patchState({ importText: value, importError: '' })} importSchedule={importSchedule} close={() => patchState({ showImport: false, importText: '', importError: '' })} />}
         {queuePromotionPrompt && <QueuePromotionModal prompt={queuePromotionPrompt.prompt} onUseLookahead={() => resolveSessionPromotion('lookahead')} onSubstitute={() => resolveSessionPromotion('substitute')} onCancel={cancelQueuePromotion} />}
         {pendingSharedUndo && <div role="alertdialog" aria-label="Undo Finish" style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#000b', display: 'grid', placeItems: 'center' }}><div style={{ background: C.card, padding: 24, borderRadius: 12, maxWidth: 420 }}>
@@ -1090,9 +1127,24 @@ function BadmintonPlanner() {
           </p>
         </section>
 
+        {isAdmin && result && isFirebaseConfigured() && <section aria-label="Player sharing" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
+          <strong style={{ fontSize: 14 }}>{sharedTarget ? 'Live player link' : 'Share with players from this device'}</strong>
+          <p style={{ margin: '6px 0 10px', color: C.textDim, fontSize: 12 }}>
+            {sharedTarget ? sharedSync.status === 'saved' && !sharedSync.hasPendingChanges ? 'Player updates are published. Game progress and organizer edits from this device update the player view automatically.'
+              : sharedSync.status === 'saved' && sharedSync.hasPendingChanges ? 'Latest changes are waiting to publish. Players currently see the last saved session.'
+              : sharedSync.status === 'saving' ? 'Publishing latest changes to the player view…'
+              : sharedSync.status === 'loading' ? 'Connecting this device to the shared session…'
+              : 'Player updates are paused. Latest changes are not published; resolve the shared connection or retry before copying the link.'
+              : 'Publish a player link here to make this device the source of live updates. An independent device copy does not update another device’s player link.'}
+          </p>
+          <button onClick={() => void shareLink()} disabled={isGenerating || isPublishingPlayerLink || Boolean(sharedTarget && ['loading', 'saving'].includes(sharedSync.status))} style={{ minHeight: 44, background: C.accentDim, color: '#fff', border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontFamily: FONT }}>
+            {isPublishingPlayerLink ? 'Publishing player link…' : sharedTarget ? 'Copy player link' : 'Share player link'}
+          </button>
+        </section>}
+
         {isSharedSession && !transferTarget && <div style={{marginBottom:16}}>
           <button onClick={useSessionOnThisDevice} disabled={isGenerating || sharedSync.status === 'saving' || Boolean(sharedTarget && sharedSync.status === 'loading')} style={{minHeight:44,background:C.accentDim,color:'#fff',border:`1px solid ${C.border}`,borderRadius:6,padding:'10px 14px',fontFamily:FONT}}>Use on this device</button>
-          <p style={{fontSize:12,color:C.textDim,marginTop:4}}>Keep this session here and disconnect live updates. A backup of this device’s previous setup is retained.</p>
+          <p style={{fontSize:12,color:C.textDim,marginTop:4}}>Keep this session here and disconnect live updates. This device will stop publishing to the existing player link. A backup of this device’s previous setup is retained.</p>
         </div>}
         <OrganizerHandoff target={transferTarget} canExport={isAdmin && selectedTab === 'setup' && players.length > 0 && !isGenerating}
           createSetup={() => buildOrganizerSetup(state, qualityWeights)} onImport={importOrganizerSetup} onCancel={cancelOrganizerTransfer}
@@ -1109,7 +1161,7 @@ function BadmintonPlanner() {
               not_found: 'This share link was not found. Ask the organizer to share it again.',
               invalid: 'This shared schedule could not be read. Ask for a new share link.',
               error: 'Could not load this shared schedule. Refresh to retry, or download debug logs for details.',
-              save_error: 'Could not publish this shared schedule. Your local changes are kept. Try Share or Save again, or download debug logs for details.',
+              save_error: 'Could not publish this shared schedule. Latest changes are not published; your local changes and existing link are kept. Retry Share or the shared connection.',
             })[shareNotice]}</span>
             {shareNotice !== 'loading' && <button aria-label="Dismiss share notice" onClick={() => patchState({ shareNotice: null })} style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 16, padding: 0 }}>×</button>}
           </div>
@@ -1243,7 +1295,7 @@ function BadmintonPlanner() {
             <button onClick={copyGames} title="Copy games only (matchups, no sit list or stats)" style={{ display: 'flex', alignItems: 'center', gap: 6, background: copiedGames ? C.green : C.card, color: copiedGames ? C.bg : C.textDim, border: `1px solid ${copiedGames ? C.green : C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 12, fontWeight: 700, fontFamily: FONT, transition: 'all 0.2s' }}>{copiedGames ? <LucideIcon name="check" size={15} /> : '⚡'} Quick Copy</button>
             <button onClick={saveAsImage} title="Save schedule as an image" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="download" size={15} /> Image</button>
             <button onClick={() => { const loaded = savedPlans.find(p => p.id === loadedPlanId); patchState({ saveTag: loaded ? loaded.tag : '', showSavePlan: true }); }} title="Save plan with tag" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="bookmark" size={15} /> Save</button>
-            <button onClick={() => shareLink()} title="Share schedule via link" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="link" size={15} /> Share</button>
+            <button onClick={() => shareLink()} disabled={isGenerating || isPublishingPlayerLink} title="Share schedule via link" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.text, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="link" size={15} /> Share</button>
             {selectedTab === 'setup' && <button onClick={clearSchedule} title="Clear schedule" style={{ display: 'flex', alignItems: 'center', gap: 6, background: C.card, color: C.textMuted, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 16px', fontSize: 13, fontWeight: 700, fontFamily: FONT }}><LucideIcon name="trash" size={15} /> Clear</button>}
           </div>
         )}

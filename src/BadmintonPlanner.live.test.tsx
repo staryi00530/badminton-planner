@@ -879,6 +879,66 @@ describe('BadmintonPlanner live game flow', () => {
       window.history.replaceState(null, '', '/?share=test-session');
       return { read: () => current };
     }
+    it('reuses the shared player link only after pending edits are acknowledged', async () => {
+      const cloud = sharedCloud();
+      vi.mocked(createShare).mockClear();
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) });
+      render(<BadmintonPlanner />);
+      await screen.findByText('Shared session saved');
+      let acknowledge!: (payload: SharePayload) => void;
+      vi.mocked(commitShare).mockClear();
+      vi.mocked(commitShare).mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve; }));
+      fireEvent.click(screen.getByRole('button', { name: 'Setup' }));
+      fireEvent.change(screen.getByLabelText('Gender for roster Shared 1'), { target: { value: 'F' } });
+      await waitFor(() => expect(commitShare).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: 'Copy player link' })).toBeDisabled();
+      expect(screen.queryByRole('textbox', { name: 'Player link' })).not.toBeInTheDocument();
+      const sent = vi.mocked(commitShare).mock.calls.at(-1)![2];
+      acknowledge({ ...sent, revision: (cloud.read().revision ?? 0) + 1 });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Copy player link' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Copy player link' }));
+      await screen.findByRole('textbox', { name: 'Player link' });
+      expect(screen.getByRole('textbox', { name: 'Player link' })).toHaveValue(`${window.location.origin}/?share=test-session&view=players`);
+      expect(createShare).not.toHaveBeenCalled();
+    });
+    it('retains the organizer draft and URL when the player-link flush fails', async () => {
+      sharedCloud();
+      render(<BadmintonPlanner />);
+      await screen.findByText('Shared session saved');
+      vi.mocked(commitShare).mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      fireEvent.click(screen.getByRole('button', { name: 'Setup' }));
+      fireEvent.change(screen.getByLabelText('Gender for roster Shared 1'), { target: { value: 'F' } });
+      await screen.findByText('Offline — changes retained on this device');
+      fireEvent.click(screen.getByRole('button', { name: 'Copy player link' }));
+      await waitFor(() => expect(screen.getAllByRole('alert').some(alert => alert.textContent?.includes('Latest changes are not published'))).toBe(true));
+      expect(screen.queryByRole('textbox', { name: 'Player link' })).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Gender for roster Shared 1')).toHaveValue('F');
+      expect(window.location.search).toBe('?share=test-session');
+      expect(sessionStorage.getItem('bp-share-draft:test-session')).toContain('"F"');
+    });
+    it('does not reattach a fresh link that finishes publishing after the organizer detaches', async () => {
+      sharedCloud();
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) });
+      render(<BadmintonPlanner />);
+      await screen.findByText('Shared session saved');
+      fireEvent.click(screen.getByRole('button', { name: 'Copy player link' }));
+      await screen.findByRole('textbox', { name: 'Player link' });
+      let acknowledge!: (id: string) => void;
+      vi.mocked(createShare).mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve; }));
+      fireEvent.click(screen.getByRole('button', { name: 'Generate a fresh link instead' }));
+      await waitFor(() => expect(acknowledge).toBeTypeOf('function'));
+      fireEvent.click(screen.getByRole('button', { name: 'Use on this device' }));
+      await waitFor(() => expect(screen.getByRole('region', { name: 'Session mode' })).toHaveTextContent('This device only'));
+      acknowledge('late-fresh-link');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Share player link' })).toBeEnabled());
+      expect(screen.getByRole('region', { name: 'Session mode' })).toHaveTextContent('This device only');
+      expect(window.location.search).toBe('');
+      expect(sessionStorage.getItem('bp-is-shared-session')).toBe('false');
+      expect(sessionStorage.getItem('bp-share-id')).toBeNull();
+      expect(fetchShare).not.toHaveBeenCalledWith('late-fresh-link');
+      expect(screen.queryByRole('textbox', { name: 'Player link' })).not.toBeInTheDocument();
+    });
     it('starts shared session timers once without completing games or autosaving every tick',async()=>{
       const cloud=sharedCloud();const clock=vi.spyOn(Date,'now').mockReturnValue(2000000);
       try{
@@ -1074,12 +1134,48 @@ describe('BadmintonPlanner live game flow', () => {
     vi.mocked(isFirebaseConfigured).mockReturnValue(true);
     let acknowledge!: (id: string) => void;
     vi.mocked(createShare).mockReturnValue(new Promise(resolve => { acknowledge = resolve; }));
-    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) });
+    vi.mocked(fetchShare).mockImplementation(async () => ({ status: 'ok', data: vi.mocked(createShare).mock.calls.at(-1)![0] }));
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => false) });
     render(<BadmintonPlanner />);
     await user.click(screen.getByRole('button', { name: /^Share$/ }));
     expect(screen.queryByText(/\?share=/)).not.toBeInTheDocument();
     acknowledge('acknowledged-share');
-    await waitFor(() => expect(screen.getByDisplayValue(/\?share=acknowledged-share/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Player link' })).toHaveValue(`${window.location.origin}/?share=acknowledged-share&view=players`));
+    expect(screen.getByRole('textbox', { name: 'Organizer session link' })).toHaveValue(`${window.location.origin}/?share=acknowledged-share`);
+    expect(window.location.search).toBe('?share=acknowledged-share');
+    expect(screen.getByRole('region', { name: 'Player sharing' })).toBeInTheDocument();
+  });
+
+  it('does not substitute a snapshot when Firebase returns no live share ID', async () => {
+    vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+    vi.mocked(createShare).mockResolvedValue(null);
+    window.SHARE_API_BASE = 'https://snapshot.example';
+    const fallback = vi.spyOn(window, 'fetch');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(<BadmintonPlanner />);
+    fireEvent.click(screen.getByRole('button', { name: /^Share$/ }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not publish'));
+    expect(screen.queryByRole('textbox', { name: 'Player link' })).not.toBeInTheDocument();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(window.location.search).toBe('');
+    expect(sessionStorage.getItem('bp-share-id')).toBeNull();
+  });
+
+  it('does not connect an old acknowledged snapshot over edits made while creating a player link', async () => {
+    vi.mocked(isFirebaseConfigured).mockReturnValue(true);
+    let acknowledge!: (id: string) => void;
+    vi.mocked(createShare).mockReturnValue(new Promise(resolve => { acknowledge = resolve; }));
+    vi.mocked(fetchShare).mockClear();
+    render(<BadmintonPlanner />);
+    fireEvent.click(screen.getByRole('button', { name: /^Share$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Setup' }));
+    fireEvent.change(screen.getByLabelText('Gender for roster P1'), { target: { value: 'F' } });
+    acknowledge('older-snapshot');
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Latest changes are not published'));
+    expect(screen.getByLabelText('Gender for roster P1')).toHaveValue('F');
+    expect(window.location.search).toBe('');
+    expect(fetchShare).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Player link' })).not.toBeInTheDocument();
   });
 
   it('shows a failed publish without creating a phantom share session', async () => {
@@ -1092,6 +1188,16 @@ describe('BadmintonPlanner live game flow', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not publish'));
     expect(sessionStorage.getItem('bp-share-id')).toBeNull();
     expect(exportLiveQueueLogs()).toContain('PERMISSION_DENIED');
+  });
+
+  it('preserves a clearly labeled snapshot fallback when live sharing is not configured', () => {
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => false) });
+    render(<BadmintonPlanner />);
+    fireEvent.click(screen.getByRole('button', { name: /^Share$/ }));
+    expect((screen.getByRole('textbox', { name: 'Snapshot link' }) as HTMLInputElement).value).toContain('#share=');
+    expect(screen.getByText('Published snapshot')).toBeInTheDocument();
+    expect(screen.getByText(/does not receive live game updates/)).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Player link' })).not.toBeInTheDocument();
   });
 
   it('generates a schedule into Live session with all initial courts live', async () => {

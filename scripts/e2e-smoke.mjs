@@ -89,6 +89,84 @@ async function assertLayout(page, step) {
 
 async function stableCourtText(locator) { return (await locator.textContent()).replace(/Elapsed (?:—|\d+(?::\d{2}){1,2})/g,'Elapsed'); }
 
+async function verifyPlayerViewer(newContext) {
+  stage='live player viewer';
+  let fixture={v:1,schema:3,planId:'player-test',revision:0,createdAt:Date.now(),
+    ids:['a','b','c','d','e','f','g','h'],p:['A','B','C','D','E','F','G','H'].map(name=>[name,'M']),
+    cfg:{g:15,c:1,sessionStart:'20:30',totalMinutes:45},
+    slots:[{s:1,c:[[[0,1],[2,3]]],sit:[]},{s:2,c:[[[0,4],[5,6]]],sit:[]},{s:3,c:[[[1,2],[3,7]]],sit:[]}],
+    runtime:{live:[{slot:1,court:0,displayCourt:0,players:['A','B','C','D'],startedAt:Date.now()-60000}],completed:[]},history:[]};
+  const initial=structuredClone(fixture);
+  const moduleCode=`
+    const write=name=>{window.__readerWrites.push(name);throw new Error('Player attempted '+name)};
+    export const isFirebaseConfigured=()=>true;
+    export const loadWinLoss=()=>write('loadWinLoss');export const saveWinLoss=()=>write('saveWinLoss');
+    export const createShare=()=>write('createShare');export const updateShare=()=>write('updateShare');
+    export const commitShare=()=>write('commitShare');export const performShareAction=()=>write('performShareAction');
+    export const fetchShare=()=>write('fetchShare');
+    export const subscribeShare=(id,onData,onError)=>{let stopped=false;window.__playerPush=data=>{if(!stopped)onData(data)};window.__playerError=onError;fetch('/__player_fixture').then(r=>r.json()).then(data=>{if(!stopped)onData(data)});return()=>{stopped=true}};
+    export const subscribeShareConnection=(connected)=>{let stopped=false;window.__playerConnected=value=>{if(!stopped)connected(value)};queueMicrotask(()=>{if(!stopped)connected(true)});return()=>{stopped=true}};
+  `;
+  for(const width of [390,1024]) {
+    fixture=structuredClone(initial);
+    const context=await newContext(width);
+    await context.route(/\/src\/firebase\.ts(?:\?|$)/,route=>route.fulfill({contentType:'text/javascript',body:moduleCode}));
+    await context.route(/\/__player_fixture$/,route=>{assert.equal(route.request().method(),'GET');return route.fulfill({contentType:'application/json',body:JSON.stringify(fixture)});});
+    await context.addInitScript(prefix=>{
+      window.__readerWrites=[];
+      if(!localStorage.getItem('reader-seeded')){
+        localStorage.clear();sessionStorage.clear();
+        localStorage.setItem(`${prefix}bp-players`,'personal-roster-sentinel');
+        localStorage.setItem(`${prefix}bp-player-history`,'private-bank-sentinel');
+        sessionStorage.setItem(`${prefix}bp-share-id`,'organizer-session-sentinel');
+        localStorage.setItem('reader-seeded','1');
+      }
+    },storagePrefix);
+    const page=await context.newPage();activePage=page;page.setDefaultTimeout(10000);
+    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(`${baseUrl}?view=players&share=-player-test`,{waitUntil:'domcontentloaded'});
+    await expect(page.getByText('Receiving live updates',{exact:true})).toBeVisible();
+    await expect(page.getByRole('tab',{name:'All games',exact:true})).toHaveAttribute('aria-selected','true');
+    await expect(page.getByRole('article')).toHaveCount(3);
+    await page.getByLabel('Choose your name',{exact:true}).selectOption('a');
+    await expect(page.getByRole('tab',{name:'My games',exact:true})).toHaveAttribute('aria-selected','true');
+    const push=async next=>{fixture=structuredClone(next);await page.evaluate(value=>window.__playerPush(value),fixture);};
+    const first=fixture.runtime.live[0];
+    await push({...fixture,revision:fixture.revision+1,history:[{id:`game-${width}`,planId:'player-test',slot:1,court:0,completedAt:first.startedAt+60000,startedAt:first.startedAt,durationMs:60000,
+      teamA:[{id:'a',name:'A',gender:'M'},{id:'b',name:'B',gender:'M'}],teamB:[{id:'c',name:'C',gender:'M'},{id:'d',name:'D',gender:'M'}],waitingIds:['e','f','g','h']}],
+      runtime:{completed:[first],live:[{slot:2,court:0,displayCourt:0,players:['A','E','F','H'],startedAt:Date.now()}]}});
+    await expect(page.getByRole('region',{name:'Current games'})).toContainText('H');
+    await expect(page.getByRole('region',{name:'Current games'})).not.toContainText('G (you)');
+    const renamed={...fixture,revision:fixture.revision+1,p:fixture.p.map((p,i)=>i===0?['Renamed A','M']:p),runtime:{...fixture.runtime,live:fixture.runtime.live.map(game=>({...game,players:game.players.map(name=>name==='A'?'Renamed A':name)}))},
+      slots:fixture.slots.map(slot=>slot.s===3?{...slot,c:[[[0,2],[3,7]]]}:slot)};
+    await push(renamed);
+    await expect(page.getByLabel('Choose your name',{exact:true})).toHaveValue('a');
+    await expect(page.getByRole('region',{name:'Planned games'})).toContainText('Renamed A (you)');
+    await expect(page.getByLabel('Choose your name',{exact:true}).locator('option')).toHaveCount(9);
+    await page.getByRole('tab',{name:'All games',exact:true}).click();
+    await expect(page.getByText('Played games (1)',{exact:true})).toBeVisible();
+    await page.getByRole('tab',{name:'My games',exact:true}).click();
+    await page.evaluate(()=>{window.__playerConnected(false);window.dispatchEvent(new Event('offline'));});
+    await expect(page.getByText('Offline — showing last received games',{exact:true})).toBeVisible();
+    await page.evaluate(()=>{window.dispatchEvent(new Event('online'));window.__playerConnected(true);});
+    await expect(page.getByText('Receiving live updates',{exact:true})).toBeVisible();
+    await page.reload({waitUntil:'domcontentloaded'});
+    await expect(page.getByText('Receiving live updates',{exact:true})).toBeVisible();
+    await expect(page.getByLabel('Choose your name',{exact:true})).toHaveValue('a');
+    await expect(page.getByRole('tab',{name:'My games',exact:true})).toHaveAttribute('aria-selected','true');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`player ${width}px overflow`);
+    await expect(page.getByRole('button',{name:/Finish game|Start game|Undo|Unlock|Edit|Generate|Save|Share/})).toHaveCount(0);
+    assert.deepEqual(await page.evaluate(()=>window.__readerWrites),[]);
+    const stored=await page.evaluate(prefix=>({roster:localStorage.getItem(`${prefix}bp-players`),bank:localStorage.getItem(`${prefix}bp-player-history`),session:sessionStorage.getItem(`${prefix}bp-share-id`),keys:Object.keys(localStorage)}),storagePrefix);
+    assert.deepEqual({roster:stored.roster,bank:stored.bank,session:stored.session},{roster:'personal-roster-sentinel',bank:'private-bank-sentinel',session:'organizer-session-sentinel'});
+    assert.deepEqual(stored.keys.sort(),[`${storagePrefix}bp-players`,`${storagePrefix}bp-player-history`,`${storagePrefix}bp-player-view:-player-test:selection`,'reader-seeded'].sort());
+    assert.deepEqual(errors,[]);
+    await page.screenshot({path:join(artifacts,`player-view-${width}.png`),fullPage:true});
+    await context.close();
+  }
+  console.log('PASS: live read-only player view, 390/1024px; All/My identity, Finish/substitute/regenerate updates, rename/refresh, offline/reconnect and isolated storage');
+}
+
 async function verifyOrganizerHandoff(newContext) {
   stage='private organizer handoff';
   const records=new Map();let creates=0,reads=0;
@@ -99,6 +177,7 @@ async function verifyOrganizerHandoff(newContext) {
     export const createShare=async data=>(await(await fetch('/__organizer_test',{method:'POST',body:JSON.stringify(data)})).json()).id;
     export const fetchShare=async id=>await(await fetch('/__organizer_test?id='+encodeURIComponent(id))).json();
     export const subscribeShare=()=>{throw new Error('Unexpected live subscription during handoff')};
+    export const subscribeShareConnection=()=>()=>{};
     export const commitShare=()=>{throw new Error('Unexpected live commit during handoff')};
     export const performShareAction=()=>{throw new Error('Unexpected remote action during handoff')};
     export const updateShare=()=>{throw new Error('Unexpected update during handoff')};
@@ -398,7 +477,7 @@ async function verifyQuarantine(newContext) {
     }, storagePrefix);
     await page.reload({ waitUntil: 'domcontentloaded' });
     const stored = key => page.evaluate(({ key, prefix }) => JSON.parse(localStorage.getItem(`${prefix}bp-${key}`)), { key, prefix: storagePrefix });
-    await expect.poll(async () => (await stored('players')).slice(0, 3).map(p => p.level)).toEqual([1, 3, 5]);
+    await expect.poll(async () => ((await stored('players')) ?? []).slice(0, 3).map(p => p.level)).toEqual([1, 3, 5]);
     await expect(page.getByRole('group', { name: 'Level for Arm', exact: true })).toBeVisible();
     const armRow = page.getByText('Arm', { exact: true }).locator('..');
     await armRow.getByRole('button', { name: '4', exact: true }).click();
@@ -607,6 +686,7 @@ try {
   await verifyQuarantine(newContext);
   await verifyHistoryRecovery(newContext);
   await verifyOrganizerHandoff(newContext);
+  await verifyPlayerViewer(newContext);
   assert.equal(timedOut, false, 'E2E deadline exceeded');
   console.log(`E2E smoke passed: ${completed} games, max ${maxLive} live courts; 8 desktop/mobile workflows. Screenshots: ${artifacts}`);
 } catch (error) {

@@ -110,6 +110,17 @@ export function subscribeShare(shareId: string, onData: (data: SharePayload | nu
   return () => { stopped = true; unsubscribe?.(); };
 }
 
+/** Reader-only transport state; listening never changes a session or its expiry. */
+export function subscribeShareConnection(onConnected: (connected: boolean) => void, onError: (error: unknown) => void): () => void {
+  let stopped = false;
+  let unsubscribe: (() => void) | undefined;
+  void requireDatabase().then(database => {
+    if (stopped) return;
+    unsubscribe = onValue(ref(database, '.info/connected'), snapshot => onConnected(snapshot.val() === true), onError);
+  }).catch(error => { if (!stopped) onError(error); });
+  return () => { stopped = true; unsubscribe?.(); };
+}
+
 export function commitShare(shareId: string, revision: number, payload: SharePayload): Promise<SharePayload> {
   return cloudOperation('firebase.share.commit', async () => {
     const database = await requireDatabase();
