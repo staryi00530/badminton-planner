@@ -89,6 +89,58 @@ async function assertLayout(page, step) {
 
 async function stableCourtText(locator) { return (await locator.textContent()).replace(/Elapsed (?:—|\d+(?::\d{2}){1,2})/g,'Elapsed'); }
 
+async function verifyMixedSlotCourtRecovery(newContext) {
+  stage='mixed-slot extra court recovery';
+  const context=await newContext(1024);
+  await context.addInitScript(prefix=>{
+    localStorage.clear();sessionStorage.clear();
+    const players=Array.from({length:34},(_,i)=>({id:`mixed-${i+1}`,name:`P${i+1}`,gender:'M',level:3,availFrom:0,availTo:5}));
+    const court=(n,start)=>({court:n,teamA:players.slice(start,start+2),teamB:players.slice(start+2,start+4)});
+    const courts=[[court(1,0)],[court(1,4),court(2,8),court(3,12)],...Array.from({length:4},()=>[court(1,16),court(2,20),court(3,24),court(4,28)])];
+    const schedule=courts.map((lineups,i)=>({slot:i+1,courts:lineups,sitting:players.filter(p=>!lineups.some(c=>[...c.teamA,...c.teamB].some(q=>q.id===p.id))),playerState:[],repeatedCourts:[]}));
+    const live=[{slot:1,court:0,displayCourt:0},...Array.from({length:3},(_,court)=>({slot:2,court,displayCourt:court+1}))].map((g,i)=>({...g,id:`mixed-live-${i}`,startedAt:Date.now()-60000,players:[...schedule[g.slot-1].courts[g.court].teamA,...schedule[g.slot-1].courts[g.court].teamB].map(p=>p.name)}));
+    const values={players,'player-history':players,result:{planId:'mixed-plan',schedule,gamesPlayed:players.map(()=>0)},'live-games':live,'completed-games':[],'played-games':[],numCourts:4,totalMinutes:90,gameMinutes:15,staggerMode:'none','player-level-scale':5,'bank-level-scale':5,'active-tab':'live'};
+    for(const[key,value]of Object.entries(values))localStorage.setItem(`${prefix}bp-${key}`,JSON.stringify(value));
+    if(prefix)localStorage.setItem(`${prefix}bp-storage-seeded`,'1');
+    Object.defineProperty(window,'ADMIN_PIN',{configurable:true,get:()=>null,set:()=>{}});
+  },storagePrefix);
+  const page=await context.newPage();activePage=page;page.setDefaultTimeout(10000);
+  await page.goto(baseUrl,{waitUntil:'domcontentloaded'});
+  const lane=n=>page.getByRole('region',{name:`Court ${n}`,exact:true});
+  await expect(lane(1).getByRole('button',{name:'Finish game',exact:true})).toBeVisible();
+  await lane(1).getByRole('button',{name:'Finish game',exact:true}).click();
+  await expect(lane(1)).toContainText('P17');await expect(lane(1)).toContainText('P20');
+  const read=()=>page.evaluate(prefix=>({live:JSON.parse(localStorage.getItem(`${prefix}bp-live-games`)),result:JSON.parse(localStorage.getItem(`${prefix}bp-result`))}),storagePrefix);
+  let state=await read();assert.deepEqual(state.live.find(g=>g.displayCourt===0).players,['P17','P18','P19','P20']);
+  await page.getByRole('button',{name:'Add court',exact:true}).click();
+  const confirm=page.getByRole('dialog',{name:'Update upcoming games?',exact:true});
+  if(await confirm.count())await confirm.getByRole('button',{name:'Update upcoming games',exact:true}).click();
+  await expect(lane(5).getByRole('button',{name:'Start game',exact:true})).toBeEnabled();
+  await lane(5).getByRole('button',{name:'Start game',exact:true}).click();
+  state=await read();assert.equal(state.live.length,5);assert.equal(new Set(state.live.flatMap(g=>g.players)).size,20);
+  const before=structuredClone(state);
+  await lane(2).getByRole('button',{name:/Edit/}).click();
+  await lane(2).locator('select').first().selectOption('P17');
+  for(const label of ['This game only','Apply & regenerate after']){
+    await lane(2).getByRole('button',{name:label,exact:true}).click();
+    await expect(page.getByRole('status',{name:'Session change',exact:true})).toContainText('P17');
+    assert.deepEqual(await read(),before,'busy-player edit changed live state or schedule');
+  }
+  await lane(2).getByRole('button',{name:'Cancel',exact:true}).click();
+  await page.getByRole('button',{name:'Setup',exact:true}).click();
+  const settings=page.getByText('Session settings',{exact:true}).locator('..');
+  await settings.locator('summary').click();
+  await settings.getByRole('button',{name:'5',exact:true}).click();
+  await page.getByRole('button',{name:'Re-roll',exact:true}).click();
+  const preview=page.getByRole('region',{name:'Reroll capacity preview',exact:true});
+  await expect(preview).toBeVisible();
+  assert.deepEqual(await preview.locator('tbody tr').first().locator('td').allTextContents(),['1','5','4']);
+  await page.getByRole('checkbox',{name:'Reset session history before reroll',exact:true}).check();
+  assert.deepEqual(await preview.locator('tbody tr').first().locator('td').allTextContents(),['1','5','5']);
+  await page.getByRole('dialog',{name:'Reroll the schedule?',exact:true}).getByRole('button',{name:'Cancel',exact:true}).click();
+  await context.close();console.log('PASS: mixed-slot 4→5 courts; Finish preserves reserved lineup, cross-slot live edits blocked, keep/reset capacity preview');
+}
+
 async function verifyPlayerViewer(newContext) {
   stage='live player viewer';
   let fixture={v:1,schema:3,planId:'player-test',revision:0,createdAt:Date.now(),
@@ -543,6 +595,9 @@ try {
     await context.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.abort());
     return context;
   }
+  if(process.env.E2E_SCENARIO==='mixed-court-recovery') {
+    await verifyMixedSlotCourtRecovery(newContext);
+  } else {
   const context = await newContext(1280);
   const page = await context.newPage();
   activePage = page;
@@ -687,8 +742,10 @@ try {
   await verifyHistoryRecovery(newContext);
   await verifyOrganizerHandoff(newContext);
   await verifyPlayerViewer(newContext);
+  await verifyMixedSlotCourtRecovery(newContext);
   assert.equal(timedOut, false, 'E2E deadline exceeded');
   console.log(`E2E smoke passed: ${completed} games, max ${maxLive} live courts; 8 desktop/mobile workflows. Screenshots: ${artifacts}`);
+  }
 } catch (error) {
   console.error(`E2E failed during ${stage}`);
   if (activePage && !activePage.isClosed()) await activePage.screenshot({ path: join(artifacts, 'failure.png'), fullPage: true, timeout: 3000 }).catch(() => {});

@@ -35,6 +35,7 @@ interface ScheduleActionOptions {
   activeTab?: PlannerState['activeTab'];
   playedGames?: PlayedGame[];
   historyEpoch?: number;
+  configuredNumCourts?: number;
   computeSkill: (name: string, level?: 1 | 2 | 3 | 4 | 5) => number;
   getPlayersWithAvailability: () => Player[];
   applyAvailability: (players: Player[]) => Player[];
@@ -94,6 +95,7 @@ export function useScheduleActions({
   activeTab = 'setup',
   playedGames = [],
   historyEpoch = 0,
+  configuredNumCourts,
   computeSkill,
   getPlayersWithAvailability,
   applyAvailability,
@@ -104,20 +106,40 @@ export function useScheduleActions({
 }: ScheduleActionOptions) {
   const runGenerate = useCallback((resetHistory = false) => {
     if (players.length < 4 || isGenerating) return;
-    const retained = resetHistory ? [] : migratePlayedGames(result, players, completedGames, scores, playedGames);
-    const nominalCourts = getCourtsPerSlot({});
+    const historyBefore = migratePlayedGames(result, players, completedGames, scores, playedGames);
+    const retained = resetHistory ? [] : historyBefore;
+    const recoveringHistory = !resetHistory && retained.length > 0;
+    const effectiveCourts = getCourtsPerSlot(courtOverrides);
+    const nominalCourts = recoveringHistory ? effectiveCourts : getCourtsPerSlot({});
     const courtsPerSlot = remainingCourtsPerSlot(retained, nominalCourts);
     const firstIndex = courtsPerSlot.findIndex(count => count > 0);
-    if (firstIndex < 0) { patchState({ sessionChangeNotice: 'No remaining games in this session. Extend the session or choose Reset history to start a fresh block.' }); return; }
+    const sourceCapacitySlot = Math.max(1, Math.min(Math.max(getFutureChangeBoundary(liveGames, completedGames), result?.capacityProgressFloorSlot ?? 1), effectiveCourts.length));
+    const sourceCapacity = effectiveCourts[sourceCapacitySlot - 1] ?? 0;
+    const plannedInitialCapacity = firstIndex < 0 ? 0 : recoveringHistory ? sourceCapacity || nominalCourts[firstIndex] || 0 : nominalCourts[firstIndex] ?? 0;
+    const nextCourtOverrides = recoveringHistory ? { ...courtOverrides } : {};
+    const planId = crypto.randomUUID();
+    const historyEpochAfter = resetHistory ? historyEpoch + 1 : historyEpoch;
+    const generationIntent = {
+      generationId: planId, intent: resetHistory ? 'reset-history' : 'keep-history', resetHistory,
+      capacityIntent: recoveringHistory ? 'history-recovery' : 'fresh-configuration',
+      historyCountBefore: historyBefore.length, retainedHistoryCount: retained.length,
+      historyEpochBefore: historyEpoch, historyEpochAfter, configuredNumCourts: configuredNumCourts ?? null,
+      nominalCourtsPerSlot: [...nominalCourts], remainingCourtsPerSlot: [...courtsPerSlot],
+      courtOverridesBefore: { ...courtOverrides }, courtOverridesAfter: nextCourtOverrides,
+      sourceCapacitySlot, sourceCapacity, plannedInitialCapacity,
+    };
+    if (firstIndex < 0) {
+      liveQueueDebug('generate:blocked', { ...generationIntent, historyEpochAfter: historyEpoch, courtOverridesAfter: { ...courtOverrides }, historyResetApplied: false, reason: 'no-remaining-games' });
+      patchState({ sessionChangeNotice: 'No remaining games in this session. Extend the session or choose Reset history to start a fresh block.' }); return;
+    }
     recordUndo();
     // Keep the prior plan/history intact until the replacement is fully generated.
     patchState({ isGenerating: true, genSlot: 0, sessionChangeNotice: null });
-    const planId = crypto.randomUUID();
     let lastValue: GeneratorYield | null = null;
     let gen: ReturnType<typeof generateScheduleGen>;
     const fail = (error: unknown) => {
       const failedSlot = (lastValue?.schedule.length ?? 0) + 1;
-      liveQueueDebug('generate:failed', { failedSlot, totalSlots, playerCount: players.length,
+      liveQueueDebug('generate:failed', { ...generationIntent, historyEpochAfter: historyEpoch, courtOverridesAfter: { ...courtOverrides }, historyResetApplied: false, failedSlot, totalSlots, playerCount: players.length,
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
       patchState({ ...(result ? { result } : {}), scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames,
@@ -135,13 +157,20 @@ export function useScheduleActions({
           patchState({ genSlot: value.schedule.length });
         }
         if (done) {
-          const newResult = lastValue ? { ...lastValue, planId } : null;
+          const newResult = lastValue ? { ...lastValue, planId, ...(recoveringHistory ? { capacityProgressFloorSlot: sourceCapacitySlot } : {}) } : null;
           const initialLiveGames = newResult
-            ? initialLiveGamesForSchedule(newResult, nominalCourts[firstIndex] ?? 0)
+            ? initialLiveGamesForSchedule(newResult, plannedInitialCapacity)
             : [];
-          liveQueueDebug('generate:complete', { completedSlots: lastValue?.schedule.length ?? 0, totalSlots });
-          patchState({ result: newResult, playedGames: retained, historyEpoch: resetHistory ? historyEpoch + 1 : historyEpoch,
-            liveGames: initialLiveGames, completedGames: [], scores: {}, courtOverrides: {}, suspendedPlayerNames: [],
+          const firstSlotScheduledGameCount = newResult?.schedule.find(slot => slot.slot === firstIndex + 1)?.courts.length ?? 0;
+          const activeFirstSlotCount = initialLiveGames.filter(game => game.slot === firstIndex + 1).length;
+          liveQueueDebug('generate:complete', { ...generationIntent, historyResetApplied: resetHistory,
+            completedSlots: lastValue?.schedule.length ?? 0, totalSlots, firstPlayableSlot: firstIndex + 1,
+            initialNominalCapacity: nominalCourts[firstIndex] ?? 0, firstSlotScheduledGameCount, activeFirstSlotCount,
+            deferredFirstSlotCount: Math.max(0, firstSlotScheduledGameCount - activeFirstSlotCount),
+            initialLiveGameCount: initialLiveGames.length, activeLaterSlotCount: initialLiveGames.length - activeFirstSlotCount,
+          });
+          patchState({ result: newResult, playedGames: retained, historyEpoch: historyEpochAfter,
+            liveGames: initialLiveGames, completedGames: [], scores: {}, courtOverrides: nextCourtOverrides, suspendedPlayerNames: [],
             fromSlot: firstIndex + 1, fromSlotCourts: 0, activeTab: newResult ? 'live' : 'setup', scheduleDirty: false, isGenerating: false,
             copied: false, isConfirmed: false, loadedPlanId: null,
           });
@@ -159,17 +188,19 @@ export function useScheduleActions({
       }));
       snapshot.keptSlots = prefix;
       logRosterSnapshot(playersWithSkill, 'initial-generation', 1);
-      liveQueueDebug('generate:start', { totalSlots, courtsPerSlot, playerCount: playersWithSkill.length, options });
+      liveQueueDebug('generate:start', { ...generationIntent, historyResetApplied: false, totalSlots, courtsPerSlot, playerCount: playersWithSkill.length, options,
+        firstPlayableSlot: firstIndex + 1, initialNominalCapacity: nominalCourts[firstIndex] ?? 0,
+      });
       gen = generateScheduleGen(playersWithSkill, totalSlots, courtsPerSlot, firstIndex, snapshot, null, options);
       requestAnimationFrame(step);
     } catch (error) { fail(error); }
-  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players, totalSlots, result, scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames, fromSlot, fromSlotCourts, isConfirmed, scheduleDirty, loadedPlanId, activeTab, playedGames, historyEpoch, recordUndo]);
+  }, [computeSkill, getCourtsPerSlot, getPlayersWithAvailability, getScheduleOptions, isGenerating, patchState, players, totalSlots, result, scores, liveGames, completedGames, courtOverrides, suspendedPlayerNames, fromSlot, fromSlotCourts, isConfirmed, scheduleDirty, loadedPlanId, activeTab, playedGames, historyEpoch, configuredNumCourts, recordUndo]);
 
   const runRegenerateFromSlotWithCourts = useCallback((targetFromSlot: number, targetCourts: number) => {
     const fail = (reason: string) => { liveQueueDebug('regenerate:blocked', { reason, targetFromSlot, targetCourts, totalSlots }); patchState({ sessionChangeNotice: reason }); };
     if (players.length < 4 || !result) { fail('Add at least four eligible players and generate a schedule before regenerating games.'); return; }
     if (!Number.isInteger(targetFromSlot) || !Number.isInteger(targetCourts) || targetFromSlot < 1 || targetCourts < 0 || targetCourts > 5) { fail('Choose a valid starting slot and between one and five courts.'); return; }
-    let boundarySlot = Math.max(targetFromSlot, getFutureChangeBoundary(liveGames, completedGames));
+    let boundarySlot = Math.max(targetFromSlot, getFutureChangeBoundary(liveGames, completedGames), result?.capacityProgressFloorSlot ?? 1);
     if (boundarySlot > totalSlots) { fail('No upcoming slot can be regenerated. Extend the session duration to add more games.'); return; }
     const nextOverrides = targetCourts > 0 ? { ...courtOverrides, [boundarySlot]: targetCourts } : courtOverrides;
     const nominalCourts = getCourtsPerSlot(nextOverrides);
@@ -187,7 +218,7 @@ export function useScheduleActions({
         const playersWithSkill = getPlayersWithAvailability().map(p => ({ ...p, skill: computeSkill(p.name, p.level) }));
         const snapshot = regenerationState(result, playersWithSkill, completedGames, [...completedGames, ...liveGames], scores, playedGames, boundarySlot);
         const newResult = generateSchedule(playersWithSkill, totalSlots, courtsArr, boundarySlot - 1, snapshot, null, { ...getScheduleOptions(playersWithSkill), consumedSlots: courtsArr.flatMap((count, index) => count === 0 ? [index + 1] : []) });
-        return newResult ? { newResult: { ...newResult, planId: result.planId }, nextScores: {} } : null;
+        return newResult ? { newResult: { ...newResult, planId: result.planId, capacityProgressFloorSlot: result.capacityProgressFloorSlot }, nextScores: {} } : null;
       },
     });
     if (patch) {
@@ -231,7 +262,7 @@ export function useScheduleActions({
       const match = key.match(/^s(\d+)c/);
       if (match && parseInt(match[1]!, 10) < targetFromSlot && sourceScores[key]) nextScores[key] = sourceScores[key];
     }
-    return { newResult: { ...newResult, planId: baseResult.planId }, nextScores };
+    return { newResult: { ...newResult, planId: baseResult.planId, capacityProgressFloorSlot: baseResult.capacityProgressFloorSlot }, nextScores };
   }, [applyAvailability, getCourtsPerSlot, getScheduleOptions, players, result, scores, totalSlots, winLoss, liveGames, completedGames, playedGames]);
 
   return { runGenerate, runRegenerateFromSlotWithCourts, runRegenerateRemaining, regenerateRemaining, runClearSchedule, clearSchedule, confirmSchedule, unconfirmSchedule, doRegen };

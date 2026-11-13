@@ -17,6 +17,8 @@ export type PreferredPair = [string, string];
 
 export interface PlannerResult {
   planId?: string;
+  /** Actual capacity phase retained when recovery repacks logical slots. */
+  capacityProgressFloorSlot?: number;
   schedule: SlotResult[];
   gamesPlayed: number[];
   preserveLineups?: boolean;
@@ -101,7 +103,7 @@ export interface SharePayload {
   p: SharedPlayer[];
   /** Public session availability only; private balancing levels are never shared. */
   q?: number[];
-  cfg?: { g?: number; c?: number; totalMinutes?: number; sessionStart?: string; staggerMode?: StaggerMode; extraCourt?: ExtraCourt; courtOverrides?: Record<number, number> };
+  cfg?: { g?: number; c?: number; capacityProgressFloorSlot?: number; totalMinutes?: number; sessionStart?: string; staggerMode?: StaggerMode; extraCourt?: ExtraCourt; courtOverrides?: Record<number, number> };
   availability?: Array<{ from: number; to: number; group?: string; leavesAt?: number | null }>;
   runtime?: { live?: GameRef[]; completed?: GameRef[]; suspended?: string[]; waitingClock?: WaitingClockState };
   actions?: SharedFinishAction[];

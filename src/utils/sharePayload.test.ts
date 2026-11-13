@@ -248,3 +248,23 @@ it('rejects invalid completed-game activation time', () => {
   const payload = { v: 1, p: [['A', 'M'], ['B', 'M'], ['C', 'M'], ['D', 'M']], slots: [{ s: 1, c: [[[0, 1], [2, 3]]], sit: [] }], runtime: { completed: [{ slot: 1, court: 0, startedAt: -1 }] } } as SharePayload;
   expect(() => reconstructScheduleFromSharePayload(payload, { currentGameMinutes: 15, currentNumCourts: 1 })).toThrow();
 });
+
+
+describe('capacity progress floor persistence', () => {
+  const build = (floor?: number) => buildSharePayload({ result: { schedule: [], ...(floor !== undefined ? { capacityProgressFloorSlot: floor } : {}) }, playersWithAvailability: [], gameMinutes: 15, numCourts: 5, scores: {}, isConfirmed: false })!;
+  it.each([1, 7, 10000])('roundtrips recovered capacity phase %s', floor => {
+    const payload = build(floor);
+    expect(payload.cfg?.capacityProgressFloorSlot).toBe(floor);
+    expect(reconstructScheduleFromSharePayload(payload, { currentGameMinutes: 15, currentNumCourts: 3 }).result.capacityProgressFloorSlot).toBe(floor);
+  });
+  it('keeps legacy plans without a floor', () => {
+    const payload = build();
+    expect(payload.cfg).not.toHaveProperty('capacityProgressFloorSlot');
+    expect(reconstructScheduleFromSharePayload(payload, { currentGameMinutes: 15, currentNumCourts: 3 }).result).not.toHaveProperty('capacityProgressFloorSlot');
+  });
+  it.each([0, -1, 1.5, 10001, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '7', null])('rejects invalid shared floor %s', floor => {
+    const payload = build();
+    (payload.cfg as any).capacityProgressFloorSlot = floor;
+    expect(() => reconstructScheduleFromSharePayload(payload, { currentGameMinutes: 15, currentNumCourts: 3 })).toThrow('Invalid shared schedule');
+  });
+});

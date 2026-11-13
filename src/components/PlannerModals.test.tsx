@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConfirmOverwriteModal, ShareLinkModal } from './PlannerModals';
 
@@ -32,6 +32,30 @@ it('keeps completed history by default and warns that unfinished live games are 
   expect(screen.getByRole('dialog')).toHaveTextContent('2 unfinished live games');
   await userEvent.click(screen.getByRole('button', { name: 'Keep history & reroll' }));
   expect(confirm).toHaveBeenCalledExactlyOnceWith(false);
+});
+it('previews partial slot budgets when keeping history and full capacity only after an explicit reset',async()=>{
+  const confirm=vi.fn();
+  render(<ConfirmOverwriteModal historyCount={7} isReroll rerollPreview={{nominal:[5,5,5,5],remaining:[2,3,3,5]}} onConfirm={confirm} onCancel={vi.fn()} />);
+  const preview=screen.getByRole('region',{name:'Reroll capacity preview'});
+  expect(preview).toHaveTextContent('13 new games');
+  expect(screen.getByText(/partly played slot can show fewer new games/i)).toBeInTheDocument();
+  const first=within(preview).getAllByRole('row')[1]!;
+  expect(within(first).getAllByRole('cell').map(cell=>cell.textContent)).toEqual(['1','5','2']);
+  await userEvent.click(screen.getByRole('checkbox',{name:/Reset session history/i}));
+  expect(preview).toHaveTextContent('20 new games');
+  expect(within(preview).getAllByRole('row').slice(1).map(row=>within(row).getAllByRole('cell').map(cell=>cell.textContent))).toEqual([['1','5','5'],['2','5','5'],['3','5','5']]);
+  expect(confirm).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button',{name:'Reset history & reroll'}));
+  expect(confirm).toHaveBeenCalledExactlyOnceWith(true);
+});
+it('previews expanded court overrides for recovery and base capacity after reset',async()=>{
+  render(<ConfirmOverwriteModal historyCount={7} isReroll rerollPreview={{nominal:[3,3,4,5],remaining:[0,1,2,5],resetNominal:[3,3,3,3]}} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  const preview=screen.getByRole('region',{name:'Reroll capacity preview'});
+  expect(preview).toHaveTextContent('8 new games');
+  expect(within(preview).getAllByRole('row').slice(1).map(row=>within(row).getAllByRole('cell').map(cell=>cell.textContent))).toEqual([['1','3','0'],['2','3','1'],['3','4','2']]);
+  await userEvent.click(screen.getByRole('checkbox',{name:/Reset session history/i}));
+  expect(preview).toHaveTextContent('12 new games');
+  expect(within(preview).getAllByRole('row').slice(1).map(row=>within(row).getAllByRole('cell').map(cell=>cell.textContent))).toEqual([['1','3','3'],['2','3','3'],['3','3','3']]);
 });
 it('requires an explicit reset selection and cancellation never confirms', async () => {
   const confirm = vi.fn(), cancel = vi.fn();

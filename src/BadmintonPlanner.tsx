@@ -8,6 +8,7 @@ import { sharedContentKey, useSharedSessionSync } from './hooks/useSharedSession
 import { loadQualityWeights, saveQualityWeights } from './utils/qualityPreferences';
 import { sharedGameId } from './utils/sharedSession';
 import { playerViewUrl } from './utils/playerView';
+import { newLiveEditConflicts } from './utils/liveEditValidation';
 import { type QualityWeights } from './utils/gameQuality';
 import { normalizePlayerIdentities } from './utils/playerIdentity';
 import { playerMetadataPatch } from './utils/playerMetadataPatch';
@@ -36,7 +37,7 @@ import PlayerList from './components/PlayerList';
 import LiveSessionBoard from './components/LiveSessionBoard';
 import PlayerWaitingPanel from './components/PlayerWaitingPanel';
 import { waitingPlayerKey, waitingPlayerStatuses } from './utils/waitingClock';
-import { historySlotsWaited, historyScheduleState, migratePlayedGames } from './utils/playedHistory';
+import { historySlotsWaited, historyScheduleState, migratePlayedGames, remainingCourtsPerSlot } from './utils/playedHistory';
 import SessionSettingsPanel from './components/SessionSettingsPanel';
 import SessionStatusPanel from './components/SessionStatusPanel';
 import AboutTab from './components/AboutTab';
@@ -327,6 +328,7 @@ function BadmintonPlanner() {
     unconfirmSchedule,
     doRegen,
   } = useScheduleActions({
+    configuredNumCourts: numCourts,
     recordUndo,
     suspendedPlayerNames,
     scheduleDirty,
@@ -494,6 +496,12 @@ function BadmintonPlanner() {
 
   const applySlotEdit = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
+    const conflicts = newLiveEditConflicts(result, liveGames, editingSlot, editLayout.courts, players);
+    if (conflicts.length) {
+      liveQueueDebug('edit:blocked', { reason: 'player-busy-on-other-live-court', action: 'apply-and-regenerate', editingSlot, conflicts });
+      patchState({ sessionChangeNotice: conflicts.map(conflict => `${conflict.name} is still playing on Court ${(conflict.otherGame.displayCourt ?? conflict.otherGame.court) + 1}.`).join(' ') + ' Finish that game or choose an available player before applying this lineup.' });
+      return;
+    }
     const quarantinedNames = new Set(players.filter(p => p.quarantined).map(p => p.name));
     if (editLayout.courts.some((court, ci) => {
       if (!court.some(name => quarantinedNames.has(name))) return false;
@@ -550,7 +558,7 @@ function BadmintonPlanner() {
       if (!continuedResult) { patchState({ sessionChangeNotice: 'Unable to regenerate around current games. Your previous schedule is unchanged.' }); return; }
       newResult = continuedResult;
     }
-    newResult = { ...recomputeStats(newResult.schedule, playersWithSkill), gamesPlayed: newResult.gamesPlayed, planId: result.planId };
+    newResult = { ...recomputeStats(newResult.schedule, playersWithSkill), gamesPlayed: newResult.gamesPlayed, planId: result.planId, capacityProgressFloorSlot: result.capacityProgressFloorSlot };
     const nextScores: ScoresMap = {};
     for (const key in scores) {
       const match = key.match(/^s(\d+)c/);
@@ -576,6 +584,12 @@ function BadmintonPlanner() {
 
   const applySlotEditOnly = useCallback(() => {
     if (!editingSlot || !result || !editLayout) return;
+    const conflicts = newLiveEditConflicts(result, liveGames, editingSlot, editLayout.courts, players);
+    if (conflicts.length) {
+      liveQueueDebug('edit:blocked', { reason: 'player-busy-on-other-live-court', action: 'this-game-only', editingSlot, conflicts });
+      patchState({ sessionChangeNotice: conflicts.map(conflict => `${conflict.name} is still playing on Court ${(conflict.otherGame.displayCourt ?? conflict.otherGame.court) + 1}.`).join(' ') + ' Finish that game or choose an available player before applying this lineup.' });
+      return;
+    }
     const quarantinedNames = new Set(players.filter(p => p.quarantined).map(p => p.name));
     if (editLayout.courts.some((court, ci) => {
       if (!court.some(name => quarantinedNames.has(name))) return false;
@@ -590,18 +604,27 @@ function BadmintonPlanner() {
     const slotIdx = editingSlot - 1;
     const origSlot = result.schedule[slotIdx];
     if (!origSlot) return;
-    const playerFor = (name: string): PlayerInGame => ({ name, gender: players.find(p => p.name === name)?.gender ?? 'M' });
-    const newCourts = editLayout.courts.map((court, ci) => ({
-      court: origSlot.courts[ci]?.court ?? ci + 1,
-      teamA: [playerFor(court[0] ?? ''), playerFor(court[1] ?? '')] as [PlayerInGame, PlayerInGame],
-      teamB: [playerFor(court[2] ?? ''), playerFor(court[3] ?? '')] as [PlayerInGame, PlayerInGame],
-    }));
+    const playerFor = (name: string): PlayerInGame => {
+      const player = players.find(p => p.name === name)
+        ?? [...origSlot.courts.flatMap(court => [...court.teamA, ...court.teamB]), ...origSlot.sitting].find(p => p.name === name);
+      return { name, gender: player?.gender ?? 'M', ...(player?.id ? { id: player.id } : {}) };
+    };
+    const newCourts = editLayout.courts.map((court, ci) => {
+      const original = origSlot.courts[ci];
+      const originalNames = original ? [...original.teamA, ...original.teamB].map(player => player.name) : [];
+      if (original && originalNames.length === court.length && court.every((name, index) => name === originalNames[index])) return original;
+      return {
+        court: original?.court ?? ci + 1,
+        teamA: [playerFor(court[0] ?? ''), playerFor(court[1] ?? '')] as [PlayerInGame, PlayerInGame],
+        teamB: [playerFor(court[2] ?? ''), playerFor(court[3] ?? '')] as [PlayerInGame, PlayerInGame],
+      };
+    });
     const newSitting = editLayout.sitting.map(playerFor);
     const newScheduleRaw = result.schedule.map((slot, i) =>
       i === slotIdx ? { ...slot, courts: newCourts, sitting: newSitting } : slot
     );
     const { schedule: newSchedule, gamesPlayed } = recomputeStats(newScheduleRaw, players);
-    const newResult = { schedule: newSchedule, gamesPlayed };
+    const newResult = { ...result, schedule: newSchedule, gamesPlayed };
     const preservedLiveGames = preserveLiveGamesAtEditedSlot(liveGames, newResult, editingSlot);
     const preservedCompletedGames = preserveCompletedGameSnapshots(completedGames);
     applyLiveGamesUpdate(
@@ -1033,6 +1056,8 @@ function BadmintonPlanner() {
     : initialShareId ? 'This page was opened with a shared link. Check its loading status below.'
     : 'Schedule edits stay in this browser.';
   const selectedTab = activeTab === 'live' && !result ? 'setup' : activeTab;
+  const rerollHistory = pendingOverwrite === 'generate' ? migratePlayedGames(result, players, completedGames, scores, playedGames) : [];
+  const rerollNominal = getCourtsPerSlot(rerollHistory.length ? courtOverrides : {});
   const waitingHistory = isAdmin && result ? migratePlayedGames(result, players, completedGames, scores, playedGames) : [];
   const slotsWaited = historySlotsWaited(waitingHistory, players, liveGames);
   const playedCounts = historyScheduleState(waitingHistory, players).gamesPlayed;
@@ -1301,7 +1326,9 @@ function BadmintonPlanner() {
         )}
 
         {pendingOverwrite && (
-          <ConfirmOverwriteModal historyCount={playedGames.length} liveCount={liveGames.length} isReroll={pendingOverwrite === 'generate'} onConfirm={executeOverwrite} onCancel={cancelOverwrite} />
+          <ConfirmOverwriteModal historyCount={pendingOverwrite === 'generate' ? rerollHistory.length : playedGames.length} liveCount={liveGames.length} isReroll={pendingOverwrite === 'generate'}
+            rerollPreview={pendingOverwrite === 'generate' ? { nominal: rerollNominal, remaining: remainingCourtsPerSlot(rerollHistory, rerollNominal), resetNominal: getCourtsPerSlot({}) } : undefined}
+            onConfirm={executeOverwrite} onCancel={cancelOverwrite} />
         )}
 
         {selectedTab === 'setup' && <>

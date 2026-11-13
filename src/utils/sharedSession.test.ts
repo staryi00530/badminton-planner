@@ -228,3 +228,37 @@ describe('shared session timer start', () => {
     expect(applySharedAction(session(), { type: 'start_timers', id: 'bad', at: 1000, gameIds } as any)).toBeNull();
   });
 });
+
+describe('shared recovered capacity progress floor', () => {
+  function recovered(): SharePayload {
+    const all = Array.from({ length: 28 }, (_, i) => [`P${i}`, 'M'] as [string, 'M']);
+    return { v: 1, p: all, cfg: { g: 15, c: 4, courtOverrides: { 4: 5 }, capacityProgressFloorSlot: 4 }, planId: 'recovered', historyEpoch: 0, revision: 0,
+      slots: [
+        { s: 1, c: [[[0,1],[2,3]], [[4,5],[6,7]]], sit: [] },
+        { s: 2, c: [[[8,9],[10,11]], [[12,13],[14,15]], [[16,17],[18,19]]], sit: [] },
+        { s: 3, c: [[[20,21],[22,23]]], sit: [] },
+        { s: 4, c: [[[24,25],[26,27]]], sit: [] },
+      ], runtime: { live: [{slot:1,court:0,displayCourt:0}, {slot:1,court:1,displayCourt:1}, {slot:2,court:0,displayCourt:2}, {slot:2,court:1,displayCourt:3}, {slot:2,court:2,displayCourt:4}], completed: [] } };
+  }
+  it('replaces a Finish at five courts while recovered runtime is still in older slots', () => {
+    const base = recovered();
+    const next = applySharedAction(base, { type: 'finish', id: 'finish-floor', gameId: sharedGameId(base, 1, 0), at: 1000 })!;
+    expect(next.runtime!.live).toHaveLength(5);
+    expect(next.runtime!.live).toContainEqual(expect.objectContaining({slot:3,court:0,displayCourt:0}));
+    expect(next.cfg!.capacityProgressFloorSlot).toBe(4);
+  });
+  it('honors an explicit four-court override at the floor instead of deriving capacity from live count', () => {
+    const base = recovered();
+    base.cfg!.courtOverrides = {4:4};
+    const next = applySharedAction(base, { type: 'finish', id: 'finish-reduced', gameId: sharedGameId(base, 1, 0), at: 1000 })!;
+    expect(next.runtime!.live).toHaveLength(4);
+  });
+  it('keeps the floor across legacy same-epoch commits but clears it on an explicit history reset', () => {
+    const base = recovered();
+    const legacy = structuredClone(base);
+    delete legacy.cfg!.capacityProgressFloorSlot;
+    expect(commitSharedSnapshot(base, 0, legacy)!.cfg!.capacityProgressFloorSlot).toBe(4);
+    const reset = { ...legacy, planId: 'reset', history: [], historyEpoch: 1 };
+    expect(commitSharedSnapshot(base, 0, reset)!.cfg!.capacityProgressFloorSlot).toBeUndefined();
+  });
+});

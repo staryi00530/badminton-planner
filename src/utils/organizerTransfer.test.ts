@@ -123,3 +123,16 @@ it.each([-1, 0.5, NaN, Infinity, '123', null])('rejects private runtime invalid 
   s.liveGames = [{ slot: 1, court: 0, startedAt: at }] as any;
   expect(() => buildOrganizerSetup(s, DEFAULT_QUALITY_WEIGHTS, now)).toThrow();
 });
+
+
+it.each([undefined, 7])('retains optional capacity progress floor %s through encrypted private handoff', async floor => {
+  const source = state();
+  source.result = generateSchedule(source.players, 2, [4, 4], 0, null, null, {})!;
+  if (floor !== undefined) source.result.capacityProgressFloorSlot = floor;
+  const setup = buildOrganizerSetup(source, DEFAULT_QUALITY_WEIGHTS, now);
+  expect(setup.publicSession.cfg?.capacityProgressFloorSlot).toBe(floor);
+  const encrypted = await encryptOrganizerSetup(setup);
+  const restored = organizerSetupPatch(await decryptOrganizerSetup(encrypted.envelope, encrypted.key, now));
+  expect(restored.result?.capacityProgressFloorSlot).toBe(floor);
+  if (floor === undefined) expect(restored.result).not.toHaveProperty('capacityProgressFloorSlot');
+});

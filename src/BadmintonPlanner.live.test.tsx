@@ -1512,8 +1512,44 @@ describe('BadmintonPlanner live game flow', () => {
     });
   });
 
-  it('keeps an unaffected live court running when another court is edited', async () => {
+  it.each(['This game only', 'Apply & regenerate after'])('blocks a cross-slot busy player before %s changes the live session', async command => {
+    const user=userEvent.setup();
+    const names=Array.from({length:12},(_,i)=>`P${i+1}`);
+    const result={planId:'cross-slot-edit',schedule:[
+      makeSlot(1,[names.slice(0,4)],names.slice(4)),
+      makeSlot(2,[names.slice(4,8)],[...names.slice(0,4),...names.slice(8)]),
+      makeSlot(3,[names.slice(8,12)],names.slice(0,8)),
+    ],gamesPlayed:names.map(()=>1)};
+    const lives=[{id:'first',slot:1,court:0,displayCourt:0,startedAt:Date.now()-60_000,players:names.slice(0,4)},
+      {id:'second',slot:2,court:0,displayCourt:1,startedAt:Date.now()-30_000,players:names.slice(4,8)}];
+    localStorage.setItem('bp-result',JSON.stringify(result));
+    localStorage.setItem('bp-live-games',JSON.stringify(lives));
+    render(<BadmintonPlanner />);
+    const beforeResult=localStorage.getItem('bp-result');
+    const beforeLives=localStorage.getItem('bp-live-games');
+    const generate=vi.spyOn(scheduler,'generateSchedule');
+    await user.click(within(sectionFor('Current game')).getAllByTitle('Edit who plays in this slot')[0]!);
+    await user.selectOptions(screen.getAllByRole('combobox')[0]!,'P5');
+    await user.click(within(sectionFor('Current game')).getAllByRole('button',{name:command})[0]!);
+    expect(screen.getByText(/P5 is still playing on Court 2/)).toBeInTheDocument();
+    expect(generate).not.toHaveBeenCalled();
+    expect(localStorage.getItem('bp-result')).toBe(beforeResult);
+    expect(localStorage.getItem('bp-live-games')).toBe(beforeLives);
+    const log=JSON.parse(exportLiveQueueLogs()).logs.findLast((entry:{label:string;details:{reason?:string}})=>entry.label==='edit:blocked'&&entry.details.reason==='player-busy-on-other-live-court');
+    expect(log.details.conflicts[0]).toMatchObject({name:'P5',otherGame:{id:'second',slot:2,court:0,displayCourt:1},editedLineup:['P5','P2','P3','P4']});
+  });
+
+  it.each(['This game only', 'Apply & regenerate after'])('keeps an unaffected live court and stable identities when another court is edited with %s', async command => {
     const user = userEvent.setup();
+    const roster=JSON.parse(localStorage.getItem('bp-players')!).map((player:Player)=>({...player,id:`stable:${player.name}`}));
+    localStorage.setItem('bp-players',JSON.stringify(roster));
+    const initial=JSON.parse(localStorage.getItem('bp-result')!);
+    initial.planId='stable-edit-plan';
+    for(const slot of initial.schedule){
+      for(const court of slot.courts)for(const player of [...court.teamA,...court.teamB])player.id=`stable:${player.name}`;
+      for(const player of slot.sitting)player.id=`stable:${player.name}`;
+    }
+    localStorage.setItem('bp-result',JSON.stringify(initial));
     render(<BadmintonPlanner />);
 
     await startNextVisibleGame(user);
@@ -1522,12 +1558,17 @@ describe('BadmintonPlanner live game flow', () => {
     await user.click(required(within(current).getAllByTitle('Edit who plays in this slot')[0]));
     const editors = screen.getAllByRole('combobox');
     await user.selectOptions(editors[0]!, 'P9');
-    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: 'Apply & regenerate after' })[0]!);
+    const otherBefore=JSON.parse(localStorage.getItem('bp-live-games')!)[1];
+    await user.click(within(sectionFor('Current game')).getAllByRole('button', { name: command })[0]!);
 
     await waitFor(() => {
       expect(within(sectionFor('Current game')).getAllByText('● LIVE')).toHaveLength(2);
       expect(within(sectionFor('Current game')).getByText(/SLOT 1 .* COURT 2/)).toBeInTheDocument();
     });
+    const after=JSON.parse(localStorage.getItem('bp-result')!);
+    expect(after.planId).toBe('stable-edit-plan');
+    expect([...after.schedule[0].courts[0].teamA,...after.schedule[0].courts[0].teamB]).toEqual(expect.arrayContaining([expect.objectContaining({name:'P9',id:'stable:P9'})]));
+    expect(JSON.parse(localStorage.getItem('bp-live-games')!)[1]).toEqual({...otherBefore,players:['P5','P6','P7','P8']});
   });
 
   it('keeps every other live court running when one current court is regenerated', async () => {

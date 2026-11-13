@@ -29,6 +29,10 @@ export function commitSharedSnapshot(current: SharePayload | null, expectedRevis
   const newPlan = (next.planId ?? 'legacy') !== (current.planId ?? 'legacy');
   const incoming = next.history ? publicPlayedGames(next.history) : [];
   if (nextEpoch !== epoch && !(nextEpoch === epoch + 1 && newPlan && incoming.length === 0)) return null;
+  // Older organizer clients omit the recovery phase; retain it within the session.
+  if (nextEpoch === epoch && current.cfg?.capacityProgressFloorSlot !== undefined && next.cfg?.capacityProgressFloorSlot === undefined) {
+    next = { ...next, cfg: { ...next.cfg, capacityProgressFloorSlot: current.cfg.capacityProgressFloorSlot } };
+  }
   const history = nextEpoch !== epoch ? [] : mergePlayedGames(decoded.playedGames, incoming).map(game => {
     const changed = incoming.find(item => item.id === game.id);
     return changed?.score ? { ...game, score: changed.score } : game;
@@ -79,7 +83,7 @@ export function applySharedAction(current: SharePayload | null, action: SharedAc
   const history = data.actions ?? [];
   const acknowledgeDuplicate = () => ({ ...current, receipts: [...(current.receipts ?? []), action.id], revision: (current.revision ?? 0) + 1 });
   const totalSlots = Math.max(1, ...data.slots.map(slot => slot.s));
-  const boundary = Math.min(totalSlots, Math.max(1, ...live.map(g => g.slot + 1), ...completed.map(g => g.slot + 1)));
+  const boundary = Math.min(totalSlots, Math.max(1, data.cfg?.capacityProgressFloorSlot ?? 1, ...live.map(g => g.slot + 1), ...completed.map(g => g.slot + 1)));
   const capacity = computeCourtsPerSlot({ totalSlots, gameMinutes: data.cfg?.g ?? 15, numCourts: data.cfg?.c ?? 1,
     extraCourt: data.cfg?.extraCourt ?? { enabled: false, startMin: 0, durationMin: 0 }, courtOverrides: data.cfg?.courtOverrides })[boundary - 1] ?? 1;
   const available = (game: GameRef) => {

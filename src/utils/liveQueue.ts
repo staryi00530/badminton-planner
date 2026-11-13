@@ -9,17 +9,25 @@ export interface GameRef {
   displayCourt?: number;
 }
 
-const LIVE_QUEUE_LOG_LIMIT = 500;
-const liveQueueLogBuffer: Array<{ timestamp: string; label: string; details: Record<string, unknown> }> = [];
+const LIVE_QUEUE_LOG_LIMIT = 2000;
+const liveQueueLogBuffer: Array<{ sequence: number; timestamp: string; label: string; details: Record<string, unknown> }> = [];
+let liveQueueLogSequence = 0;
+let liveQueueDroppedEntries = 0;
 
 export function liveQueueDebug(label: string, details: Record<string, unknown> = {}) {
   if (typeof window === 'undefined') return;
-  liveQueueLogBuffer.push({ timestamp: new Date().toISOString(), label, details });
-  if (liveQueueLogBuffer.length > LIVE_QUEUE_LOG_LIMIT) liveQueueLogBuffer.shift();
+  let snapshot: Record<string, unknown>;
+  try { snapshot = JSON.parse(JSON.stringify(details)) as Record<string, unknown>; }
+  catch { snapshot = { diagnosticError: 'Details could not be serialized' }; }
+  liveQueueLogBuffer.push({ sequence: ++liveQueueLogSequence, timestamp: new Date().toISOString(), label, details: snapshot });
+  if (liveQueueLogBuffer.length > LIVE_QUEUE_LOG_LIMIT) { liveQueueLogBuffer.shift(); liveQueueDroppedEntries++; }
 }
 
 export function exportLiveQueueLogs() {
-  return JSON.stringify({ exportedAt: new Date().toISOString(), buildTime: typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : 'unknown', logs: liveQueueLogBuffer }, null, 2);
+  return JSON.stringify({ formatVersion: 2, exportedAt: new Date().toISOString(), buildTime: typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : 'unknown',
+    retention: { limit: LIVE_QUEUE_LOG_LIMIT, retained: liveQueueLogBuffer.length, dropped: liveQueueDroppedEntries,
+      firstSequence: liveQueueLogBuffer[0]?.sequence ?? null, lastSequence: liveQueueLogBuffer.at(-1)?.sequence ?? null },
+    logs: liveQueueLogBuffer }, null, 2);
 }
 
 export function gameMatches(game: GameRef, slot: number, court: number) {
@@ -67,6 +75,7 @@ export function normalizeGameRefs(
     if (seen.has(key)) continue;
     seen.add(key);
     normalized.push({
+      ...(typeof game.id === 'string' && game.id ? { id: game.id } : {}),
       slot: game.slot,
       court: game.court,
       ...(game.players ? { players: [...game.players] } : {}),

@@ -18,7 +18,7 @@ export function buildSharePayload({
   playedGames,
   historyEpoch = 0,
 }: {
-  result: Pick<PlannerResult, 'schedule' | 'planId'> | null;
+  result: Pick<PlannerResult, 'schedule' | 'planId' | 'capacityProgressFloorSlot'> | null;
   playersWithAvailability: { id?: string; name: string; gender: string; quarantined?: boolean; availFrom?: number; availTo?: number; group?: string; leavesAt?: number | null }[];
   gameMinutes: number;
   numCourts: number;
@@ -50,7 +50,7 @@ export function buildSharePayload({
     ...(runtime ? { runtime } : {}),
     // Empty arrays clear an existing RTDB child during update(), rather than retaining stale quarantine.
     q: pwith.flatMap((p, index) => p.quarantined ? [index] : []),
-    cfg: { g: gameMinutes, c: numCourts, ...settings },
+    cfg: { g: gameMinutes, c: numCourts, ...settings, ...(result.capacityProgressFloorSlot !== undefined ? { capacityProgressFloorSlot: result.capacityProgressFloorSlot } : {}) },
     scores: Object.fromEntries(
       Object.entries(scores)
         .filter(([, value]) => includeScoreDrafts || value?.applied)
@@ -81,6 +81,8 @@ export function reconstructScheduleFromSharePayload(
   if (!Array.isArray(sharedPlayers) || !Array.isArray(slots)
     || (slots.length > 0 && sharedPlayers.length === 0)
     || sharedPlayers.some(player => !Array.isArray(player) || typeof player[0] !== 'string' || typeof player[1] !== 'string')) throw invalid();
+  const floor = cfg?.capacityProgressFloorSlot;
+  if (floor !== undefined && (typeof floor !== 'number' || !Number.isSafeInteger(floor) || floor < 1 || floor > 10000)) throw invalid();
   const n = sharedPlayers.length;
   if (data.planId !== undefined && (typeof data.planId !== 'string' || !data.planId.trim())) throw invalid();
   if (!Number.isInteger(data.historyEpoch ?? 0) || (data.historyEpoch ?? 0) < 0) throw invalid();
@@ -162,7 +164,7 @@ export function reconstructScheduleFromSharePayload(
   };
   const restoredGameMinutes = cfg?.g || currentGameMinutes;
   const decodedPlayers: Player[] = sharedPlayers.flatMap(([name, gender], index) => active.has(index) ? [{ name, gender: gender === 'F' ? 'F' as const : 'M' as const, ...(data.ids?.[index] ? { id: data.ids[index] } : {}), skill: 2, availFrom: data.availability?.[index]?.from ?? 0, availTo: data.availability?.[index]?.to ?? slots.length - 1, group: data.availability?.[index]?.group ?? 'full', leavesAt: data.availability?.[index]?.leavesAt ?? null, ...(quarantined.has(index) ? { quarantined: true } : {}) }] : []);
-  const decodedResult: PlannerResult = { schedule: newSchedule, gamesPlayed: gp.filter((_, i) => active.has(i)), ...(data.planId ? { planId: data.planId } : {}) };
+  const decodedResult: PlannerResult = { schedule: newSchedule, gamesPlayed: gp.filter((_, i) => active.has(i)), ...(data.planId ? { planId: data.planId } : {}), ...(floor !== undefined ? { capacityProgressFloorSlot: floor } : {}) };
   const completedGames = refs(data.runtime?.completed);
   const playedGames = data.history ? publicPlayedGames(data.history) : migratePlayedGames(decodedResult, decodedPlayers, completedGames, restoredScores);
   return {

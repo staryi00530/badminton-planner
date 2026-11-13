@@ -83,15 +83,18 @@ export function QueuePromotionModal({ prompt, onUseLookahead, onSubstitute, onCa
   );
 }
 
-export function ConfirmOverwriteModal({ onConfirm, onCancel, historyCount = 0, liveCount = 0, isReroll = false }: {
+export function ConfirmOverwriteModal({ onConfirm, onCancel, historyCount = 0, liveCount = 0, isReroll = false, rerollPreview }: {
   onConfirm: (resetHistory?: boolean) => void;
   onCancel: () => void;
   historyCount?: number;
   liveCount?: number;
   isReroll?: boolean;
+  rerollPreview?: { nominal: number[]; remaining: number[]; resetNominal?: number[] };
 }) {
   const [resetHistory, setResetHistory] = useState(false);
   const historyChoice = isReroll && historyCount > 0;
+  const previewNominal = resetHistory ? rerollPreview?.resetNominal ?? rerollPreview?.nominal : rerollPreview?.nominal;
+  const previewCourts = resetHistory ? previewNominal : rerollPreview?.remaining;
   return (
     <ModalShell maxWidth={360}>
       <div role="dialog" aria-modal="true" aria-labelledby="overwrite-title" onKeyDown={event => { if (event.key === 'Escape') onCancel(); }}>
@@ -101,9 +104,20 @@ export function ConfirmOverwriteModal({ onConfirm, onCancel, historyCount = 0, l
       </p>
       {historyChoice && <>
         <p style={{ fontSize: 13 }}>{historyCount} completed game{historyCount === 1 ? '' : 's'} and their scores will {resetHistory ? 'be removed from session history. Reroll starts a fresh configured session.' : 'stay in session history and continue rotation and repeat tracking. Reroll fills the remaining session.'}</p>
+        {!resetHistory && <p style={{ fontSize: 12, color: C.textDim }}>Keeping history uses only the remaining game budget. A partly played slot can show fewer new games than the configured court count.</p>}
         <label style={{ display: 'flex', gap: 8, fontSize: 13, marginBottom: 12 }}><input type="checkbox" checked={resetHistory} onChange={event => setResetHistory(event.target.checked)} />Reset session history before reroll</label>
         {resetHistory && <p style={{ fontSize: 12, color: C.amber }}>Remove all {historyCount} completed game{historyCount === 1 ? '' : 's'} from this session only. Player bank and all-time win/loss records stay unchanged.</p>}
       </>}
+      {isReroll && rerollPreview && previewCourts && previewNominal && <section aria-label="Reroll capacity preview" style={{marginBottom:12,fontSize:12}}>
+        <p style={{fontWeight:700}}>{previewCourts.reduce((total,count)=>total+count,0)} new games in the session budget{resetHistory ? ' after resetting history' : `; ${historyCount} completed games retained`}.</p>
+        <table style={{width:'100%',borderCollapse:'collapse',textAlign:'left'}}>
+          <caption style={{textAlign:'left',color:C.textDim,marginBottom:6}}>First {Math.min(3,previewNominal.length)} slots</caption>
+          <thead><tr>{['Slot','Configured','New games'].map(label=><th key={label} scope="col" style={{padding:'4px 6px',borderBottom:`1px solid ${C.border}`}}>{label}</th>)}</tr></thead>
+          <tbody>{previewNominal.slice(0,3).map((capacity,index)=><tr key={index}>
+            <td style={{padding:'4px 6px'}}>{index+1}</td><td style={{padding:'4px 6px'}}>{capacity}</td><td style={{padding:'4px 6px'}}>{previewCourts[index] ?? 0}</td>
+          </tr>)}</tbody>
+        </table>
+      </section>}
       {isReroll && liveCount > 0 && <p style={{ fontSize: 13, color: C.amber }}>{liveCount} unfinished live game{liveCount === 1 ? '' : 's'} will be replaced and will not be recorded as completed.</p>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={() => historyChoice ? onConfirm(resetHistory) : onConfirm()} style={{ flex: 1, background: C.accentDim, color: '#fff', border: 'none', borderRadius: 6, padding: '10px', fontWeight: 700, fontFamily: FONT }}>{historyChoice ? resetHistory ? 'Reset history & reroll' : 'Keep history & reroll' : isReroll ? 'Reroll' : 'Overwrite'}</button>

@@ -26,7 +26,7 @@ export function waitingPlayerStatuses(context: WaitingClockContext) {
     return game.players ?? (court ? [...court.teamA, ...court.teamB].map(p => p.name) : []);
   }));
   const totalSlots = Math.max(0, ...(result?.schedule.map(s => s.slot) ?? []));
-  const futureBoundary = getFutureChangeBoundary(liveGames, completedGames) - 1;
+  const futureBoundary = Math.max(getFutureChangeBoundary(liveGames, completedGames), result?.capacityProgressFloorSlot ?? 1) - 1;
   // The final games are still in progress even when no future slot can be edited.
   const boundary = liveGames.length ? Math.min(futureBoundary, Math.max(0, totalSlots - 1)) : futureBoundary;
   return applyAvailability(players, { staggerMode, totalSlots }).map(player => ({ player, key: waitingPlayerKey(player),

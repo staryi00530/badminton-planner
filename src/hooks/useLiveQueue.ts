@@ -147,7 +147,7 @@ export function useLiveQueue({
 }: LiveQueueOptions) {
   const quarantinedNames = useMemo(() => players.filter(p => p.quarantined).map(p => p.name), [players]);
   const suspendedPlayerNames = useMemo(() => [...new Set([...transientSuspendedPlayerNames, ...quarantinedNames])], [transientSuspendedPlayerNames, quarantinedNames]);
-  const changeSlot = getFutureChangeBoundary(liveGames, completedGames);
+  const changeSlot = Math.max(getFutureChangeBoundary(liveGames, completedGames), result?.capacityProgressFloorSlot ?? 1);
   const liveCapacity = getCourtsPerSlot()[Math.min(totalSlots - 1, changeSlot - 1)] ?? 1;
   const setSessionChangeNotice = (sessionChangeNotice: QueueRuntimeState['sessionChangeNotice']) => patchState({ sessionChangeNotice });
   const setPendingSessionChange = (pendingSessionChange: QueueRuntimeState['pendingSessionChange']) => patchState({ pendingSessionChange });
@@ -159,6 +159,9 @@ export function useLiveQueue({
     return {
       slot: game.slot,
       court: game.court + 1,
+      ...(game.id ? { id: game.id } : {}),
+      ...(game.displayCourt != null ? { displayCourt: game.displayCourt + 1 } : {}),
+      ...(game.startedAt != null ? { startedAt: game.startedAt } : {}),
       players: game.players ? [...game.players] : court ? [...court.teamA, ...court.teamB].map(player => player.name) : [],
     };
   }), [result]);
@@ -295,6 +298,10 @@ export function useLiveQueue({
           flowId,
           queuedGame: describeGames([queuedPreviewGame], nextResult)[0],
           replacements: queuedSubstitution.replacements,
+          reason: 'explicit-substitution',
+          reservedLineupBefore: describeGames([queuedPreviewGame], nextResult)[0],
+          reservedLineupAfter: describeGames([queuedSubstitution.game], nextResult)[0],
+          reservationPreserved: true,
           promotedGame: {
             ...describeGames([queuedSubstitution.game], nextResult)[0],
             displayCourt: (assigned?.displayCourt ?? queuedSubstitution.game.court) + 1,
@@ -434,7 +441,11 @@ export function useLiveQueue({
       return slot;
     };
 
-    const initialRegenSlot = nextSafeRegenSlot(changedSlot + 1);
+    // The first pending game can be beyond an entirely live/completed slot.
+    // Starting earlier would regenerate its lineup before its reservation can
+    // reach forcedFirstSlot. Preserve that played/live prefix and force the
+    // reserved court in the first slot that actually needs regeneration.
+    const initialRegenSlot = nextSafeRegenSlot(Math.max(changedSlot + 1, reservedQueuedGame?.slot ?? 0));
     const shouldRegenerate = options.regenerate ?? Boolean(
       nextResult && (
         options.overrideResult ||
@@ -483,13 +494,19 @@ export function useLiveQueue({
           break;
         }
         const beforeCount = nextLiveGames.length;
-        nextLiveGames = addUniqueGame(nextLiveGames, queuedGame);
+        nextLiveGames = addUniqueGame(nextLiveGames, { ...queuedGame, players: courtPlayersForLog(nextResult!, queuedGame) });
         if (nextLiveGames.length === beforeCount) break;
+        const reservationPreserved = reservedQueuedGame != null && reservedQueuedGame.slot === queuedGame.slot && reservedQueuedGame.court === queuedGame.court && JSON.stringify(reservedQueuedGame.players) === JSON.stringify(courtPlayersForLog(nextResult!, queuedGame));
         liveQueueDebug('queue:promote', {
           flowId,
           queuedGame: queuedPreviewGame ? describeGames([queuedPreviewGame], scheduleResult)[0] : null,
           promotedGame: describeGames([queuedGame], nextResult)[0],
           unavailableQueuedPlayers,
+          reservedLineupBefore: reservedQueuedGame ? describeGames([reservedQueuedGame], scheduleResult)[0] : null,
+          reservedLineupAfter: reservedQueuedGame ? { ...describeGames([reservedQueuedGame], nextResult)[0], players: courtPlayersForLog(nextResult!, reservedQueuedGame) } : null,
+          reservationPreserved,
+          reason: options.queueChoice === 'lookahead' ? 'explicit-lookahead' : queuedSubstitution?.replacements.length ? 'substitution' : reservedQueuedGame ? reservationPreserved ? 'reserved-lineup' : 'reservation-changed-during-regeneration' : 'regenerated-playable-candidate',
+          promotedPhysicalCourt: (assignDisplayCourts(nextLiveGames, displayCapacity).find(game => game.slot === queuedGame.slot && game.court === queuedGame.court)?.displayCourt ?? queuedGame.court) + 1,
           beforeLiveGames: describeGames(nextLiveGames.slice(0, beforeCount), nextResult),
           afterLiveGames: describeGames(nextLiveGames, nextResult),
           completedGames: describeGames(nextCompletedGames, nextResult),
@@ -565,13 +582,14 @@ export function useLiveQueue({
     const withoutCompleted = completedGames.filter(game => !gameMatches(game, slotNum, court));
     const nextLiveGames = isLive
       ? liveGames.filter(game => !gameMatches(game, slotNum, court))
-      : addUniqueGame(liveGames, { slot: slotNum, court, ...(displayCourt != null ? { displayCourt } : {}) });
+      : addUniqueGame(liveGames, { ...snapshotGame(slotNum, court), ...(displayCourt != null ? { displayCourt } : {}) });
     const nextCompletedGames = isLive ? [...withoutCompleted, snapshotGame(slotNum, court)] : withoutCompleted;
     // Finishing replaces at most one game; new lanes still require an explicit Start.
     const targetLiveCount = Math.max(nextLiveGames.length, Math.min(activeCapacity, liveGames.length));
     liveQueueDebug('toggle', {
       flowId,
       clicked: { slot: slotNum, court },
+      selectedCurrentGame: result ? { ...describeGames([snapshotGame(slotNum, court)], result)[0], renderedPlayers: courtPlayersForLog(result, { slot: slotNum, court }), physicalCourt: ((liveGames.find(game => gameMatches(game, slotNum, court))?.displayCourt ?? displayCourt) ?? court) + 1 } : null,
       action: isLive ? 'complete' : 'start',
       beforeLiveGames: describeGames(liveGames),
       beforeCompletedGames: describeGames(completedGames),
@@ -691,7 +709,7 @@ export function useLiveQueue({
 
   const applySessionChange = useCallback((change: NonNullable<typeof pendingSessionChange>) => {
     if (!result) return;
-    const boundarySlot = Math.max(change.boundarySlot, getFutureChangeBoundary(liveGames, completedGames));
+    const boundarySlot = Math.max(change.boundarySlot, getFutureChangeBoundary(liveGames, completedGames), result?.capacityProgressFloorSlot ?? 1);
     if (boundarySlot > totalSlots) {
       setSessionChangeNotice('No upcoming slot can be changed. Current and completed games are unchanged.');
       return;
